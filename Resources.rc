@@ -1,0 +1,5 @@
+#include "resource.h"
+
+// Embed YAML files as RCDATA resources (standard type)
+DATA_YML        RCDATA  "data.yml"
+DATA_SIG_YML    RCDATA  "data-sig.yml"

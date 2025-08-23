@@ -1,0 +1,64 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.36212.18
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SapphireHookDLL", "SapphireHookDLL.vcxproj", "{386F28A7-F0FC-9A17-E38B-A32BE480F2BD}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "notes", "notes", "{02EA681E-C7D8-13C7-8484-4AC65E1B71E8}"
+	ProjectSection(SolutionItems) = preProject
+		..\sapphire\src\world\Network\PacketWrappers\ChatPacket.h = ..\sapphire\src\world\Network\PacketWrappers\ChatPacket.h
+		..\sapphire\src\world\Network\PacketWrappers\ChatToChannelPacket.h = ..\sapphire\src\world\Network\PacketWrappers\ChatToChannelPacket.h
+		..\sapphire\src\common\Network\PacketDef\Chat\ClientChatDef.h = ..\sapphire\src\common\Network\PacketDef\Chat\ClientChatDef.h
+		..\sapphire\src\common\Network\PacketDef\ClientIpcs.h = ..\sapphire\src\common\Network\PacketDef\ClientIpcs.h
+		..\sapphire\src\common\Network\PacketDef\Zone\ClientZoneDef.h = ..\sapphire\src\common\Network\PacketDef\Zone\ClientZoneDef.h
+		..\sapphire\src\common\Network\CommonNetwork.h = ..\sapphire\src\common\Network\CommonNetwork.h
+		..\sapphire\src\common\Network\Connection.cpp = ..\sapphire\src\common\Network\Connection.cpp
+		..\sapphire\src\common\Network\Connection.h = ..\sapphire\src\common\Network\Connection.h
+		..\sapphire\src\world\DebugCommand\DebugCommand.h = ..\sapphire\src\world\DebugCommand\DebugCommand.h
+		..\sapphire\src\world\Manager\DebugCommandMgr.cpp = ..\sapphire\src\world\Manager\DebugCommandMgr.cpp
+		..\sapphire\src\world\Manager\DebugCommandMgr.h = ..\sapphire\src\world\Manager\DebugCommandMgr.h
+		..\..\..\Desktop\IDA scripts\ffxiv-ida-scripts-master\xiv\ffxiv-exdgetters.py = ..\..\..\Desktop\IDA scripts\ffxiv-ida-scripts-master\xiv\ffxiv-exdgetters.py
+		D:\Final Fantasy XIV - Sapphire\3.35\FINAL FANTASY XIV - A Realm Reborn\game\ffxiv_dx11.exe.h = D:\Final Fantasy XIV - Sapphire\3.35\FINAL FANTASY XIV - A Realm Reborn\game\ffxiv_dx11.exe.h
+		functions.txt = functions.txt
+		..\sapphire\src\world\Network\Handlers\GMCommandHandlers.cpp = ..\sapphire\src\world\Network\Handlers\GMCommandHandlers.cpp
+		..\sapphire\src\world\Network\Handlers\PacketCommandHandler.cpp = ..\sapphire\src\world\Network\Handlers\PacketCommandHandler.cpp
+		..\sapphire\src\world\Network\Util\PacketUtil.cpp = ..\sapphire\src\world\Network\Util\PacketUtil.cpp
+		notes\parse_functions.py = notes\parse_functions.py
+		..\sapphire\src\common\Network\PacketDef\Chat\ServerChatDef.h = ..\sapphire\src\common\Network\PacketDef\Chat\ServerChatDef.h
+		..\sapphire\src\common\Network\PacketDef\ServerIpcs.h = ..\sapphire\src\common\Network\PacketDef\ServerIpcs.h
+		..\sapphire\src\common\Network\PacketDef\Zone\ServerZoneDef.h = ..\sapphire\src\common\Network\PacketDef\Zone\ServerZoneDef.h
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SapphireHookInjector", "..\SapphireHookInjector\SapphireHookInjector.vcxproj", "{F15D9F99-E492-44BC-A293-2DE22061909F}"
+	ProjectSection(ProjectDependencies) = postProject
+		{386F28A7-F0FC-9A17-E38B-A32BE480F2BD} = {386F28A7-F0FC-9A17-E38B-A32BE480F2BD}
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x64 = Debug|x64
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{386F28A7-F0FC-9A17-E38B-A32BE480F2BD}.Debug|x64.ActiveCfg = Debug|x64
+		{386F28A7-F0FC-9A17-E38B-A32BE480F2BD}.Debug|x64.Build.0 = Debug|x64
+		{386F28A7-F0FC-9A17-E38B-A32BE480F2BD}.Release|x64.ActiveCfg = Release|x64
+		{386F28A7-F0FC-9A17-E38B-A32BE480F2BD}.Release|x64.Build.0 = Release|x64
+		{F15D9F99-E492-44BC-A293-2DE22061909F}.Debug|x64.ActiveCfg = Debug|x64
+		{F15D9F99-E492-44BC-A293-2DE22061909F}.Debug|x64.Build.0 = Debug|x64
+		{F15D9F99-E492-44BC-A293-2DE22061909F}.Release|x64.ActiveCfg = Release|x64
+		{F15D9F99-E492-44BC-A293-2DE22061909F}.Release|x64.Build.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{02EA681E-C7D8-13C7-8484-4AC65E1B71E8} = {8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {15382AED-428B-481F-9C15-35FAACE3BF87}
+	EndGlobalSection
+EndGlobal
