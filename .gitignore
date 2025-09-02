@@ -16,6 +16,8 @@
 # Mono auto generated files
 mono_crash.*
 
+/notes/
+
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
@@ -361,3 +363,20 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Project specific build outputs
+build/
+temp_data.yml
+
+# External dependencies (if not using submodules)
+external/*/build/
+external/*/lib/
+external/*/bin/
+
+# IDE specific
+.vscode/
+.idea/
+
+# Project specific temp files
+*.temp
+*.backup
