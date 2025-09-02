@@ -226,6 +226,7 @@ namespace { // helpers and learning (single definition, above usage)
     }
 
     // Track last known valid sockets seen in traffic
+    static std::atomic<uint32_t> g_localActorId{ 0 };
     static std::atomic<std::uintptr_t> g_lastZoneSock{ static_cast<std::uintptr_t>(INVALID_SOCKET) };
     static std::atomic<std::uintptr_t> g_lastChatSock{ static_cast<std::uintptr_t>(INVALID_SOCKET) };
 
@@ -474,15 +475,43 @@ namespace SapphireHook {
             : SOCKET_ERROR;
     }
 
+    // Replace the body of send_Detour with this version (adds LocalActorId learning)
     static int __stdcall send_Detour(SOCKET s, const char* buf, int len, int flags)
     {
         std::printf("[PacketInjector] *** send() called on socket %lld, len=%d ***\n",
             static_cast<long long>(s), len);
 
-        if (buf && len >= 0x40 && ::IsReadable(buf, 0x40))
+        if (buf && len >= 0x50 && ::IsReadable(buf, 0x50))
         {
             const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
 
+            // Learn LocalActorId from outbound ChatHandler (0x0067): payload originEntityId at 0x4C
+            uint32_t segType32 = 0;
+            uint16_t reserved16 = 0, ipcType = 0;
+            (void)ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x34, segType32);
+            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x38, reserved16);
+            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x3A, ipcType);
+            if (segType32 == 3 && reserved16 == 0x0014)
+            {
+                if (ipcType == 0x0067)
+                {
+                    uint32_t originEntityId = 0;
+                    if (ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x4C, originEntityId))
+                    {
+                        if (originEntityId != 0 && originEntityId != 0xFFFFFFFF)
+                        {
+                            const uint32_t prev = g_localActorId.exchange(originEntityId, std::memory_order_relaxed);
+                            if (prev != originEntityId)
+                            {
+                                std::printf("[PacketInjector] Learned LocalActorId from ChatHandler: 0x%X (%u)\n",
+                                    originEntityId, originEntityId);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Existing classification and socket learning
             uint16_t connType = 0;
             (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x1C, connType);
 
@@ -510,7 +539,7 @@ namespace SapphireHook {
                 g_lastChatSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
             }
 
-            // Manual command visibility (look for '!' inside payload)
+            // Existing manual packet preview
             if (len > 40)
             {
                 std::string sample(reinterpret_cast<const char*>(p), std::min(static_cast<size_t>(len), size_t(1024)));
@@ -801,4 +830,9 @@ namespace SapphireHook {
         return SendOnSocket(s_chatSocket, data, len);
     }
 
+    // Expose learned actor id to other modules
+    uint32_t GetLearnedLocalActorId()
+    {
+        return g_localActorId.load(std::memory_order_relaxed);
+    }
 } // namespace SapphireHook

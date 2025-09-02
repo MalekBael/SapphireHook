@@ -35,6 +35,40 @@
 // Link with Psapi.lib
 #pragma comment(lib, "Psapi.lib")
 
+// Forward declarations for local helpers
+namespace SapphireHook { uint32_t GetLearnedLocalActorId(); }
+
+namespace {
+    // Prefer learned id; fallback to env; last resort 0x200001
+    static uint32_t GetLocalEntityId()
+    {
+        uint32_t learned = SapphireHook::GetLearnedLocalActorId();
+        if (learned != 0 && learned != 0xFFFFFFFF)
+        {
+            return learned;
+        }
+        static uint32_t s_id = 0x200001;
+        static bool s_inited = false;
+        if (!s_inited)
+        {
+            s_inited = true;
+            if (const char* v = std::getenv("SAPPHIRE_ENTITYID"))
+            {
+                if (std::strlen(v) > 2 && (v[0] == '0') && (v[1] == 'x' || v[1] == 'X'))
+                {
+                    s_id = static_cast<uint32_t>(std::strtoul(v + 2, nullptr, 16));
+                }
+                else
+                {
+                    s_id = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
+                }
+            }
+            std::printf("[CommandInterface] LocalEntityId: 0x%X (%u)\n", s_id, s_id);
+        }
+        return s_id;
+    }
+}
+
 // Use the CORRECT Sapphire packet structures
 namespace SapphireHook {
     struct FFXIVARR_PACKET_HEADER
@@ -144,22 +178,27 @@ namespace SapphireHook {
         ChatPacketData chatData;
     };
 
-    struct CommandPacketData {
-        char command[512];
+    struct ClientTriggerPacketData {
+        uint32_t Id;
+        uint32_t Arg0;
+        uint32_t Arg1;
+        uint32_t Arg2;
+        uint32_t Arg3;
+        uint64_t Target;
     };
 
-    struct CompleteCommandPacket {
+    struct CompleteClientTriggerPacket {
         FFXIVARR_PACKET_HEADER header;
         FFXIVARR_PACKET_SEGMENT_HEADER segmentHeader;
         FFXIVARR_IPC_HEADER ipcHeader;
-        CommandPacketData cmd;
+        ClientTriggerPacketData data;
     };
 }
 
 // Static member definitions
 CommandInterface::ChatCommand_t CommandInterface::s_chatCommandFunc = nullptr;
 CommandInterface::SendPacket_t CommandInterface::s_sendPacketFunc = nullptr;
-CommandInterface::SendPacketMethod_t CommandInterface::s_sendPacketMethod = nullptr; // NEW
+CommandInterface::SendPacketMethod_t CommandInterface::s_sendPacketMethod = nullptr;
 CommandInterface::GameConnection_t CommandInterface::s_gameConnection = nullptr;
 uintptr_t CommandInterface::s_gameConnectionPtr = 0;
 
@@ -483,26 +522,19 @@ bool CommandInterface::SendDebugCommand(const char* command)
 {
     std::printf("[CommandInterface] Attempting to send debug command: %s\n", command ? command : "");
 
-    // 1) Prefer Command IPC (0x0191). If not handled, fallback to chat.
-    if (SendDebugCommandPacket(command))
-    {
-        std::printf("[CommandInterface] Sent command via Command IPC: %s\n", command ? command : "");
-        return true;
-    }
-
     // Normalize chat string
     std::string cmd = command ? command : "";
     auto beginsWith = [](const std::string& s, char c) { return !s.empty() && s[0] == c; };
     const std::string chatCommand = (beginsWith(cmd, '!') || beginsWith(cmd, '/')) ? cmd : "!" + cmd;
 
-    // 2) Try chat path (in-process or packet)
+    // Try chat path (in-process or packet)
     if (SendChatMessage(chatCommand.c_str(), 0))
     {
         std::printf("[CommandInterface] Sent command via chat path: %s\n", chatCommand.c_str());
         return true;
     }
 
-    // 3) As a last resort, try GM parse (only for known-good commands)
+    // As a last resort, try GM parse (only for known-good commands)
     if (TryParseAsGMCommand(command))
     {
         std::printf("[CommandInterface] Sent command via GM command parsing: %s\n", command);
@@ -513,41 +545,60 @@ bool CommandInterface::SendDebugCommand(const char* command)
     return false;
 }
 
-// Implement Command packet builder using the same header scheme as GM/Chat
+// Build numeric ClientTrigger (0x0191) with job id when applicable; set source_actor
 bool CommandInterface::SendDebugCommandPacket(const char* command)
 {
     if (!command || !*command) return false;
     std::printf("[CommandInterface] SendDebugCommandPacket: %s\n", command);
 
-    SapphireHook::CompleteCommandPacket packet{};
-    uint64_t timestamp = GetTickCount64();
+    // normalize and tokenize
+    std::string cmd = command;
+    if (!cmd.empty() && (cmd[0] == '!' || cmd[0] == '/')) cmd.erase(0, 1);
+    std::vector<std::string> parts;
+    { std::stringstream ss(cmd); std::string t; while (ss >> t) parts.push_back(t); }
 
-    // FFXIVARR_PACKET_HEADER
-    packet.header.timestamp = timestamp;
-    packet.header.connectionType = 1; // Zone
+    // Map to Id/Args
+    uint32_t id = 0, a0 = 0, a1 = 0, a2 = 0, a3 = 0;
+    if (parts.size() >= 3 && parts[0] == "set" && (parts[1] == "classjob" || parts[1] == "job"))
+    {
+        id = 0x01BE; // matches your logs
+        try { a0 = static_cast<uint32_t>(std::stoul(parts[2])); }
+        catch (...) { a0 = 0; }
+    }
+
+    SapphireHook::CompleteClientTriggerPacket packet{};
+    const uint64_t ts = GetTickCount64();
+    const uint32_t actorId = GetLocalEntityId();
+
+    // Header
+    packet.header.timestamp = ts;
+    packet.header.connectionType = 1;
     packet.header.count = 1;
 
-    // FFXIVARR_IPC_HEADER payload size + segment header
-    const uint32_t dataSize = sizeof(SapphireHook::FFXIVARR_IPC_HEADER) + sizeof(SapphireHook::CommandPacketData);
-    const uint32_t segmentSize = sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER) + dataSize;
-    const uint32_t totalSize = sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + segmentSize;
+    const uint32_t dataSize = sizeof(SapphireHook::FFXIVARR_IPC_HEADER) + sizeof(SapphireHook::ClientTriggerPacketData);
+    const uint32_t segSize = sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER) + dataSize;
+    const uint32_t total = sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + segSize;
 
-    packet.header.size = totalSize;
+    packet.header.size = total;
 
-    // FFXIVARR_PACKET_SEGMENT_HEADER
-    packet.segmentHeader.size = segmentSize;
-    packet.segmentHeader.type = 3; // IPC
+    // Segment header with actor id
+    packet.segmentHeader.size = segSize;
+    packet.segmentHeader.source_actor = actorId;
+    packet.segmentHeader.target_actor = 0;
+    packet.segmentHeader.type = 3;
 
-    // FFXIVARR_IPC_HEADER
+    // IPC header (0x0191)
     packet.ipcHeader.reserved = 0x14;
-    packet.ipcHeader.type = 0x0191; // Command
-    packet.ipcHeader.timestamp = static_cast<uint32_t>(timestamp);
+    packet.ipcHeader.type = 0x0191;
+    packet.ipcHeader.timestamp = static_cast<uint32_t>(ts);
 
-    // Payload: copy command text
-    std::memset(packet.cmd.command, 0, sizeof(packet.cmd.command));
-    std::strncpy(packet.cmd.command, command, sizeof(packet.cmd.command) - 1);
+    // Payload
+    packet.data.Id = id;
+    packet.data.Arg0 = a0; packet.data.Arg1 = a1; packet.data.Arg2 = a2; packet.data.Arg3 = a3;
+    packet.data.Target = 0;
 
-    // Send
+    std::printf("[CommandInterface] ClientTrigger: Id=0x%X Arg0=%u SourceActor=0x%X\n", id, a0, actorId);
+
     std::vector<uint8_t> buffer(sizeof(packet));
     std::memcpy(buffer.data(), &packet, sizeof(packet));
     return SendRawPacket(buffer);
@@ -579,21 +630,18 @@ bool CommandInterface::SendChatMessage(const char* message, uint8_t chatType)
     // For debug commands starting with '!', we need to send BOTH packets like manual typing
     if (message && message[0] == '!')
     {
-        std::printf("[CommandInterface] Debug command detected, sending both Chat and Command packets\n");
+        std::printf("[CommandInterface] Debug command detected, sending ChatHandler then 0x0191\n");
 
-        // Step 1: Send ChatHandler packet (0x0067) 
-        bool chatSent = SendChatPacket(message, chatType);
-        if (!chatSent)
+        if (!SendChatPacket(message, chatType))
         {
             std::printf("[CommandInterface] Failed to send ChatHandler packet\n");
             return false;
         }
 
-        // Step 2: Send Command packet (0x0191) - this triggers the actual execution
-        // Extract command without the '!' prefix
-        std::string command = message + 1; // Skip the '!' character
-        bool commandSent = SendDebugCommandPacket(command.c_str());
-        if (!commandSent)
+        Sleep(150); // let chat parsing path settle
+
+        std::string command = message + 1; // skip '!'
+        if (!SendDebugCommandPacket(command.c_str()))
         {
             std::printf("[CommandInterface] Failed to send Command packet\n");
             return false;
@@ -602,11 +650,9 @@ bool CommandInterface::SendChatMessage(const char* message, uint8_t chatType)
         std::printf("[CommandInterface] Successfully sent both Chat (0x0067) and Command (0x0191) packets\n");
         return true;
     }
-    else
-    {
-        // Regular chat message - just send ChatHandler
-        return SendChatPacket(message, chatType);
-    }
+
+    // Regular chat message - just send ChatHandler
+    return SendChatPacket(message, chatType);
 }
 
 bool CommandInterface::SendChatPacket(const char* message, uint8_t chatType)
@@ -614,13 +660,10 @@ bool CommandInterface::SendChatPacket(const char* message, uint8_t chatType)
     std::printf("[CommandInterface] Attempting to send chat packet: %s (type: %u)\n",
         message ? message : "", chatType);
 
-    // CORRECTED: Use the EXACT structure from ClientZoneDef.h
     struct CorrectChatPacket {
         SapphireHook::FFXIVARR_PACKET_HEADER header;
         SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER segmentHeader;
         SapphireHook::FFXIVARR_IPC_HEADER ipcHeader;
-
-        // EXACT structure that server expects (from ClientZoneDef.h)
         struct {
             uint32_t clientTimeValue;
             struct {
@@ -628,49 +671,48 @@ bool CommandInterface::SendChatPacket(const char* message, uint8_t chatType)
                 float pos[3];
                 float dir;
             } position;
-            uint8_t chatType;  // Common::ChatType is likely uint8_t
+            uint8_t chatType;
             char message[1024];
         } data;
     };
 
-    CorrectChatPacket packet = {};
-    uint64_t timestamp = GetTickCount64();
+    CorrectChatPacket packet{};
+    const uint64_t ts = GetTickCount64();
+    const uint32_t actorId = GetLocalEntityId();
 
-    // Calculate sizes for the CORRECT structure
-    uint32_t dataSize = sizeof(packet.data);
-    uint32_t segmentSize = sizeof(packet.segmentHeader) + sizeof(packet.ipcHeader) + dataSize;
-    uint32_t totalSize = sizeof(packet.header) + segmentSize;
+    const uint32_t dataSize = sizeof(packet.data);
+    const uint32_t segSize = sizeof(packet.segmentHeader) + sizeof(packet.ipcHeader) + dataSize;
+    const uint32_t total = sizeof(packet.header) + segSize;
 
-    // FFXIVARR_PACKET_HEADER
-    packet.header.timestamp = timestamp;
-    packet.header.connectionType = 1; // Zone
+    // Packet header
+    packet.header.timestamp = ts;
+    packet.header.connectionType = 1;      // Zone
     packet.header.count = 1;
-    packet.header.size = totalSize;
+    packet.header.size = total;
 
-    // FFXIVARR_PACKET_SEGMENT_HEADER  
-    packet.segmentHeader.size = segmentSize;
-    packet.segmentHeader.source_actor = 0;
+    // Segment header
+    packet.segmentHeader.size = segSize;
+    packet.segmentHeader.source_actor = actorId;
     packet.segmentHeader.target_actor = 0;
     packet.segmentHeader.type = 3; // IPC
 
-    // FFXIVARR_IPC_HEADER - ChatHandler opcode
+    // IPC header: ChatHandler (0x0067) — REQUIRED
     packet.ipcHeader.reserved = 0x14;
-    packet.ipcHeader.type = 0x0067; // ChatHandler
+    packet.ipcHeader.type = 0x0067;
     packet.ipcHeader.padding = 0;
     packet.ipcHeader.serverId = 0;
-    packet.ipcHeader.timestamp = static_cast<uint32_t>(timestamp);
+    packet.ipcHeader.timestamp = static_cast<uint32_t>(ts);
     packet.ipcHeader.padding1 = 0;
 
-    // CORRECT Chat data - EXACT structure the server expects
-    packet.data.clientTimeValue = static_cast<uint32_t>(timestamp);
-    packet.data.position.originEntityId = 0; // Player entity ID if you have it
+    // Payload
+    packet.data.clientTimeValue = static_cast<uint32_t>(ts);
+    packet.data.position.originEntityId = actorId;
     packet.data.position.pos[0] = 0.0f;
     packet.data.position.pos[1] = 0.0f;
     packet.data.position.pos[2] = 0.0f;
     packet.data.position.dir = 0.0f;
-    packet.data.chatType = chatType;
+    packet.data.chatType = chatType; // 0 is fine for commands with leading '!'
 
-    // Clear and set message
     std::memset(packet.data.message, 0, sizeof(packet.data.message));
     std::strncpy(packet.data.message, message ? message : "", sizeof(packet.data.message) - 1);
 
@@ -778,5 +820,3 @@ bool CommandInterface::SendGMCommand(uint32_t commandId, uint32_t arg0, uint32_t
     std::memcpy(buffer.data(), &packet, sizeof(packet));
     return SendRawPacket(buffer);
 }
-
-// REMOVED: The duplicate SendChatPacket function definition that was causing the error
