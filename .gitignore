@@ -380,3 +380,5 @@ external/*/bin/
 # Project specific temp files
 *.temp
 *.backup
+/worldlog.txt
+/packet.txt

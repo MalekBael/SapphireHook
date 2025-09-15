@@ -39,6 +39,19 @@
 namespace SapphireHook { uint32_t GetLearnedLocalActorId(); }
 
 namespace {
+    struct Position3 {
+        float x, y, z;
+    };
+
+    // Get player position if available
+    static Position3* GetLocalPlayerPosition()
+    {
+        // For now, return nullptr since we don't have a way to get player position
+        // This would require finding the player object in memory
+        // In the future, this could be implemented by pattern scanning for player data
+        return nullptr;
+    }
+
     // Prefer learned id; fallback to env; last resort 0x200001
     static uint32_t GetLocalEntityId()
     {
@@ -557,13 +570,13 @@ bool CommandInterface::SendDebugCommandPacket(const char* command)
     std::vector<std::string> parts;
     { std::stringstream ss(cmd); std::string t; while (ss >> t) parts.push_back(t); }
 
-    // Map to Id/Args
+    // Map to Id/Args - DO NOT parse the numeric parameter
     uint32_t id = 0, a0 = 0, a1 = 0, a2 = 0, a3 = 0;
     if (parts.size() >= 3 && parts[0] == "set" && (parts[1] == "classjob" || parts[1] == "job"))
     {
         id = 0x01BE; // matches your logs
-        try { a0 = static_cast<uint32_t>(std::stoul(parts[2])); }
-        catch (...) { a0 = 0; }
+        // DO NOT set a0 to the job ID - it should remain 0
+        a0 = 0;
     }
 
     SapphireHook::CompleteClientTriggerPacket packet{};
@@ -632,14 +645,18 @@ bool CommandInterface::SendChatMessage(const char* message, uint8_t chatType)
     {
         std::printf("[CommandInterface] Debug command detected, sending ChatHandler then 0x0191\n");
 
-        if (!SendChatPacket(message, chatType))
+        // First, send the chat message via ChatHandler
+        // Use Say channel (0x0A) for commands - this is what the server monitors
+        if (!SendChatPacket(message, static_cast<uint8_t>(10))) // ChatType::Say = 10
         {
             std::printf("[CommandInterface] Failed to send ChatHandler packet\n");
             return false;
         }
 
-        Sleep(150); // let chat parsing path settle
+        // Give the server time to process the chat message
+        Sleep(50);
 
+        // Then send the ClientTrigger packet (0x0191)
         std::string command = message + 1; // skip '!'
         if (!SendDebugCommandPacket(command.c_str()))
         {
@@ -657,67 +674,79 @@ bool CommandInterface::SendChatMessage(const char* message, uint8_t chatType)
 
 bool CommandInterface::SendChatPacket(const char* message, uint8_t chatType)
 {
-    std::printf("[CommandInterface] Attempting to send chat packet: %s (type: %u)\n",
-        message ? message : "", chatType);
+    if (!message || !*message)
+    {
+        std::printf("[CommandInterface] SendChatPacket: empty message\n");
+        return false;
+    }
 
-    struct CorrectChatPacket {
-        SapphireHook::FFXIVARR_PACKET_HEADER header;
-        SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER segmentHeader;
-        SapphireHook::FFXIVARR_IPC_HEADER ipcHeader;
-        struct {
-            uint32_t clientTimeValue;
-            struct {
-                uint32_t originEntityId;
-                float pos[3];
-                float dir;
-            } position;
-            uint8_t chatType;
-            char message[1024];
-        } data;
+    std::printf("[CommandInterface] Attempting to send chat packet: %s (type: %u)\n", message, chatType);
+
+    // Build the chat packet
+    struct FFXIVIpcChatHandler
+    {
+        uint32_t clientTimeValue;
+        uint32_t originEntityId;
+        float pos[3];
+        float dir;
+        uint16_t chatType;
+        char message[1024];
     };
 
-    CorrectChatPacket packet{};
-    const uint64_t ts = GetTickCount64();
-    const uint32_t actorId = GetLocalEntityId();
+    FFXIVIpcChatHandler chatPacket = {};
+    chatPacket.clientTimeValue = GetTickCount();
+    chatPacket.originEntityId = GetLocalEntityId();
+    chatPacket.chatType = static_cast<uint16_t>(chatType);
+    strncpy_s(chatPacket.message, sizeof(chatPacket.message), message, _TRUNCATE);
 
-    const uint32_t dataSize = sizeof(packet.data);
-    const uint32_t segSize = sizeof(packet.segmentHeader) + sizeof(packet.ipcHeader) + dataSize;
-    const uint32_t total = sizeof(packet.header) + segSize;
+    // Get player position if available
+    auto pos = GetLocalPlayerPosition();
+    if (pos)
+    {
+        chatPacket.pos[0] = pos->x;
+        chatPacket.pos[1] = pos->y;
+        chatPacket.pos[2] = pos->z;
+        chatPacket.dir = 0.0f; // We don't have direction data yet
+    }
+    else
+    {
+        // Default position and direction
+        chatPacket.pos[0] = 0.0f;
+        chatPacket.pos[1] = 0.0f;
+        chatPacket.pos[2] = 0.0f;
+        chatPacket.dir = 0.0f;
+    }
 
-    // Packet header
-    packet.header.timestamp = ts;
-    packet.header.connectionType = 1;      // Zone
-    packet.header.count = 1;
-    packet.header.size = total;
+    // Build complete packet with headers
+    const size_t chatDataSize = sizeof(FFXIVIpcChatHandler);
+    const size_t ipcSize = sizeof(SapphireHook::FFXIVARR_IPC_HEADER) + chatDataSize;
+    const size_t segmentSize = sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER) + ipcSize;
+    const size_t totalSize = sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + segmentSize;
 
-    // Segment header
-    packet.segmentHeader.size = segSize;
-    packet.segmentHeader.source_actor = actorId;
-    packet.segmentHeader.target_actor = 0;
-    packet.segmentHeader.type = 3; // IPC
+    std::vector<uint8_t> buffer(totalSize);
+    auto* header = reinterpret_cast<SapphireHook::FFXIVARR_PACKET_HEADER*>(buffer.data());
+    auto* segment = reinterpret_cast<SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER*>(buffer.data() + sizeof(SapphireHook::FFXIVARR_PACKET_HEADER));
+    auto* ipc = reinterpret_cast<SapphireHook::FFXIVARR_IPC_HEADER*>(buffer.data() + sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER));
+    auto* data = buffer.data() + sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER) + sizeof(SapphireHook::FFXIVARR_IPC_HEADER);
 
-    // IPC header: ChatHandler (0x0067) — REQUIRED
-    packet.ipcHeader.reserved = 0x14;
-    packet.ipcHeader.type = 0x0067;
-    packet.ipcHeader.padding = 0;
-    packet.ipcHeader.serverId = 0;
-    packet.ipcHeader.timestamp = static_cast<uint32_t>(ts);
-    packet.ipcHeader.padding1 = 0;
+    // Fill headers
+    header->timestamp = GetTickCount64();
+    header->size = static_cast<uint32_t>(totalSize);
+    header->connectionType = 0;
+    header->count = 1;
 
-    // Payload
-    packet.data.clientTimeValue = static_cast<uint32_t>(ts);
-    packet.data.position.originEntityId = actorId;
-    packet.data.position.pos[0] = 0.0f;
-    packet.data.position.pos[1] = 0.0f;
-    packet.data.position.pos[2] = 0.0f;
-    packet.data.position.dir = 0.0f;
-    packet.data.chatType = chatType; // 0 is fine for commands with leading '!'
+    segment->size = static_cast<uint32_t>(segmentSize);
+    segment->source_actor = GetLocalEntityId();
+    segment->target_actor = 0;
+    segment->type = 3;
 
-    std::memset(packet.data.message, 0, sizeof(packet.data.message));
-    std::strncpy(packet.data.message, message ? message : "", sizeof(packet.data.message) - 1);
+    ipc->reserved = 0x14;
+    ipc->type = 0x0067; // ChatHandler
+    ipc->timestamp = GetTickCount();
 
-    std::vector<uint8_t> buffer(sizeof(packet));
-    std::memcpy(buffer.data(), &packet, sizeof(packet));
+    // Copy chat data
+    memcpy(data, &chatPacket, chatDataSize);
+
     return SendRawPacket(buffer);
 }
 

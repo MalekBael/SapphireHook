@@ -1,11 +1,17 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36212.18
+VisualStudioVersion = 17.14.36429.23 d17.14
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SapphireHookDLL", "SapphireHookDLL.vcxproj", "{386F28A7-F0FC-9A17-E38B-A32BE480F2BD}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}"
+	ProjectSection(SolutionItems) = preProject
+		..\..\..\AppData\Local\Temp\hook.log = ..\..\..\AppData\Local\Temp\hook.log
+		packet.txt = packet.txt
+		logs\server_log.txt = logs\server_log.txt
+		worldlog.txt = worldlog.txt
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SapphireHookInjector", "SapphireHookInjector\SapphireHookInjector.vcxproj", "{F15D9F99-E492-44BC-A293-2DE22061909F}"
 EndProject
@@ -16,6 +22,8 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dalamud.Injector", "..\Dalamud\Dalamud.Injector\Dalamud.Injector.csproj", "{1BC52734-C8A2-DE05-0BD2-8826F17A4542}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Dalamud.Injector.Boot", "..\Dalamud\Dalamud.Injector.Boot\Dalamud.Injector.Boot.vcxproj", "{8874326B-E755-4D13-90B4-59AB263A3E6B}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sapphire_reference", "..\sapphire_reference\sapphire_reference.vcxproj", "{3D8B5DCA-96C3-494A-9F26-9D5569A044E6}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -39,6 +47,9 @@ Global
 		{1BC52734-C8A2-DE05-0BD2-8826F17A4542}.Release|x64.ActiveCfg = Release|x64
 		{8874326B-E755-4D13-90B4-59AB263A3E6B}.Debug|x64.ActiveCfg = Debug|x64
 		{8874326B-E755-4D13-90B4-59AB263A3E6B}.Release|x64.ActiveCfg = Release|x64
+		{3D8B5DCA-96C3-494A-9F26-9D5569A044E6}.Debug|x64.ActiveCfg = Debug|x64
+		{3D8B5DCA-96C3-494A-9F26-9D5569A044E6}.Release|x64.ActiveCfg = Release|x64
+		{3D8B5DCA-96C3-494A-9F26-9D5569A044E6}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
