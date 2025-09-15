@@ -7,6 +7,9 @@
 #include "../vendor/imgui/imgui.h"
 #include <algorithm>
 #include <cstring>
+#include <unordered_map>
+#include "../Modules/MemoryViewerModule.h"
+#include "../Modules/GMCommandsModule.h"
 
 using namespace SapphireHook;
 
@@ -94,9 +97,19 @@ void UIManager::RegisterModule(std::unique_ptr<UIModule> module)
 
 UIModule* UIManager::GetModule(const char* name)
 {
-	LogDebug("GetModule('" + std::string(name) + "') called on instance: " +
-		std::to_string(reinterpret_cast<uintptr_t>(this)) +
-		" with " + std::to_string(m_modules.size()) + " modules");
+	// Throttle logging per module name (log only first 3 times)
+	static std::unordered_map<std::string, int> s_logCount;
+	const std::string key = name ? std::string(name) : std::string();
+
+	auto itCount = s_logCount.find(key);
+	const bool shouldLog = (itCount == s_logCount.end()) || (itCount->second < 3);
+	if (shouldLog)
+	{
+		LogDebug("GetModule('" + std::string(name ? name : "") + "') called on instance: " +
+			std::to_string(reinterpret_cast<uintptr_t>(this)) +
+			" with " + std::to_string(m_modules.size()) + " modules");
+		s_logCount[key] = (itCount == s_logCount.end()) ? 1 : (itCount->second + 1);
+	}
 
 	auto it = std::find_if(m_modules.begin(), m_modules.end(),
 		[name](const std::unique_ptr<UIModule>& module)
@@ -105,13 +118,21 @@ UIModule* UIManager::GetModule(const char* name)
 			bool matches = strcmp(module->GetName(), name) == 0;
 			if (matches)
 			{
-				LogDebug("Found matching module: " + std::string(module->GetDisplayName()));
+				// Only log the match the first few times too
+				// Note: We can’t access s_logCount here; keep this quiet to avoid spam
+				// or add a separate per-name throttle similarly if you want.
+				// Keeping it silent avoids double spam.
+				// LogDebug("Found matching module: " + std::string(module->GetDisplayName()));
 			}
 			return matches;
 		});
 
 	UIModule* result = (it != m_modules.end()) ? it->get() : nullptr;
-	LogDebug("GetModule result: " + std::string(result ? "FOUND" : "NOT FOUND"));
+
+	if (shouldLog)
+	{
+		LogDebug(std::string("GetModule result: ") + (result ? "FOUND" : "NOT FOUND"));
+	}
 	return result;
 }
 
@@ -198,8 +219,58 @@ void UIManager::RegisterDefaultModules()
 		LogError("Failed to register Function Call Monitor: unknown exception");
 	}
 
+	try
+	{
+		if (GetModule("memory_viewer") == nullptr)
+		{
+			LogInfo("Creating Memory Viewer module...");
+			auto memView = std::make_unique<MemoryViewerModule>();
+			RegisterModule(std::move(memView));
+			LogInfo("✓ Memory Viewer module registered");
+			successCount++;
+		}
+		else
+		{
+			LogInfo("Memory Viewer module already exists");
+			successCount++;
+		}
+	}
+	catch (const std::exception& e)
+	{
+		LogError("Failed to register Memory Viewer: " + std::string(e.what()));
+	}
+	catch (...)
+	{
+		LogError("Failed to register Memory Viewer: unknown exception");
+	}
+
+	try
+	{
+		if (GetModule("gm_commands") == nullptr)
+		{
+			LogInfo("Creating GM Commands module...");
+			auto gm = std::make_unique<GMCommandsModule>();
+			RegisterModule(std::move(gm));
+			LogInfo("✓ GM Commands module registered");
+			successCount++;
+		}
+		else
+		{
+			LogInfo("GM Commands module already exists");
+			successCount++;
+		}
+	}
+	catch (const std::exception& e)
+	{
+		LogError("Failed to register GM Commands: " + std::string(e.what()));
+	}
+	catch (...)
+	{
+		LogError("Failed to register GM Commands: unknown exception");
+	}
+
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
-	LogInfo("Successfully registered: " + std::to_string(successCount) + "/3 modules");
+	LogInfo("Successfully registered: " + std::to_string(successCount) + "/5 modules");
 	LogInfo("Final module count on instance " + std::to_string(reinterpret_cast<uintptr_t>(this)) +
 		": " + std::to_string(m_modules.size()));
 
@@ -308,6 +379,29 @@ void UIManager::RenderMainMenu()
 			ImGui::MenuItem("ESP", nullptr, nullptr);
 			ImGui::MenuItem("Teleport", nullptr, nullptr);
 			ImGui::MenuItem("Speed Hack", nullptr, nullptr);
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Tools"))
+		{
+			// Cache the module pointer once to avoid per-frame GetModule logging
+			static UIModule* s_memViewer = nullptr;
+			if (!s_memViewer)
+				s_memViewer = GetModule("memory_viewer");
+
+			if (s_memViewer)
+			{
+				bool open = s_memViewer->IsWindowOpen();
+				if (ImGui::MenuItem("Memory Viewer", nullptr, open))
+				{
+					s_memViewer->SetWindowOpen(!open);
+				}
+			}
+			else
+			{
+				ImGui::MenuItem("Memory Viewer", nullptr, false, false);
+			}
+
 			ImGui::EndMenu();
 		}
 

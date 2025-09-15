@@ -694,7 +694,7 @@ bool CommandInterface::SendChatPacket(const char* message, uint8_t chatType)
     };
 
     FFXIVIpcChatHandler chatPacket = {};
-    chatPacket.clientTimeValue = GetTickCount();
+    chatPacket.clientTimeValue = static_cast<uint32_t>(GetTickCount64());
     chatPacket.originEntityId = GetLocalEntityId();
     chatPacket.chatType = static_cast<uint16_t>(chatType);
     strncpy_s(chatPacket.message, sizeof(chatPacket.message), message, _TRUNCATE);
@@ -742,7 +742,7 @@ bool CommandInterface::SendChatPacket(const char* message, uint8_t chatType)
 
     ipc->reserved = 0x14;
     ipc->type = 0x0067; // ChatHandler
-    ipc->timestamp = GetTickCount();
+    ipc->timestamp = static_cast<uint32_t>(GetTickCount64());
 
     // Copy chat data
     memcpy(data, &chatPacket, chatDataSize);

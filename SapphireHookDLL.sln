@@ -1,12 +1,13 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36429.23 d17.14
+VisualStudioVersion = 17.14.36429.23
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SapphireHookDLL", "SapphireHookDLL.vcxproj", "{386F28A7-F0FC-9A17-E38B-A32BE480F2BD}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{8EC462FD-D22E-90A8-E5CE-7E832BA40C5D}"
 	ProjectSection(SolutionItems) = preProject
+		gmcommands.txt = gmcommands.txt
 		..\..\..\AppData\Local\Temp\hook.log = ..\..\..\AppData\Local\Temp\hook.log
 		packet.txt = packet.txt
 		logs\server_log.txt = logs\server_log.txt

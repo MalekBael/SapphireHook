@@ -84,13 +84,16 @@
     <ClCompile Include="src\Core\WindowsAPIWrapper.cpp" />
     <ClCompile Include="src\Core\patternscanner.cpp" />
     <ClCompile Include="src\Modules\DebugCommandsModule.cpp" />
+    <ClCompile Include="src\Modules\GMCommandsModule.cpp" />
     <ClCompile Include="src\Modules\IPCCommandsModule.cpp" />
     <ClCompile Include="src\Modules\CommandInterface.cpp" />
+    <ClCompile Include="src\Modules\MemoryViewerModule.cpp" />
     <ClCompile Include="src\UI\imgui_overlay.cpp" />
     <ClCompile Include="src\UI\UIManager.cpp" />
     <ClCompile Include="src\Hooking\hook_manager.cpp" />
     <ClCompile Include="src\Hooking\lua_hook.cpp" />
     <ClCompile Include="src\Entry\dllmain.cpp" />
+    <ClCompile Include="vendor\hex_editor\imgui_hex.cpp" />
     <!-- ImGui Core Files -->
     <ClCompile Include="vendor\imgui\imgui.cpp" />
     <ClCompile Include="vendor\imgui\imgui_draw.cpp" />
@@ -123,13 +126,16 @@
     <ClInclude Include="src\Core\WindowsApiWrapper.h" />
     <ClInclude Include="src\Hooking\hook_factory_impl.h" />
     <ClInclude Include="src\Modules\DebugCommandsModule.h" />
+    <ClInclude Include="src\Modules\GMCommandsModule.h" />
     <ClInclude Include="src\Modules\IPCCommandsModule.h" />
     <ClInclude Include="src\Modules\CommandInterface.h" />
+    <ClInclude Include="src\Modules\MemoryViewerModule.h" />
     <ClInclude Include="src\UI\imgui_overlay.h" />
     <ClInclude Include="src\UI\UIManager.h" />
     <ClInclude Include="src\UI\UIModule.h" />
     <ClInclude Include="src\Hooking\hook_manager.h" />
     <ClInclude Include="src\Hooking\lua_hook.h" />
+    <ClInclude Include="vendor\hex_editor\imgui_hex.h" />
     <!-- ImGui Header Files -->
     <ClInclude Include="vendor\imgui\imgui.h" />
     <ClInclude Include="vendor\imgui\imgui_internal.h" />
