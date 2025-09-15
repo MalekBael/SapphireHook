@@ -382,3 +382,4 @@ external/*/bin/
 *.backup
 /worldlog.txt
 /packet.txt
+/gmcommands.txt
