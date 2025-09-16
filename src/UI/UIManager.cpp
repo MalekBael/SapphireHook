@@ -11,7 +11,6 @@
 #include "../Modules/MemoryViewerModule.h"
 #include "../Modules/GMCommandsModule.h"
 #include "../Modules/NetDiagnosticsModule.h"
-#include "../Modules/NetworkMonitorModule.h"
 
 using namespace SapphireHook;
 
@@ -118,14 +117,6 @@ UIModule* UIManager::GetModule(const char* name)
 		{
 			if (!module) return false;
 			bool matches = strcmp(module->GetName(), name) == 0;
-			if (matches)
-			{
-				// Only log the match the first few times too
-				// Note: We can’t access s_logCount here; keep this quiet to avoid spam
-				// or add a separate per-name throttle similarly if you want.
-				// Keeping it silent avoids double spam.
-				// LogDebug("Found matching module: " + std::string(module->GetDisplayName()));
-			}
 			return matches;
 		});
 
@@ -271,7 +262,7 @@ void UIManager::RegisterDefaultModules()
 		LogError("Failed to register GM Commands: unknown exception");
 	}
 
-	// NEW: Net Diagnostics module (ImPlot graphs)
+	// Unified Network Monitor (packets + graphs)
 	try
 	{
 		if (GetModule("net_diagnostics") == nullptr)
@@ -297,34 +288,8 @@ void UIManager::RegisterDefaultModules()
 		LogError("Failed to register Net Diagnostics: unknown exception");
 	}
 
-	// NEW: Network Monitor module
-	try
-	{
-		if (GetModule("network_monitor") == nullptr)
-		{
-			LogInfo("Creating Network Monitor module...");
-			auto nm = std::make_unique<NetworkMonitorModule>();
-			RegisterModule(std::move(nm));
-			LogInfo("\u2713 Network Monitor module registered");
-			successCount++;
-		}
-		else
-		{
-			LogInfo("Network Monitor module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register Network Monitor: " + std::string(e.what()));
-	}
-	catch (...)
-	{
-		LogError("Failed to register Network Monitor: unknown exception");
-	}
-
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
-	LogInfo("Successfully registered: " + std::to_string(successCount) + "/7 modules");
+	LogInfo("Successfully registered: " + std::to_string(successCount) + "/6 modules");
 	LogInfo("Final module count on instance " + std::to_string(reinterpret_cast<uintptr_t>(this)) +
 		": " + std::to_string(m_modules.size()));
 
@@ -456,33 +421,16 @@ void UIManager::RenderMainMenu()
 				ImGui::MenuItem("Memory Viewer", nullptr, false, false);
 			}
 
-			// Net Diagnostics quick toggle
-			static UIModule* s_netDiag = nullptr;
-			if (!s_netDiag)
-				s_netDiag = GetModule("net_diagnostics");
-			if (s_netDiag)
+			// Unified Network Monitor toggle
+			static UIModule* sNetMod = nullptr;
+			if (!sNetMod)
+				sNetMod = GetModule("net_diagnostics");
+			if (sNetMod)
 			{
-				bool open = s_netDiag->IsWindowOpen();
-				if (ImGui::MenuItem("Net Diagnostics", nullptr, open))
-				{
-					s_netDiag->SetWindowOpen(!open);
-				}
-			}
-			else
-			{
-				ImGui::MenuItem("Net Diagnostics", nullptr, false, false);
-			}
-
-			// Network Monitor quick toggle
-			static UIModule* s_netMon = nullptr;
-			if (!s_netMon)
-				s_netMon = GetModule("network_monitor");
-			if (s_netMon)
-			{
-				bool open = s_netMon->IsWindowOpen();
+				bool open = sNetMod->IsWindowOpen();
 				if (ImGui::MenuItem("Network Monitor", nullptr, open))
 				{
-					s_netMon->SetWindowOpen(!open);
+					sNetMod->SetWindowOpen(!open);
 				}
 			}
 			else

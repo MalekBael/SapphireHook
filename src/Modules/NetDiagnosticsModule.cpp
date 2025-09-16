@@ -1,6 +1,7 @@
 #include "NetDiagnosticsModule.h"
 #include "../Core/PacketInjector.h"
 #include "../vendor/imgui/imgui.h"
+#include "../Monitor/NetworkMonitor.h" // for embedded packet view
 
 #if __has_include("../vendor/implot/implot.h")
     #define SH_HAVE_IMPLOT 1
@@ -73,7 +74,7 @@ namespace {
 }
 
 void NetDiagnosticsModule::RenderMenu() {
-    // Intentionally no-op to avoid duplicate entry; this module is toggled from the Tools menu.
+    // No duplicate entry in Features. Toggled from Tools only.
 }
 
 void NetDiagnosticsModule::RenderWindow() {
@@ -81,9 +82,16 @@ void NetDiagnosticsModule::RenderWindow() {
     if (!g_init) { g_ring.init(300); g_init = true; }
     sample_once();
 
-    if (ImGui::Begin("Net Diagnostics", &m_windowOpen)) {
+    ImGui::SetNextWindowSize(ImVec2(1200, 700), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Network Monitor", &m_windowOpen)) {
+        // Left: packet view, Right: diagnostics (or stacked if no ImPlot)
+        ImGui::BeginChild("left", ImVec2(ImGui::GetContentRegionAvail().x * 0.5f, 0), true);
+        SafeHookLogger::Instance().DrawImGuiEmbedded();
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("right", ImVec2(0, 0), true);
 #if SH_HAVE_IMPLOT
-        if (ImPlot::BeginPlot("Packets/sec", ImVec2(-1, 160))) {
+        if (ImPlot::BeginPlot("Packets/sec", ImVec2(-1, 180))) {
             std::vector<double> x, a, b; x.reserve(g_ring.size()); a.reserve(g_ring.size()); b.reserve(g_ring.size());
             g_ring.for_each([&](const Sample& s){ x.push_back(s.t); a.push_back(s.sends); b.push_back(s.recvs); });
             ImPlot::SetupAxes("t (s)","count/s", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
@@ -94,7 +102,7 @@ void NetDiagnosticsModule::RenderWindow() {
             ImPlot::EndPlot();
         }
 
-        if (ImPlot::BeginPlot("Throughput (KB/s)", ImVec2(-1, 160))) {
+        if (ImPlot::BeginPlot("Throughput (KB/s)", ImVec2(-1, 180))) {
             std::vector<double> x, o, i; x.reserve(g_ring.size()); o.reserve(g_ring.size()); i.reserve(g_ring.size());
             g_ring.for_each([&](const Sample& s){ x.push_back(s.t); o.push_back(s.kbpsOut); i.push_back(s.kbpsIn); });
             ImPlot::SetupAxes("t (s)","KB/s", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
@@ -105,7 +113,7 @@ void NetDiagnosticsModule::RenderWindow() {
             ImPlot::EndPlot();
         }
 
-        if (ImPlot::BeginPlot("WSA errors (delta per tick)", ImVec2(-1, 120))) {
+        if (ImPlot::BeginPlot("WSA errors (delta per tick)", ImVec2(-1, 160))) {
             std::vector<double> x, e38, e54, e35, e57;
             x.reserve(g_ring.size()); e38.reserve(g_ring.size()); e54.reserve(g_ring.size()); e35.reserve(g_ring.size()); e57.reserve(g_ring.size());
             g_ring.for_each([&](const Sample& s){
@@ -121,8 +129,9 @@ void NetDiagnosticsModule::RenderWindow() {
             ImPlot::EndPlot();
         }
 #else
-        ImGui::TextWrapped("ImPlot not found. To enable Net Diagnostics graphs, add vendor/implot (implot.h/.cpp + implot_items.cpp) to the project.");
+        ImGui::TextWrapped("ImPlot not found. Add vendor/implot to enable diagnostics graphs.");
 #endif
+        ImGui::EndChild();
     }
     ImGui::End();
 }

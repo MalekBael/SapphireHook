@@ -26,7 +26,7 @@ namespace GMCommands
         Entry{ Invisible, "invisible", "[targetId]", "Toggle invisibility. Optional target actor id." },
         Entry{ Wireframe, "wireframe", "[0|1]", "Enable/disable wireframe rendering (1=on, 0=off)." },
         Entry{ Teri_Info, "teri_info", "", "Dump teri/terrain related info (no args)." },
-        Entry{ Quest_Accept, "quest_accept", "", " <questid> <player>." },
+        Entry{ Quest_Accept, "quest_accept", "[questId]", " Accepts quest." },
     };
 }
 

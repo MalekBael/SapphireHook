@@ -78,6 +78,9 @@ public:
     void DrawImGuiSimple();
     void DrawImGuiSimple(bool* p_open); // with close button controlled by caller
 
+    // Embedded content (no Begin/End) for composing with other widgets
+    void DrawImGuiEmbedded();
+
     // hex dump helper (exposed for utility rendering helpers)
     static void DumpHexAscii(const HookPacket& hp);
 
