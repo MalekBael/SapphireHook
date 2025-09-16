@@ -46,6 +46,21 @@
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Psapi.lib")
 
+// Diagnostics counters for UI plots
+static std::atomic<uint64_t> g_sendOk{0}, g_sendFail{0}, g_bytesSent{0};
+static std::atomic<uint64_t> g_recvOk{0}, g_bytesRecv{0};
+static std::atomic<uint64_t> g_wsa10038{0}, g_wsa10054{0}, g_wsa10035{0}, g_wsa10057{0};
+
+static inline void CountWsa(int wsa) {
+    switch (wsa) {
+    case WSAENOTSOCK: g_wsa10038.fetch_add(1, std::memory_order_relaxed); break;
+    case WSAECONNRESET: g_wsa10054.fetch_add(1, std::memory_order_relaxed); break;
+    case WSAEWOULDBLOCK: g_wsa10035.fetch_add(1, std::memory_order_relaxed); break;
+    case WSAENOTCONN: g_wsa10057.fetch_add(1, std::memory_order_relaxed); break;
+    default: break;
+    }
+}
+
 // ADD near top
 #include <atomic>
 #include <winsock2.h>
@@ -87,11 +102,9 @@ static void ObserveTrafficAndMaybeLearn(SOCKET s, const uint8_t* buf, int len)
 // HOOK glue (call this from your existing send/recv hooks)
 int WSAAPI Hook_send(SOCKET s, const char* buf, int len, int flags) {
     ObserveTrafficAndMaybeLearn(s, reinterpret_cast<const uint8_t*>(buf), len);
-    // was: return Real_send(s, buf, len, flags);
     return ::send(s, buf, len, flags);
 }
 int WSAAPI Hook_recv(SOCKET s, char* buf, int len, int flags) {
-    // was: const int ret = Real_recv(s, buf, len, flags);
     const int ret = ::recv(s, buf, len, flags);
     if (ret > 0) ObserveTrafficAndMaybeLearn(s, reinterpret_cast<const uint8_t*>(buf), ret);
     return ret;
@@ -127,9 +140,8 @@ static SOCKET PickSocketForPacket(const uint8_t* buf, size_t len)
     }
 }
 
-// Change the signature only; keep the body as-is or delete the whole function if you prefer.
-// was: bool PacketInjector::Send(const void* data, size_t bytes)
-static bool SendHardened(const void* data, size_t bytes)
+// Hardened send: on 10038, invalidate and retry once with candidate
+static bool SendHardenedInternal(const void* data, size_t bytes)
 {
     if (!data || bytes == 0) return false;
     const uint8_t* buf = static_cast<const uint8_t*>(data);
@@ -139,21 +151,23 @@ static bool SendHardened(const void* data, size_t bytes)
         int sent = ::send(s, reinterpret_cast<const char*>(buf), (int)bytes, 0);
         if (sent == SOCKET_ERROR) {
             const int wsa = WSAGetLastError();
+            CountWsa(wsa);
             printf("[PacketInjector] Send failed on 0x%Ix (WSA=%d)\n", (uintptr_t)s, wsa);
             if (wsa == WSAENOTSOCK) {
-                // kill learned handles if they match
                 if (s == g_zoneSocket.load()) g_zoneSocket.store(INVALID_SOCKET);
                 if (s == g_chatSocket.load()) g_chatSocket.store(INVALID_SOCKET);
             }
+            g_sendFail.fetch_add(1, std::memory_order_relaxed);
             return false;
         }
+        g_sendOk.fetch_add(1, std::memory_order_relaxed);
+        g_bytesSent.fetch_add(static_cast<uint64_t>(sent), std::memory_order_relaxed);
         return true;
     };
 
     SOCKET primary = PickSocketForPacket(buf, bytes);
     if (trySend(primary)) return true;
 
-    // Retry once with candidate if primary failed/invalid
     SOCKET fallback;
     const bool isChat = (buf && bytes >= 0x34 && IsFfxivHeader(buf, (int)bytes) && IsChatOpcode(ReadOpcodeLE(buf)));
     fallback = isChat ? g_lastChatCandidate.load() : g_lastZoneCandidate.load();
@@ -166,54 +180,7 @@ static bool SendHardened(const void* data, size_t bytes)
     return false;
 }
 
-
-// Hygiene and include order
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-
-// Force full winsock2 inclusion FIRST
-#include <winsock2.h>
-#include <ws2tcpip.h>
-
-// EXPLICIT: Ensure WSAAPI is defined exactly as in WinSock2.h
-#if !defined(WSAAPI)
-#if !defined(FAR)
-#define FAR
-#endif
-#if !defined(PASCAL)
-#define PASCAL __stdcall
-#endif
-#define WSAAPI FAR PASCAL
-#endif
-
-// Verify it's defined
-#ifndef WSAAPI
-#error "WSAAPI still not defined after explicit setup"
-#endif
-
-#include <windows.h>
-#include <psapi.h>
-#include <unordered_map>
-#include <mutex>
-#include <atomic>
-#include <algorithm>
-#include <cstring>   // std::memcmp, std::memcpy
-#include <cstdlib>   // std::getenv
-#include <sstream>   // std::ostringstream
-#include <vector>
-#include <cstdio>
-#include "../Logger/Logger.h"
-#include "../Hooking/hook_manager.h"
-
-#include "PacketInjector.h"
-#include "MinHook.h"
-
-#pragma comment(lib, "Ws2_32.lib")
-#pragma comment(lib, "Psapi.lib")
+// Duplicate include block existed below in original; keep only once.
 
 // Readable check (file-scope, before any uses)
 static bool IsReadable(const void* ptr, size_t minLen) noexcept
@@ -639,12 +606,28 @@ namespace SapphireHook {
             }
         }
 
-        return g_realWSASend
+        int rc = g_realWSASend
             ? g_realWSASend(s, lpBuffers, dwBufferCount, lpNumberOfBytesSent, dwFlags, lpOverlapped, lpCompletionRoutine)
             : SOCKET_ERROR;
+
+        if (rc == SOCKET_ERROR)
+        {
+            CountWsa(WSAGetLastError());
+            g_sendFail.fetch_add(1, std::memory_order_relaxed);
+        }
+        else
+        {
+            g_sendOk.fetch_add(1, std::memory_order_relaxed);
+            uint64_t total = 0;
+            if (lpNumberOfBytesSent) total = *lpNumberOfBytesSent;
+            else for (DWORD i=0;i<dwBufferCount;i++) total += lpBuffers[i].len;
+            g_bytesSent.fetch_add(total, std::memory_order_relaxed);
+        }
+
+        return rc;
     }
 
-    // Replace the body of send_Detour with this version (adds LocalActorId learning)
+    // Replace the body of send_Detour with metrics and learning
     static int __stdcall send_Detour(SOCKET s, const char* buf, int len, int flags)
     {
         std::printf("[PacketInjector] *** send() called on socket %lld, len=%d ***\n",
@@ -655,16 +638,24 @@ namespace SapphireHook {
             const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
 
             // Learn LocalActorId from outbound ChatHandler (0x0067): payload originEntityId at 0x4C
-            uint32_t originEntityId = 0;
-            if (ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x4C, originEntityId))
+            uint32_t segType32 = 0;
+            uint16_t reserved16 = 0, ipcType = 0;
+            (void)ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x34, segType32);
+            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x38, reserved16);
+            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x3A, ipcType);
+            if (segType32 == 3 && reserved16 == 0x0014)
             {
-                if (originEntityId != 0 && originEntityId != 0xFFFFFFFF)
+                if (ipcType == 0x0067)
                 {
-                    const uint32_t prev = g_localActorId.exchange(originEntityId, std::memory_order_relaxed);
-                    if (prev != originEntityId)
+                    uint32_t originEntityId = 0;
+                    if (ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x4C, originEntityId))
                     {
-                        std::printf("[PacketInjector] Learned LocalActorId from ChatHandler: 0x%X (%u)\n",
-                            originEntityId, originEntityId);
+                        if (originEntityId != 0 && originEntityId != 0xFFFFFFFF)
+                        {
+                            g_localActorId.store(originEntityId, std::memory_order_relaxed);
+                            std::printf("[PacketInjector] Learned LocalActorId from ChatHandler: 0x%X (%u)\n",
+                                originEntityId, originEntityId);
+                        }
                     }
                 }
             }
@@ -733,14 +724,31 @@ namespace SapphireHook {
             }
         }
 
-        return g_realSend ? g_realSend(s, buf, len, flags) : SOCKET_ERROR;
+        int rc = g_realSend ? g_realSend(s, buf, len, flags) : SOCKET_ERROR;
+        if (rc == SOCKET_ERROR)
+        {
+            CountWsa(WSAGetLastError());
+            g_sendFail.fetch_add(1, std::memory_order_relaxed);
+        }
+        else if (rc > 0)
+        {
+            g_sendOk.fetch_add(1, std::memory_order_relaxed);
+            g_bytesSent.fetch_add(static_cast<uint64_t>(rc), std::memory_order_relaxed);
+        }
+        return rc;
     }
 
     static int __stdcall recv_Detour(SOCKET s, char* buf, int len, int flags)
     {
         std::printf("[PacketInjector] *** recv() called on socket %lld, len=%d ***\n",
             static_cast<long long>(s), len);
-        return g_realRecv ? g_realRecv(s, buf, len, flags) : SOCKET_ERROR;
+        int rc = g_realRecv ? g_realRecv(s, buf, len, flags) : SOCKET_ERROR;
+        if (rc > 0)
+        {
+            g_recvOk.fetch_add(1, std::memory_order_relaxed);
+            g_bytesRecv.fetch_add(static_cast<uint64_t>(rc), std::memory_order_relaxed);
+        }
+        return rc;
     }
 
     static int __stdcall sendto_Detour(SOCKET s, const char* buf, int len, int flags, const sockaddr* to, int tolen)
@@ -783,7 +791,9 @@ namespace SapphireHook {
                             rc, static_cast<unsigned long long>(sock));
                         return true;
                     }
-                    std::printf("[PacketInjector] send() failed: %d (WSAGetLastError=%d)\n", rc, WSAGetLastError());
+                    int wsa = WSAGetLastError();
+                    CountWsa(wsa);
+                    std::printf("[PacketInjector] send() failed: %d (WSAGetLastError=%d)\n", rc, wsa);
                 }
                 if (g_realWSASend)
                 {
@@ -797,9 +807,14 @@ namespace SapphireHook {
                     {
                         std::printf("[PacketInjector] Injected %lu bytes via WSASend on socket 0x%llx\n",
                             sent, static_cast<unsigned long long>(sock));
+                        g_sendOk.fetch_add(1, std::memory_order_relaxed);
+                        g_bytesSent.fetch_add(static_cast<uint64_t>(sent), std::memory_order_relaxed);
                         return true;
                     }
-                    std::printf("[PacketInjector] WSASend failed: %d (WSAGetLastError=%d)\n", rc, WSAGetLastError());
+                    int wsa = WSAGetLastError();
+                    CountWsa(wsa);
+                    std::printf("[PacketInjector] WSASend failed: %d (WSAGetLastError=%d)\n", rc, wsa);
+                    g_sendFail.fetch_add(1, std::memory_order_relaxed);
                 }
             }
             else
@@ -824,8 +839,10 @@ namespace SapphireHook {
                         rc, static_cast<unsigned long long>(activeSocket));
                     return true;
                 }
+                int wsa = WSAGetLastError();
+                CountWsa(wsa);
                 std::printf("[PacketInjector] Socket 0x%llx failed with error %d, trying next...\n",
-                    static_cast<unsigned long long>(activeSocket), WSAGetLastError());
+                    static_cast<unsigned long long>(activeSocket), wsa);
             }
         }
 
@@ -915,6 +932,20 @@ namespace SapphireHook {
             }
         }
 
+        // Hook closesocket()
+        auto pClose = GetProcAddress(hWs2, "closesocket");
+        if (pClose)
+        {
+            if (MH_CreateHook(pClose, &Hook_closesocket, reinterpret_cast<LPVOID*>(&Real_closesocket)) == MH_OK)
+            {
+                if (MH_EnableHook(pClose) == MH_OK)
+                {
+                    std::printf("[PacketInjector] *** HOOKED closesocket() ***\n");
+                    anySuccess = true;
+                }
+            }
+        }
+
         // Keep WSASend hook as fallback
         if (InstallWSASendHook())
         {
@@ -992,5 +1023,21 @@ namespace SapphireHook {
     uint32_t GetLearnedLocalActorId()
     {
         return g_localActorId.load(std::memory_order_relaxed);
+    }
+
+    PacketInjector::MetricsSnapshot PacketInjector::GetMetricsSnapshot()
+    {
+        MetricsSnapshot s{};
+        s.t_ms      = GetTickCount64();
+        s.sendOk    = g_sendOk.load(std::memory_order_relaxed);
+        s.sendFail  = g_sendFail.load(std::memory_order_relaxed);
+        s.bytesSent = g_bytesSent.load(std::memory_order_relaxed);
+        s.recvOk    = g_recvOk.load(std::memory_order_relaxed);
+        s.bytesRecv = g_bytesRecv.load(std::memory_order_relaxed);
+        s.wsa10038  = g_wsa10038.load(std::memory_order_relaxed);
+        s.wsa10054  = g_wsa10054.load(std::memory_order_relaxed);
+        s.wsa10035  = g_wsa10035.load(std::memory_order_relaxed);
+        s.wsa10057  = g_wsa10057.load(std::memory_order_relaxed);
+        return s;
     }
 } // namespace SapphireHook

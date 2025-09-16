@@ -21,6 +21,22 @@ namespace SapphireHook {
         static std::uintptr_t s_zoneSocket;
         static std::uintptr_t s_chatSocket;
 
+        // Diagnostics metrics snapshot (for ImPlot graphs / UI)
+        struct MetricsSnapshot {
+            std::uint64_t t_ms;      // GetTickCount64()
+            std::uint64_t sendOk;
+            std::uint64_t sendFail;
+            std::uint64_t bytesSent;
+            std::uint64_t recvOk;
+            std::uint64_t bytesRecv;
+            std::uint64_t wsa10038;  // WSAENOTSOCK
+            std::uint64_t wsa10054;  // WSAECONNRESET
+            std::uint64_t wsa10035;  // WSAEWOULDBLOCK
+            std::uint64_t wsa10057;  // WSAENOTCONN
+        };
+
+        static MetricsSnapshot GetMetricsSnapshot();
+
     private:
         static bool s_installed;
         static bool InstallWSASendHook();

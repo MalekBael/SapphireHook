@@ -88,6 +88,7 @@
     <ClCompile Include="src\Modules\IPCCommandsModule.cpp" />
     <ClCompile Include="src\Modules\CommandInterface.cpp" />
     <ClCompile Include="src\Modules\MemoryViewerModule.cpp" />
+    <ClCompile Include="src\Modules\NetDiagnosticsModule.cpp" />
     <ClCompile Include="src\UI\imgui_overlay.cpp" />
     <ClCompile Include="src\UI\UIManager.cpp" />
     <ClCompile Include="src\Hooking\hook_manager.cpp" />
@@ -104,6 +105,9 @@
     <ClCompile Include="vendor\imgui\backends\imgui_impl_dx11.cpp" />
     <ClCompile Include="vendor\imgui\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="src\Logger\Logger.cpp" />
+    <ClCompile Include="vendor\implot\implot.cpp" />
+    <ClCompile Include="vendor\implot\implot_demo.cpp" />
+    <ClCompile Include="vendor\implot\implot_items.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Core\AsyncPatternScanner.h" />
@@ -131,6 +135,7 @@
     <ClInclude Include="src\Modules\IPCCommandsModule.h" />
     <ClInclude Include="src\Modules\CommandInterface.h" />
     <ClInclude Include="src\Modules\MemoryViewerModule.h" />
+    <ClInclude Include="src\Modules\NetDiagnosticsModule.h" />
     <ClInclude Include="src\UI\imgui_overlay.h" />
     <ClInclude Include="src\UI\UIManager.h" />
     <ClInclude Include="src\UI\UIModule.h" />
@@ -146,6 +151,8 @@
     <ClInclude Include="vendor\imgui\backends\imgui_impl_dx11.h" />
     <ClInclude Include="vendor\imgui\backends\imgui_impl_win32.h" />
     <ClInclude Include="src\Logger\Logger.h" />
+    <ClInclude Include="vendor\implot\implot.h" />
+    <ClInclude Include="vendor\implot\implot_internal.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".editorconfig" />
@@ -160,6 +167,9 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Include="packages.config" />
+    <None Include="vendor\implot\LICENSE" />
+    <None Include="vendor\implot\README.md" />
+    <None Include="vendor\implot\TODO.md" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="packages\Serilog.4.3.0\build\Serilog.targets" Condition="Exists('packages\Serilog.4.3.0\build\Serilog.targets')" />

@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include "../Modules/MemoryViewerModule.h"
 #include "../Modules/GMCommandsModule.h"
+#include "../Modules/NetDiagnosticsModule.h"
 
 using namespace SapphireHook;
 
@@ -151,7 +152,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating IPC Commands module...");
 			auto ipcModule = std::make_unique<IPCCommandsModule>();
 			RegisterModule(std::move(ipcModule));
-			LogInfo("✓ IPC Commands module registered");
+			LogInfo("\u2713 IPC Commands module registered");
 			successCount++;
 		}
 		else
@@ -176,7 +177,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating Debug Commands module...");
 			auto debugModule = std::make_unique<DebugCommandsModule>();
 			RegisterModule(std::move(debugModule));
-			LogInfo("✓ Debug Commands module registered");
+			LogInfo("\u2713 Debug Commands module registered");
 			successCount++;
 		}
 		else
@@ -201,7 +202,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating Function Call Monitor module...");
 			auto functionModule = std::make_unique<FunctionCallMonitor>();
 			RegisterModule(std::move(functionModule));
-			LogInfo("✓ Function Call Monitor module registered");
+			LogInfo("\u2713 Function Call Monitor module registered");
 			successCount++;
 		}
 		else
@@ -226,7 +227,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating Memory Viewer module...");
 			auto memView = std::make_unique<MemoryViewerModule>();
 			RegisterModule(std::move(memView));
-			LogInfo("✓ Memory Viewer module registered");
+			LogInfo("\u2713 Memory Viewer module registered");
 			successCount++;
 		}
 		else
@@ -251,7 +252,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating GM Commands module...");
 			auto gm = std::make_unique<GMCommandsModule>();
 			RegisterModule(std::move(gm));
-			LogInfo("✓ GM Commands module registered");
+			LogInfo("\u2713 GM Commands module registered");
 			successCount++;
 		}
 		else
@@ -267,6 +268,32 @@ void UIManager::RegisterDefaultModules()
 	catch (...)
 	{
 		LogError("Failed to register GM Commands: unknown exception");
+	}
+
+	// NEW: Net Diagnostics module (ImPlot graphs)
+	try
+	{
+		if (GetModule("net_diagnostics") == nullptr)
+		{
+			LogInfo("Creating Net Diagnostics module...");
+			auto net = std::make_unique<NetDiagnosticsModule>();
+			RegisterModule(std::move(net));
+			LogInfo("\u2713 Net Diagnostics module registered");
+			successCount++;
+		}
+		else
+		{
+			LogInfo("Net Diagnostics module already exists");
+			successCount++;
+		}
+	}
+	catch (const std::exception& e)
+	{
+		LogError("Failed to register Net Diagnostics: " + std::string(e.what()));
+	}
+	catch (...)
+	{
+		LogError("Failed to register Net Diagnostics: unknown exception");
 	}
 
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
@@ -400,6 +427,23 @@ void UIManager::RenderMainMenu()
 			else
 			{
 				ImGui::MenuItem("Memory Viewer", nullptr, false, false);
+			}
+
+			// Net Diagnostics quick toggle
+			static UIModule* s_netDiag = nullptr;
+			if (!s_netDiag)
+				s_netDiag = GetModule("net_diagnostics");
+			if (s_netDiag)
+			{
+				bool open = s_netDiag->IsWindowOpen();
+				if (ImGui::MenuItem("Net Diagnostics", nullptr, open))
+				{
+					s_netDiag->SetWindowOpen(!open);
+				}
+			}
+			else
+			{
+				ImGui::MenuItem("Net Diagnostics", nullptr, false, false);
 			}
 
 			ImGui::EndMenu();

@@ -12,6 +12,8 @@
 #include "../../vendor/imgui/backends/imgui_impl_win32.h"
 #include "../../vendor/minhook/include/MinHook.h"
 #include "../UI/UIManager.h"
+// NEW: ImPlot for charts
+#include "../../vendor/implot/implot.h"
 
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
@@ -222,6 +224,8 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
             CreateRenderTarget(pSwapChain);
 
             ImGui::CreateContext();
+            // Create ImPlot context to support plotting modules
+            ImPlot::CreateContext();
             ImGuiIO& io = ImGui::GetIO();
             io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
             io.MouseDrawCursor = false;
@@ -408,10 +412,20 @@ void CleanupOverlay()
         LogInfo("Window procedure restored");
     }
 
+    // Shutdown backends first
     if (ImGui::GetCurrentContext())
     {
         ImGui_ImplDX11_Shutdown();
         ImGui_ImplWin32_Shutdown();
+    }
+
+    // Destroy plotting and GUI contexts
+    if (ImPlot::GetCurrentContext())
+    {
+        ImPlot::DestroyContext();
+    }
+    if (ImGui::GetCurrentContext())
+    {
         ImGui::DestroyContext();
         LogInfo("ImGui cleaned up");
     }
