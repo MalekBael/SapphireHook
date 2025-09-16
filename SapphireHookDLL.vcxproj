@@ -126,6 +126,7 @@
     <ClInclude Include="src\Core\WindowsApiWrapper.h" />
     <ClInclude Include="src\Hooking\hook_factory_impl.h" />
     <ClInclude Include="src\Modules\DebugCommandsModule.h" />
+    <ClInclude Include="src\Modules\GMCommandList.h" />
     <ClInclude Include="src\Modules\GMCommandsModule.h" />
     <ClInclude Include="src\Modules\IPCCommandsModule.h" />
     <ClInclude Include="src\Modules\CommandInterface.h" />

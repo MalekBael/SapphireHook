@@ -26,4 +26,7 @@ namespace SapphireHook {
         static bool InstallWSASendHook();
     };
 
+    // NEW: expose learned local actor id for UI/modules
+    uint32_t GetLearnedLocalActorId();
+
 } // namespace SapphireHook

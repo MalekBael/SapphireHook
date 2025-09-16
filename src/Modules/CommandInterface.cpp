@@ -831,6 +831,10 @@ bool CommandInterface::SendGMCommand(uint32_t commandId, uint32_t arg0, uint32_t
 
     packet.header.size = totalSize;
     packet.segmentHeader.size = segmentSize;
+
+    // NEW: set source_actor as the local entity id (helps server identify sender)
+    packet.segmentHeader.source_actor = GetLocalEntityId();
+
     packet.segmentHeader.target_actor = static_cast<uint32_t>(target);
     packet.segmentHeader.type = 3; // IPC
 

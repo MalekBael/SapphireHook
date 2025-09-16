@@ -22,19 +22,14 @@ private:
     // UI state
     bool m_windowOpen = false;
 
-    // Send by ID
+    // Dropdown selection index into GMCommands::kList
+    int m_selectedIndex = -1;
+
+    // Opcode-only: Send by numeric ID (GMCommand 0x0197)
     int m_commandId = 0;
     int m_arg0 = 0;
     int m_arg1 = 0;
     int m_arg2 = 0;
     int m_arg3 = 0;
     unsigned long long m_targetId = 0ULL;
-
-    // Send by Name
-    char m_targetName[64] = {};
-    int m_nameCommandId = 0;
-    int m_nameArg0 = 0;
-    int m_nameArg1 = 0;
-    int m_nameArg2 = 0;
-    int m_nameArg3 = 0;
 };

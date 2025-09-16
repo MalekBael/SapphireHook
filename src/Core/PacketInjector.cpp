@@ -46,6 +46,175 @@
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Psapi.lib")
 
+// ADD near top
+#include <atomic>
+#include <winsock2.h>
+
+namespace {
+    std::atomic<SOCKET> g_zoneSocket{ INVALID_SOCKET };
+    std::atomic<SOCKET> g_chatSocket{ INVALID_SOCKET };
+    std::atomic<SOCKET> g_lastZoneCandidate{ INVALID_SOCKET };
+    std::atomic<SOCKET> g_lastChatCandidate{ INVALID_SOCKET };
+}
+
+static inline bool IsFfxivHeader(const uint8_t* b, int len) {
+    return len >= 0x34 && b[0] == 0x52 && b[1] == 0x52 && b[2] == 0xA0 && b[3] == 0x41;
+}
+static inline uint16_t ReadOpcodeLE(const uint8_t* b) {
+    return static_cast<uint16_t>(b[0x30] | (b[0x31] << 8));
+}
+static inline bool IsChatOpcode(uint16_t op) { return op == 0x0067; } // ChatHandler
+
+static void ObserveTrafficAndMaybeLearn(SOCKET s, const uint8_t* buf, int len)
+{
+    if (!buf || len < 0x34 || !IsFfxivHeader(buf, len)) return;
+    const uint16_t op = ReadOpcodeLE(buf);
+    if (IsChatOpcode(op)) {
+        g_lastChatCandidate.store(s, std::memory_order_relaxed);
+        if (g_chatSocket.load(std::memory_order_relaxed) == INVALID_SOCKET) {
+            g_chatSocket.store(s, std::memory_order_relaxed);
+            printf("[PacketInjector] Learned chat socket (traffic): 0x%Ix\n", (uintptr_t)s);
+        }
+    } else {
+        g_lastZoneCandidate.store(s, std::memory_order_relaxed);
+        if (g_zoneSocket.load(std::memory_order_relaxed) == INVALID_SOCKET) {
+            g_zoneSocket.store(s, std::memory_order_relaxed);
+            printf("[PacketInjector] Learned zone socket (traffic): 0x%Ix\n", (uintptr_t)s);
+        }
+    }
+}
+
+// HOOK glue (call this from your existing send/recv hooks)
+int WSAAPI Hook_send(SOCKET s, const char* buf, int len, int flags) {
+    ObserveTrafficAndMaybeLearn(s, reinterpret_cast<const uint8_t*>(buf), len);
+    // was: return Real_send(s, buf, len, flags);
+    return ::send(s, buf, len, flags);
+}
+int WSAAPI Hook_recv(SOCKET s, char* buf, int len, int flags) {
+    // was: const int ret = Real_recv(s, buf, len, flags);
+    const int ret = ::recv(s, buf, len, flags);
+    if (ret > 0) ObserveTrafficAndMaybeLearn(s, reinterpret_cast<const uint8_t*>(buf), ret);
+    return ret;
+}
+
+// closesocket hook: clear stale learned handles on rotation
+static decltype(&::closesocket) Real_closesocket = ::closesocket;
+static int WSAAPI Hook_closesocket(SOCKET s)
+{
+    if (s == g_zoneSocket.load()) {
+        g_zoneSocket.store(INVALID_SOCKET);
+        printf("[PacketInjector] Zone socket closed -> cleared\n");
+    }
+    if (s == g_chatSocket.load()) {
+        g_chatSocket.store(INVALID_SOCKET);
+        printf("[PacketInjector] Chat socket closed -> cleared\n");
+    }
+    if (s == g_lastZoneCandidate.load()) g_lastZoneCandidate.store(INVALID_SOCKET);
+    if (s == g_lastChatCandidate.load()) g_lastChatCandidate.store(INVALID_SOCKET);
+    return Real_closesocket(s);
+}
+// Ensure you install the closesocket hook next to send/recv hooks.
+
+// Pick socket by opcode (chat vs zone), with candidate fallback
+static SOCKET PickSocketForPacket(const uint8_t* buf, size_t len)
+{
+    if (buf && len >= 0x34 && IsFfxivHeader(buf, (int)len) && IsChatOpcode(ReadOpcodeLE(buf))) {
+        SOCKET s = g_chatSocket.load();
+        return (s != INVALID_SOCKET) ? s : g_lastChatCandidate.load();
+    } else {
+        SOCKET s = g_zoneSocket.load();
+        return (s != INVALID_SOCKET) ? s : g_lastZoneCandidate.load();
+    }
+}
+
+// Change the signature only; keep the body as-is or delete the whole function if you prefer.
+// was: bool PacketInjector::Send(const void* data, size_t bytes)
+static bool SendHardened(const void* data, size_t bytes)
+{
+    if (!data || bytes == 0) return false;
+    const uint8_t* buf = static_cast<const uint8_t*>(data);
+
+    auto trySend = [&](SOCKET s) -> bool {
+        if (s == INVALID_SOCKET) return false;
+        int sent = ::send(s, reinterpret_cast<const char*>(buf), (int)bytes, 0);
+        if (sent == SOCKET_ERROR) {
+            const int wsa = WSAGetLastError();
+            printf("[PacketInjector] Send failed on 0x%Ix (WSA=%d)\n", (uintptr_t)s, wsa);
+            if (wsa == WSAENOTSOCK) {
+                // kill learned handles if they match
+                if (s == g_zoneSocket.load()) g_zoneSocket.store(INVALID_SOCKET);
+                if (s == g_chatSocket.load()) g_chatSocket.store(INVALID_SOCKET);
+            }
+            return false;
+        }
+        return true;
+    };
+
+    SOCKET primary = PickSocketForPacket(buf, bytes);
+    if (trySend(primary)) return true;
+
+    // Retry once with candidate if primary failed/invalid
+    SOCKET fallback;
+    const bool isChat = (buf && bytes >= 0x34 && IsFfxivHeader(buf, (int)bytes) && IsChatOpcode(ReadOpcodeLE(buf)));
+    fallback = isChat ? g_lastChatCandidate.load() : g_lastZoneCandidate.load();
+    if (fallback != primary && trySend(fallback)) {
+        printf("[PacketInjector] Retried send via fallback socket 0x%Ix\n", (uintptr_t)fallback);
+        return true;
+    }
+
+    printf("[PacketInjector] Aborted: no viable socket\n");
+    return false;
+}
+
+
+// Hygiene and include order
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+
+// Force full winsock2 inclusion FIRST
+#include <winsock2.h>
+#include <ws2tcpip.h>
+
+// EXPLICIT: Ensure WSAAPI is defined exactly as in WinSock2.h
+#if !defined(WSAAPI)
+#if !defined(FAR)
+#define FAR
+#endif
+#if !defined(PASCAL)
+#define PASCAL __stdcall
+#endif
+#define WSAAPI FAR PASCAL
+#endif
+
+// Verify it's defined
+#ifndef WSAAPI
+#error "WSAAPI still not defined after explicit setup"
+#endif
+
+#include <windows.h>
+#include <psapi.h>
+#include <unordered_map>
+#include <mutex>
+#include <atomic>
+#include <algorithm>
+#include <cstring>   // std::memcmp, std::memcpy
+#include <cstdlib>   // std::getenv
+#include <sstream>   // std::ostringstream
+#include <vector>
+#include <cstdio>
+#include "../Logger/Logger.h"
+#include "../Hooking/hook_manager.h"
+
+#include "PacketInjector.h"
+#include "MinHook.h"
+
+#pragma comment(lib, "Ws2_32.lib")
+#pragma comment(lib, "Psapi.lib")
+
 // Readable check (file-scope, before any uses)
 static bool IsReadable(const void* ptr, size_t minLen) noexcept
 {
@@ -486,27 +655,16 @@ namespace SapphireHook {
             const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
 
             // Learn LocalActorId from outbound ChatHandler (0x0067): payload originEntityId at 0x4C
-            uint32_t segType32 = 0;
-            uint16_t reserved16 = 0, ipcType = 0;
-            (void)ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x34, segType32);
-            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x38, reserved16);
-            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x3A, ipcType);
-            if (segType32 == 3 && reserved16 == 0x0014)
+            uint32_t originEntityId = 0;
+            if (ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x4C, originEntityId))
             {
-                if (ipcType == 0x0067)
+                if (originEntityId != 0 && originEntityId != 0xFFFFFFFF)
                 {
-                    uint32_t originEntityId = 0;
-                    if (ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x4C, originEntityId))
+                    const uint32_t prev = g_localActorId.exchange(originEntityId, std::memory_order_relaxed);
+                    if (prev != originEntityId)
                     {
-                        if (originEntityId != 0 && originEntityId != 0xFFFFFFFF)
-                        {
-                            const uint32_t prev = g_localActorId.exchange(originEntityId, std::memory_order_relaxed);
-                            if (prev != originEntityId)
-                            {
-                                std::printf("[PacketInjector] Learned LocalActorId from ChatHandler: 0x%X (%u)\n",
-                                    originEntityId, originEntityId);
-                            }
-                        }
+                        std::printf("[PacketInjector] Learned LocalActorId from ChatHandler: 0x%X (%u)\n",
+                            originEntityId, originEntityId);
                     }
                 }
             }
