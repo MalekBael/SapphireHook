@@ -29,18 +29,30 @@ void GMCommandsModule::RenderMenu()
     }
 }
 
+static void DrawHintBox()
+{
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.16f, 0.35f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 5.0f);
+    ImGui::BeginChild("##gm_hint", ImVec2(0, 72), true);
+    ImGui::TextColored(ImVec4(0.9f, 0.85f, 0.3f, 1.0f), "Syntax");
+    ImGui::Separator();
+    ImGui::TextWrapped("This command expects the arguments shown below. The '/gm ' prefix and the command name are added automatically when you click Send.");
+    ImGui::EndChild();
+    ImGui::PopStyleVar();
+    ImGui::PopStyleColor();
+}
+
 void GMCommandsModule::RenderWindow()
 {
     if (!m_windowOpen) return;
 
-    ImGui::SetNextWindowSize(ImVec2(520, 360), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(560, 420), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("GM Commands", &m_windowOpen))
     {
         ImGui::TextDisabled("GM commands are sent via opcodes only (no chat text).");
         ImGui::Separator();
 
-        ImGui::TextWrapped("Select a GM command and supply up to 4 integer args and an optional target object ID.");
-        ImGui::Separator();
+        DrawHintBox();
 
         // Combo preview is blank until a selection is made
         const bool hasItems = !GMCommands::kList.empty();
@@ -51,7 +63,6 @@ void GMCommandsModule::RenderWindow()
 
         if (ImGui::BeginCombo("GM Command", currentPreview))
         {
-            // First entry: None (clears selection). Preview remains blank.
             bool noneSelected = (m_selectedIndex == -1);
             if (ImGui::Selectable("(None)", noneSelected))
             {
@@ -60,21 +71,35 @@ void GMCommandsModule::RenderWindow()
             }
             if (noneSelected) ImGui::SetItemDefaultFocus();
 
-            // Real command entries
             for (int i = 0; i < (int)GMCommands::kList.size(); ++i)
             {
                 bool selected = (m_selectedIndex == i);
                 if (ImGui::Selectable(GMCommands::kList[i].name, selected))
                 {
                     m_selectedIndex = i;
-                    m_commandId = GMCommands::kList[i].id; // sync backing id
+                    m_commandId = GMCommands::kList[i].id;
                 }
                 if (selected) ImGui::SetItemDefaultFocus();
             }
             ImGui::EndCombo();
         }
 
-        // Display numeric ID read-only (0 if None selected)
+        // If a command is selected, show inline syntax help
+        if (m_selectedIndex >= 0 && m_selectedIndex < (int)GMCommands::kList.size())
+        {
+            const auto& entry = GMCommands::kList[m_selectedIndex];
+            ImGui::Spacing();
+            ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Syntax:");
+            // Show only the argument portion (prefix implied by selection)
+            ImGui::TextWrapped("%s", (entry.argsHint && entry.argsHint[0] != '\0') ? entry.argsHint : "<no args>");
+            if (entry.description && entry.description[0] != '\0')
+            {
+                ImGui::TextDisabled("%s", entry.description);
+            }
+        }
+
+        ImGui::Separator();
+
         ImGui::BeginDisabled(true);
         ImGui::InputInt("Command ID", &m_commandId);
         ImGui::EndDisabled();
@@ -136,7 +161,7 @@ void GMCommandsModule::RenderWindow()
         if (!canSend) ImGui::EndDisabled();
 
         ImGui::Separator();
-        ImGui::TextDisabled("Source: compiled command list in GMCommandList.h (enum + table).");
+        ImGui::TextDisabled("Source: compiled command list in GMCommandList.h (enum + table). Add argsHint/description for better help.");
     }
     ImGui::End();
 }

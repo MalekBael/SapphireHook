@@ -75,6 +75,9 @@
     <ClCompile Include="src\Core\FunctionCallMonitor.cpp" />
     <ClCompile Include="src\Core\FunctionDatabase.cpp" />
     <ClCompile Include="src\Core\FunctionScanner.cpp" />
+    <ClCompile Include="src\Modules\NetworkMonitorModule.cpp" />
+    <ClCompile Include="src\Monitor\NetworkMonitor.cpp" />
+    <ClCompile Include="src\Monitor\NetworkMonitor.h" />
     <ClCompile Include="src\Core\PacketInjector.cpp" />
     <ClCompile Include="src\Core\ResourceLoader.cpp" />
     <ClCompile Include="src\Core\SafeMemory.cpp" />
@@ -136,6 +139,7 @@
     <ClInclude Include="src\Modules\CommandInterface.h" />
     <ClInclude Include="src\Modules\MemoryViewerModule.h" />
     <ClInclude Include="src\Modules\NetDiagnosticsModule.h" />
+    <ClInclude Include="src\Modules\NetworkMonitorModule.h" />
     <ClInclude Include="src\UI\imgui_overlay.h" />
     <ClInclude Include="src\UI\UIManager.h" />
     <ClInclude Include="src\UI\UIModule.h" />

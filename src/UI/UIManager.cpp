@@ -11,6 +11,7 @@
 #include "../Modules/MemoryViewerModule.h"
 #include "../Modules/GMCommandsModule.h"
 #include "../Modules/NetDiagnosticsModule.h"
+#include "../Modules/NetworkMonitorModule.h"
 
 using namespace SapphireHook;
 
@@ -296,8 +297,34 @@ void UIManager::RegisterDefaultModules()
 		LogError("Failed to register Net Diagnostics: unknown exception");
 	}
 
+	// NEW: Network Monitor module
+	try
+	{
+		if (GetModule("network_monitor") == nullptr)
+		{
+			LogInfo("Creating Network Monitor module...");
+			auto nm = std::make_unique<NetworkMonitorModule>();
+			RegisterModule(std::move(nm));
+			LogInfo("\u2713 Network Monitor module registered");
+			successCount++;
+		}
+		else
+		{
+			LogInfo("Network Monitor module already exists");
+			successCount++;
+		}
+	}
+	catch (const std::exception& e)
+	{
+		LogError("Failed to register Network Monitor: " + std::string(e.what()));
+	}
+	catch (...)
+	{
+		LogError("Failed to register Network Monitor: unknown exception");
+	}
+
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
-	LogInfo("Successfully registered: " + std::to_string(successCount) + "/5 modules");
+	LogInfo("Successfully registered: " + std::to_string(successCount) + "/7 modules");
 	LogInfo("Final module count on instance " + std::to_string(reinterpret_cast<uintptr_t>(this)) +
 		": " + std::to_string(m_modules.size()));
 
@@ -444,6 +471,23 @@ void UIManager::RenderMainMenu()
 			else
 			{
 				ImGui::MenuItem("Net Diagnostics", nullptr, false, false);
+			}
+
+			// Network Monitor quick toggle
+			static UIModule* s_netMon = nullptr;
+			if (!s_netMon)
+				s_netMon = GetModule("network_monitor");
+			if (s_netMon)
+			{
+				bool open = s_netMon->IsWindowOpen();
+				if (ImGui::MenuItem("Network Monitor", nullptr, open))
+				{
+					s_netMon->SetWindowOpen(!open);
+				}
+			}
+			else
+			{
+				ImGui::MenuItem("Network Monitor", nullptr, false, false);
 			}
 
 			ImGui::EndMenu();

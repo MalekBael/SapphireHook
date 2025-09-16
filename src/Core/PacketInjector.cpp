@@ -42,6 +42,7 @@
 
 #include "PacketInjector.h"
 #include "MinHook.h"
+#include "../Monitor/NetworkMonitor.h" // Enqueue packets for UI Network Monitor
 
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Psapi.lib")
@@ -577,7 +578,14 @@ namespace SapphireHook {
             {
                 const uint8_t* buf = reinterpret_cast<const uint8_t*>(lpBuffers[i].buf);
                 const size_t len = lpBuffers[i].len;
-                if (!buf || len < 0x40 || !::IsReadable(buf, 0x40)) continue;
+                if (!buf || len == 0) continue;
+
+                // Log to Network Monitor UI (safe check)
+                if (::IsReadable(buf, 1)) {
+                    SafeHookLogger::Instance().TryEnqueueFromHook(buf, len, /*outgoing=*/true, (uint64_t)s);
+                }
+
+                if (len < 0x40 || !::IsReadable(buf, 0x40)) continue;
 
                 uint16_t connType = 0;
                 (void)ReadLE<uint16_t>(buf, len, 0x1C, connType);
@@ -632,6 +640,12 @@ namespace SapphireHook {
     {
         std::printf("[PacketInjector] *** send() called on socket %lld, len=%d ***\n",
             static_cast<long long>(s), len);
+
+        if (buf && len > 0 && ::IsReadable(buf, 1))
+        {
+            // Enqueue for UI
+            SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(len), /*outgoing=*/true, (uint64_t)s);
+        }
 
         if (buf && len >= 0x50 && ::IsReadable(buf, 0x50))
         {
@@ -745,6 +759,12 @@ namespace SapphireHook {
         int rc = g_realRecv ? g_realRecv(s, buf, len, flags) : SOCKET_ERROR;
         if (rc > 0)
         {
+            // Enqueue received bytes for UI
+            if (buf && ::IsReadable(buf, 1))
+            {
+                SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(rc), /*outgoing=*/false, (uint64_t)s);
+            }
+
             g_recvOk.fetch_add(1, std::memory_order_relaxed);
             g_bytesRecv.fetch_add(static_cast<uint64_t>(rc), std::memory_order_relaxed);
         }
@@ -755,6 +775,10 @@ namespace SapphireHook {
     {
         std::printf("[PacketInjector] *** sendto() called on socket %lld, len=%d ***\n",
             static_cast<long long>(s), len);
+        if (buf && len > 0 && ::IsReadable(buf, 1))
+        {
+            SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(len), /*outgoing=*/true, (uint64_t)s);
+        }
         if (PacketInjector::s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
         {
             PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(s);
@@ -768,7 +792,12 @@ namespace SapphireHook {
     {
         std::printf("[PacketInjector] *** recvfrom() called on socket %lld, len=%d ***\n",
             static_cast<long long>(s), len);
-        return g_realRecvFrom ? g_realRecvFrom(s, buf, len, flags, from, fromlen) : SOCKET_ERROR;
+        int rc = g_realRecvFrom ? g_realRecvFrom(s, buf, len, flags, from, fromlen) : SOCKET_ERROR;
+        if (rc > 0 && buf && ::IsReadable(buf, 1))
+        {
+            SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(rc), /*outgoing=*/false, (uint64_t)s);
+        }
+        return rc;
     }
 
     // Send helper (prefers given socket; fallback to discovery if needed)
