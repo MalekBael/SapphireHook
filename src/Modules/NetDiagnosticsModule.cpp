@@ -73,7 +73,7 @@ namespace {
         g_prev = cur;
     }
 
-    // UI toggle for auto-highlighted hex regions
+    // UI toggle for auto-highlighted hex ranges
     bool g_enableHexRegions = false;
 
     static inline uint16_t ReadU16LE(const uint8_t* p) { uint16_t v; std::memcpy(&v, p, 2); return v; }
@@ -123,6 +123,20 @@ namespace {
             pos += segSize;
         }
     }
+
+    // Estimate required width for the highlighted hex viewer (offset + hex + ascii)
+    float EstimateHexViewerWidth()
+    {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float charW = ImGui::CalcTextSize("A").x;
+        const float hexCellW = ImGui::CalcTextSize("00 ").x;
+        const float offW = ImGui::CalcTextSize("0000:").x;
+        const float hexStride = hexCellW * 1.5f;
+        const float hexW = 16.0f * hexStride;
+        const float asciiW = 16.0f * charW;
+        const float padding = 8.0f + style.ItemSpacing.x * 4.0f + 24.0f; // small margins
+        return offW + hexW + asciiW + padding;
+    }
 }
 
 void NetDiagnosticsModule::RenderMenu() {
@@ -134,14 +148,34 @@ void NetDiagnosticsModule::RenderWindow() {
     if (!g_init) { g_ring.init(300); g_init = true; }
     sample_once();
 
-    // Increase initial width by ~5% to give more room for hex viewer
+    // Initial size hint (first use)
     ImGui::SetNextWindowSize(ImVec2(1260, 700), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Network Monitor", &m_windowOpen)) {
-        // Left: packet view, Right: diagnostics + hex (classic)
-        ImGui::BeginChild("left", ImVec2(ImGui::GetContentRegionAvail().x * 0.5f, 0), true);
+        // If auto-highlighting is enabled, ensure the right pane is wide enough; expand window if needed
+        const float leftFrac = g_enableHexRegions ? 0.45f : 0.50f; // give a bit more room to the right when enabled
+        const float totalAvailBefore = ImGui::GetContentRegionAvail().x;
+        const float rightTargetBefore = totalAvailBefore * (1.0f - leftFrac) - ImGui::GetStyle().ItemSpacing.x;
+        if (g_enableHexRegions) {
+            float need = EstimateHexViewerWidth();
+            if (need > rightTargetBefore) {
+                ImVec2 cur = ImGui::GetWindowSize();
+                float delta = need - rightTargetBefore + 8.0f;
+                float maxW = ImGui::GetMainViewport()->WorkSize.x;
+                float desired = cur.x + delta;
+                if (desired > cur.x && desired < maxW - 8.0f) {
+                    ImGui::SetWindowSize(ImVec2(desired, cur.y));
+                }
+            }
+        }
+
+        // Left: packet view
+        const float leftWidth = ImGui::GetContentRegionAvail().x * leftFrac;
+        ImGui::BeginChild("left", ImVec2(leftWidth, 0), true);
         SafeHookLogger::Instance().DrawImGuiEmbedded();
         ImGui::EndChild();
         ImGui::SameLine();
+
+        // Right: diagnostics + hex
         ImGui::BeginChild("right", ImVec2(0, 0), true);
 #if SH_HAVE_IMPLOT
         if (ImPlot::BeginPlot("Packets/sec", ImVec2(-1, 180))) {
