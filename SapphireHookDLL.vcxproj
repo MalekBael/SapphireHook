@@ -98,6 +98,8 @@
     <ClCompile Include="src\Hooking\lua_hook.cpp" />
     <ClCompile Include="src\Entry\dllmain.cpp" />
     <ClCompile Include="vendor\hex_editor\imgui_hex.cpp" />
+    <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
+    <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />
     <!-- ImGui Core Files -->
     <ClCompile Include="vendor\imgui\imgui.cpp" />
     <ClCompile Include="vendor\imgui\imgui_draw.cpp" />
@@ -111,6 +113,7 @@
     <ClCompile Include="vendor\implot\implot.cpp" />
     <ClCompile Include="vendor\implot\implot_demo.cpp" />
     <ClCompile Include="vendor\implot\implot_items.cpp" />
+    <ClCompile Include="vendor\miniz\miniz.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Core\AsyncPatternScanner.h" />
@@ -146,6 +149,8 @@
     <ClInclude Include="src\Hooking\hook_manager.h" />
     <ClInclude Include="src\Hooking\lua_hook.h" />
     <ClInclude Include="vendor\hex_editor\imgui_hex.h" />
+    <ClInclude Include="vendor\ImGuiFD\ImGuiFD.h" />
+    <ClInclude Include="vendor\ImGuiFD\ImGuiFD_internal.h" />
     <!-- ImGui Header Files -->
     <ClInclude Include="vendor\imgui\imgui.h" />
     <ClInclude Include="vendor\imgui\imgui_internal.h" />
@@ -157,6 +162,7 @@
     <ClInclude Include="src\Logger\Logger.h" />
     <ClInclude Include="vendor\implot\implot.h" />
     <ClInclude Include="vendor\implot\implot_internal.h" />
+    <ClInclude Include="vendor\miniz\miniz.h" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".editorconfig" />
@@ -171,9 +177,12 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
     <None Include="packages.config" />
+    <None Include="vendor\ImGuiFD\LICENCE" />
+    <None Include="vendor\ImGuiFD\README.md" />
     <None Include="vendor\implot\LICENSE" />
     <None Include="vendor\implot\README.md" />
     <None Include="vendor\implot\TODO.md" />
+    <None Include="vendor\miniz\LICENSE" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="packages\Serilog.4.3.0\build\Serilog.targets" Condition="Exists('packages\Serilog.4.3.0\build\Serilog.targets')" />

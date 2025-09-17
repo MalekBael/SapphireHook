@@ -1,7 +1,7 @@
 #include "NetDiagnosticsModule.h"
 #include "../Core/PacketInjector.h"
 #include "../vendor/imgui/imgui.h"
-#include "../Monitor/NetworkMonitor.h" // for embedded packet view
+#include "../Monitor/NetworkMonitor.h" // for embedded packet view and hex access
 
 #if __has_include("../vendor/implot/implot.h")
     #define SH_HAVE_IMPLOT 1
@@ -12,6 +12,7 @@
 
 #include <vector>
 #include <algorithm>
+#include <cstring>
 
 using namespace SapphireHook;
 
@@ -71,6 +72,57 @@ namespace {
         g_ring.push(s);
         g_prev = cur;
     }
+
+    // UI toggle for auto-highlighted hex regions
+    bool g_enableHexRegions = false;
+
+    static inline uint16_t ReadU16LE(const uint8_t* p) { uint16_t v; std::memcpy(&v, p, 2); return v; }
+    static inline uint32_t ReadU32LE(const uint8_t* p) { uint32_t v; std::memcpy(&v, p, 4); return v; }
+
+    // Compute per-byte colors for interesting regions directly from the raw packet
+    void BuildAutoHighlightColors(const HookPacket& hp, std::vector<unsigned int>& out)
+    {
+        const ImU32 def = ImGui::GetColorU32(ImGuiCol_Text);
+        out.assign(hp.len, def);
+        const uint8_t* b = hp.buf.data();
+        const size_t L = hp.len;
+        if (L < 0x28) return; // not enough bytes
+
+        auto set = [&](size_t off, size_t count, ImU32 col){ size_t e = std::min(off+count, (size_t)L); for (size_t i=off; i<e; ++i) out[i] = col; };
+
+        const ImU32 colHeader = IM_COL32(130, 180, 250, 255);     // packet header
+        const ImU32 colSegHdr = IM_COL32(200, 180, 255, 255);     // segment header
+        const ImU32 colIpcHdr = IM_COL32(255, 200, 150, 255);     // IPC header
+        const ImU32 colCompressed = IM_COL32(255, 150, 150, 255); // compressed blob
+
+        // Packet header
+        set(0x00, 0x28, colHeader);
+
+        // isCompressed flag (at 0x20 upper byte)
+        bool isCompressed = false;
+        if (L >= 0x22) { uint16_t tmp = ReadU16LE(b + 0x20); isCompressed = ((tmp >> 8) & 0xFF) != 0; }
+
+        if (isCompressed) {
+            // Highlight the entire compressed segment area
+            set(0x28, L - 0x28, colCompressed);
+            return;
+        }
+
+        // Walk raw segments at 0x28.. (uncompressed case)
+        size_t pos = 0x28;
+        while (pos + 0x10 <= L) {
+            uint32_t segSize = ReadU32LE(b + pos + 0x00);
+            if (segSize < 0x10 || pos + segSize > L) break; // sanity
+            uint16_t segType = ReadU16LE(b + pos + 0x0C);
+            // segment header (0x10)
+            set(pos, 0x10, colSegHdr);
+            if (segType == 3 && segSize >= 0x20) {
+                // IPC header (next 0x10)
+                set(pos + 0x10, 0x10, colIpcHdr);
+            }
+            pos += segSize;
+        }
+    }
 }
 
 void NetDiagnosticsModule::RenderMenu() {
@@ -82,9 +134,10 @@ void NetDiagnosticsModule::RenderWindow() {
     if (!g_init) { g_ring.init(300); g_init = true; }
     sample_once();
 
-    ImGui::SetNextWindowSize(ImVec2(1200, 700), ImGuiCond_FirstUseEver);
+    // Increase initial width by ~5% to give more room for hex viewer
+    ImGui::SetNextWindowSize(ImVec2(1260, 700), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Network Monitor", &m_windowOpen)) {
-        // Left: packet view, Right: diagnostics (or stacked if no ImPlot)
+        // Left: packet view, Right: diagnostics + hex (classic)
         ImGui::BeginChild("left", ImVec2(ImGui::GetContentRegionAvail().x * 0.5f, 0), true);
         SafeHookLogger::Instance().DrawImGuiEmbedded();
         ImGui::EndChild();
@@ -127,6 +180,25 @@ void NetDiagnosticsModule::RenderWindow() {
                 ImPlot::PlotStems("10057 NOTCONN", x.data(), e57.data(), (int)x.size());
             }
             ImPlot::EndPlot();
+        }
+
+        // Classic hex on the right (same content as the old in-place view)
+        if (ImGui::CollapsingHeader("Selected packet hex", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Checkbox("Auto highlight packet regions", &g_enableHexRegions);
+            HookPacket hp{};
+            if (SafeHookLogger::TryGetSelectedPacket(hp)) {
+                ImGui::BeginChild("right_hex", ImVec2(0, 0), true, ImGuiWindowFlags_HorizontalScrollbar);
+                if (g_enableHexRegions) {
+                    std::vector<unsigned int> colors;
+                    BuildAutoHighlightColors(hp, colors);
+                    SafeHookLogger::DumpHexAsciiColored(hp, colors);
+                } else {
+                    SafeHookLogger::DumpHexAscii(hp);
+                }
+                ImGui::EndChild();
+            } else {
+                ImGui::TextDisabled("No packet selected on the left pane");
+            }
         }
 #else
         ImGui::TextWrapped("ImPlot not found. Add vendor/implot to enable diagnostics graphs.");

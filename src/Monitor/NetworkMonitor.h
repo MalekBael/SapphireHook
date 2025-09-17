@@ -1,26 +1,3 @@
-// NetworkMonitor.h
-// Lock-free fixed-slot packet logger for use inside hooks (C++20)
-// Requires: Dear ImGui (for DrawImGuiSimple), C++20
-//
-// Author: ChatGPT
-// License: MIT (free to use/modify)
-//
-// -----------------------------
-// Usage:
-//
-// In your hook (send/recv wrapper):
-//     SafeHookLogger::Instance().TryEnqueueFromHook(buf, len, /*outgoing=*/true, connId);
-//
-// In your render loop (ImGui):
-//     SafeHookLogger::Instance().DrawImGuiSimple();
-//
-// Or drain manually:
-//     std::vector<HookPacket> batch;
-//     SafeHookLogger::Instance().DrainToVector(batch);
-//     // do custom UI or parsing
-//
-// -----------------------------
-
 #pragma once
 
 #include <atomic>
@@ -33,18 +10,18 @@
 #include "../vendor/imgui/imgui.h"
 
 // -------- Configuration --------
-constexpr size_t SLOT_COUNT = 16384;  // number of preallocated slots
-constexpr size_t SLOT_PAYLOAD_CAP = 8192;   // max bytes per slot
-constexpr size_t UI_BATCH_CAP = 16384;  // max packets drained to UI per frame
+inline constexpr size_t SLOT_COUNT = 16384;  // number of preallocated slots
+inline constexpr size_t SLOT_PAYLOAD_CAP = 8192;   // max bytes per slot
+inline constexpr size_t UI_BATCH_CAP = 16384;  // max packets drained to UI per frame
 
 // -------- Data structures --------
 struct HookPacket {
     bool outgoing = false; // true = send, false = recv
     uint64_t connection_id = 0;
-    std::chrono::system_clock::time_point ts;
+    std::chrono::system_clock::time_point ts{};
 
     uint32_t len = 0;
-    std::array<uint8_t, SLOT_PAYLOAD_CAP> buf;
+    std::array<uint8_t, SLOT_PAYLOAD_CAP> buf{}; // value-initialize to silence analyzer and avoid UB reads
 };
 
 // Internal slot state machine
@@ -83,6 +60,11 @@ public:
 
     // hex dump helper (exposed for utility rendering helpers)
     static void DumpHexAscii(const HookPacket& hp);
+    // colored/highlighted version — colors.size() must be >= hp.len (IM_COL32)
+    static void DumpHexAsciiColored(const HookPacket& hp, const std::vector<unsigned int>& colors);
+
+    // Provide currently selected packet copy for external views (e.g., diagnostics pane)
+    static bool TryGetSelectedPacket(HookPacket& out);
 
 private:
     SafeHookLogger();

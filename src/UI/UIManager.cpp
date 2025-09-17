@@ -144,7 +144,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating IPC Commands module...");
 			auto ipcModule = std::make_unique<IPCCommandsModule>();
 			RegisterModule(std::move(ipcModule));
-			LogInfo("\u2713 IPC Commands module registered");
+			LogInfo("[OK] IPC Commands module registered");
 			successCount++;
 		}
 		else
@@ -169,7 +169,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating Debug Commands module...");
 			auto debugModule = std::make_unique<DebugCommandsModule>();
 			RegisterModule(std::move(debugModule));
-			LogInfo("\u2713 Debug Commands module registered");
+			LogInfo("[OK] Debug Commands module registered");
 			successCount++;
 		}
 		else
@@ -194,7 +194,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating Function Call Monitor module...");
 			auto functionModule = std::make_unique<FunctionCallMonitor>();
 			RegisterModule(std::move(functionModule));
-			LogInfo("\u2713 Function Call Monitor module registered");
+			LogInfo("[OK] Function Call Monitor module registered");
 			successCount++;
 		}
 		else
@@ -219,7 +219,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating Memory Viewer module...");
 			auto memView = std::make_unique<MemoryViewerModule>();
 			RegisterModule(std::move(memView));
-			LogInfo("\u2713 Memory Viewer module registered");
+			LogInfo("[OK] Memory Viewer module registered");
 			successCount++;
 		}
 		else
@@ -244,7 +244,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating GM Commands module...");
 			auto gm = std::make_unique<GMCommandsModule>();
 			RegisterModule(std::move(gm));
-			LogInfo("\u2713 GM Commands module registered");
+			LogInfo("[OK] GM Commands module registered");
 			successCount++;
 		}
 		else
@@ -270,7 +270,7 @@ void UIManager::RegisterDefaultModules()
 			LogInfo("Creating Net Diagnostics module...");
 			auto net = std::make_unique<NetDiagnosticsModule>();
 			RegisterModule(std::move(net));
-			LogInfo("\u2713 Net Diagnostics module registered");
+			LogInfo("[OK] Net Diagnostics module registered");
 			successCount++;
 		}
 		else
