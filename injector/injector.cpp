@@ -77,7 +77,6 @@ bool IsProcessRunning(DWORD processId)
 
 bool InjectDLL(DWORD processId, const std::wstring& dllPath)
 {
-	std::cout << "\n[INJECT] Starting injection process..." << std::endl;
 	std::cout << "[INJECT] Target PID: " << processId << std::endl;
 
 	// Verify process is still running
@@ -87,7 +86,6 @@ bool InjectDLL(DWORD processId, const std::wstring& dllPath)
 		return false;
 	}
 
-	std::cout << "[INJECT] Opening process..." << std::endl;
 	HANDLE hProcess = OpenProcess(PROCESS_ALL_ACCESS, FALSE, processId);
 	if (!hProcess)
 	{
@@ -95,7 +93,6 @@ bool InjectDLL(DWORD processId, const std::wstring& dllPath)
 		return false;
 	}
 
-	std::cout << "[INJECT] Allocating memory in target process..." << std::endl;
 	size_t dllPathSize = (dllPath.size() + 1) * sizeof(wchar_t);
 	LPVOID pRemoteMemory = VirtualAllocEx(hProcess, nullptr, dllPathSize,
 		MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
@@ -106,7 +103,6 @@ bool InjectDLL(DWORD processId, const std::wstring& dllPath)
 		return false;
 	}
 
-	std::cout << "[INJECT] Writing DLL path to target process..." << std::endl;
 	if (!WriteProcessMemory(hProcess, pRemoteMemory, dllPath.c_str(), dllPathSize, nullptr))
 	{
 		std::cout << "[INJECT] Failed to write DLL path. Error: " << GetLastError() << std::endl;
@@ -118,9 +114,6 @@ bool InjectDLL(DWORD processId, const std::wstring& dllPath)
 	HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
 	LPTHREAD_START_ROUTINE pLoadLibraryW = (LPTHREAD_START_ROUTINE)GetProcAddress(hKernel32, "LoadLibraryW");
 
-	std::cout << "[INJECT] Creating remote thread to load DLL..." << std::endl;
-	std::cout << "[INJECT] LoadLibraryW address: 0x" << std::hex << pLoadLibraryW << std::dec << std::endl;
-
 	HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0, pLoadLibraryW, pRemoteMemory, 0, nullptr);
 	if (!hThread)
 	{
@@ -130,92 +123,59 @@ bool InjectDLL(DWORD processId, const std::wstring& dllPath)
 		return false;
 	}
 
-	std::cout << "[INJECT] Waiting for DLL to load..." << std::endl;
 	DWORD waitResult = WaitForSingleObject(hThread, 5000);
-
 	DWORD exitCode = 0;
 	GetExitCodeThread(hThread, &exitCode);
-	std::cout << "[INJECT] Thread exit code: 0x" << std::hex << exitCode << std::dec << std::endl;
+	std::cout << "[INJECT] LoadLibraryW returned: 0x" << std::hex << exitCode << std::dec << std::endl;
 
 	CloseHandle(hThread);
 	VirtualFreeEx(hProcess, pRemoteMemory, 0, MEM_RELEASE);
 	CloseHandle(hProcess);
 
-	// Wait a moment and check if process is still running
-	std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	// Give the process a moment and validate it's still alive
+	std::this_thread::sleep_for(std::chrono::milliseconds(200));
 	if (!IsProcessRunning(processId))
 	{
 		std::cout << "[INJECT] WARNING: Target process is no longer running after injection!" << std::endl;
 		return false;
 	}
 
-	std::cout << "[INJECT] Injection completed successfully." << std::endl;
-	return true;
+	return exitCode != 0;
 }
 
 int main()
 {
-	SetConsoleTitleW(L"SapphireHook Injector - Diagnostic Mode");
-	std::cout << "==================================" << std::endl;
-	std::cout << "  SapphireHook Injector (DEBUG)" << std::endl;
-	std::cout << "==================================" << std::endl;
-	std::cout << std::endl;
-
-	// Log initial state
-	std::cout << "Checking for FFXIV processes BEFORE injection..." << std::endl;
-	LogProcesses();
+	SetConsoleTitleW(L"SapphireHook Injector");
 
 	fs::path currentPath = fs::current_path();
 	fs::path fullDllPath = currentPath / "SapphireHookDLL.dll";
-
 	if (!fs::exists(fullDllPath))
 	{
-		std::cout << "Error: SapphireHookDLL.dll not found!" << std::endl;
-		std::cout << "Current directory: " << currentPath << std::endl;
-		std::cout << "Press any key to exit..." << std::endl;
-		std::cin.get();
+		std::cout << "Error: SapphireHookDLL.dll not found in: " << currentPath << std::endl;
 		return 1;
 	}
 
-	std::cout << "DLL found: " << fullDllPath << std::endl;
+	std::wstring dllPathStr = fullDllPath.wstring();
+	const std::wstring targetExe = L"ffxiv_dx11.exe";
 
-	// Find FFXIV process
-	DWORD processId = GetProcessId(L"ffxiv_dx11.exe");
+	std::cout << "Waiting for process 'ffxiv_dx11.exe' (up to 30s)..." << std::endl;
+	DWORD processId = 0;
+	auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+	while (std::chrono::steady_clock::now() < deadline)
+	{
+		processId = GetProcessId(targetExe);
+		if (processId != 0) break;
+		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+	}
+
 	if (processId == 0)
 	{
-		std::cout << "Error: ffxiv_dx11.exe not found!" << std::endl;
-		std::cout << "Make sure the game is running." << std::endl;
-		std::cout << "Press any key to exit..." << std::endl;
-		std::cin.get();
-		return 1;
+		std::cout << "Process not found. Exiting." << std::endl;
+		return 2;
 	}
 
-	std::cout << "\nFound ffxiv_dx11.exe with PID: " << processId << std::endl;
-	std::cout << "\nPress ENTER to inject (or close this window to cancel)..." << std::endl;
-	std::cin.get();
-
-	// Inject
-	std::wstring dllPathStr = fullDllPath.wstring();
+	std::cout << "Found PID: " << processId << ". Injecting..." << std::endl;
 	bool success = InjectDLL(processId, dllPathStr);
-
-	// Check what happened after injection
-	std::cout << "\nChecking for FFXIV processes AFTER injection..." << std::endl;
-	LogProcesses();
-
-	if (success)
-	{
-		std::cout << "\nInjection reported success." << std::endl;
-		std::cout << "If the game closed/restarted, it might be due to:" << std::endl;
-		std::cout << "1. Anti-cheat detection" << std::endl;
-		std::cout << "2. DLL initialization crash" << std::endl;
-		std::cout << "3. Hook installation failure" << std::endl;
-	}
-	else
-	{
-		std::cout << "\nInjection failed!" << std::endl;
-	}
-
-	std::cout << "\nPress any key to exit..." << std::endl;
-	std::cin.get();
-	return 0;
+	std::cout << (success ? "Injection succeeded." : "Injection failed.") << std::endl;
+	return success ? 0 : 1;
 }
