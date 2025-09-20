@@ -13,6 +13,7 @@
 #include <filesystem>
 #include <fstream>
 #include <chrono>
+#include <functional>  // ADD THIS for std::function
 #include "../../vendor/miniz/miniz.h"
 #include "../../vendor/ImGuiFD/ImGuiFD.h"
 
@@ -24,7 +25,7 @@ SafeHookLogger& SafeHookLogger::Instance() {
 // Track resolved connection type per connection_id (from SESSIONINIT packets)
 namespace { static std::unordered_map<uint64_t, uint16_t> g_connTypeByConnId; }
 
-// Correlate ActionRequest -> ActionResult by RequestId
+// Correlate ActionRequest -> ActionResult by RequestId - KEEP ONLY ONE DECLARATION
 namespace { struct ActionReqRec { uint64_t connId = 0; std::chrono::system_clock::time_point ts{}; uint8_t actionKind = 0; uint32_t actionKey = 0; uint64_t target = 0; uint16_t dir = 0; uint16_t dirTarget = 0;}; }
 namespace { static std::unordered_map<uint32_t, ActionReqRec> g_actionReqById; }
 
@@ -41,6 +42,103 @@ namespace {
     static uint32_t g_hoveredSegmentSize = 0;
     static bool g_hasHoveredSegment = false;
 }
+
+// Enhanced correlation tracking (REMOVE DUPLICATE DECLARATIONS):
+namespace {
+    // Track event sequences
+    struct EventSequence {
+        uint32_t eventId;
+        uint32_t actorId;
+        std::chrono::system_clock::time_point startTime;
+        std::vector<uint16_t> packets; // opcodes in sequence
+    };
+    static std::unordered_map<uint32_t, EventSequence> g_activeEvents;
+    
+    // Track combat sequences
+    struct CombatSequence {
+        uint32_t requestId;
+        std::chrono::system_clock::time_point startTime;
+        uint16_t actionId;
+        uint32_t sourceActor;
+        uint32_t targetActor;
+        std::vector<uint16_t> resultOpcodes;
+    };
+    static std::unordered_map<uint32_t, CombatSequence> g_combatSequences;
+    
+    // Enhanced packet relationship tracking
+    struct PacketRelationship {
+        uint32_t requestOpcode;
+        uint32_t responseOpcode;
+        std::chrono::milliseconds avgLatency;
+        uint32_t count;
+    };
+    static std::unordered_map<uint64_t, PacketRelationship> g_packetRelations;
+    
+    // Track packet flow sequences
+    struct FlowSequence {
+        std::vector<uint16_t> opcodes;
+        std::chrono::system_clock::time_point startTime;
+        std::chrono::system_clock::time_point endTime;
+        std::string description;
+    };
+    static std::vector<FlowSequence> g_flowHistory;
+    static FlowSequence g_currentFlow;
+    
+    // Pattern detection
+    struct PacketPattern {
+        std::string name;
+        std::vector<uint16_t> opcodes;
+        std::function<bool(const std::vector<uint16_t>&)> matcher;
+        uint32_t matchCount = 0;
+    };
+    
+    static std::vector<PacketPattern> g_patterns = {
+        {"Teleport Sequence", {0x0194, 0x019A}, nullptr},
+        {"Combat Round", {0x0190, 0x0146}, nullptr},
+        {"Craft Step", {0x0190, 0x01B4}, nullptr},
+        {"Mount/Dismount", {0x01BF, 0x0142}, nullptr},
+    };
+    
+    static void DetectPatterns(const std::vector<uint16_t>& recentOpcodes) {
+        for (auto& pattern : g_patterns) {
+            if (recentOpcodes.size() >= pattern.opcodes.size()) {
+                bool match = true;
+                for (size_t i = 0; i < pattern.opcodes.size(); ++i) {
+                    if (recentOpcodes[recentOpcodes.size() - pattern.opcodes.size() + i] != pattern.opcodes[i]) {
+                        match = false;
+                        break;
+                    }
+                }
+                if (match) {
+                    pattern.matchCount++;
+                }
+            }
+        }
+    }
+    
+    static void UpdatePacketCorrelation(uint16_t opcode, bool outgoing, const HookPacket& hp) {
+        // Track combat flow
+        if (outgoing && opcode == 0x0190) {
+            g_currentFlow.opcodes.clear();
+            g_currentFlow.opcodes.push_back(opcode);
+            g_currentFlow.startTime = hp.ts;
+            g_currentFlow.description = "Combat Action";
+        }
+        else if (!outgoing && (opcode == 0x0146 || opcode == 0x0147)) {
+            if (!g_currentFlow.opcodes.empty()) {
+                g_currentFlow.opcodes.push_back(opcode);
+                g_currentFlow.endTime = hp.ts;
+                g_flowHistory.push_back(g_currentFlow);
+                if (g_flowHistory.size() > 100) g_flowHistory.erase(g_flowHistory.begin());
+            }
+        }
+
+        // Track event sequences
+        if (outgoing && opcode == 0x01C2) {
+            g_activeEvents.clear();
+        }
+    }
+}  // CLOSE THE NAMESPACE HERE
 
 SafeHookLogger::SafeHookLogger() {
     for (size_t i = 0; i < SLOT_COUNT; ++i)
@@ -186,20 +284,22 @@ void SafeHookLogger::DumpHexAsciiColored(const HookPacket& hp, const std::vector
             ImVec2 hpPos = ImVec2(hexX + j * hexStride, y);
             ImVec2 ascPos = ImVec2(asciiX + j * charW, y);
             ImRect hexR(hpPos, ImVec2(hpPos.x + hexStride, y + lineH));
-            ImRect ascR(ascPos, ImVec2(ascPos.x + charW, y + lineH));
+            ImRect ascR(ImVec2(asciiX + j * charW, y), ImVec2(asciiX + (j + 1) * charW, y + lineH));
 
             // Backgrounds: selection then hover then segment highlight
             if ((int)i >= selMin && (int)i <= selMax && selMin != -1) {
                 const ImU32 selCol = IM_COL32(255, 80, 80, 120);
                 dl->AddRectFilled(hexR.Min, hexR.Max, selCol, 2.0f);
                 dl->AddRectFilled(ascR.Min, ascR.Max, selCol, 2.0f);
-            } else if ((int)i == hoveredIdx) {
+            }
+            else if ((int)i == hoveredIdx) {
                 const ImU32 hovCol = IM_COL32(80, 160, 255, 90);
                 dl->AddRectFilled(hexR.Min, hexR.Max, hovCol, 2.0f);
                 dl->AddRectFilled(ascR.Min, ascR.Max, hovCol, 2.0f);
-            } else if (g_hasHoveredSegment && 
-                       i >= (uint32_t(0x28) + g_hoveredSegmentOffset) && 
-                       i < (uint32_t(0x28) + g_hoveredSegmentOffset + g_hoveredSegmentSize)) {
+            }
+            else if (g_hasHoveredSegment &&
+                i >= (uint32_t(0x28) + g_hoveredSegmentOffset) &&
+                i < (uint32_t(0x28) + g_hoveredSegmentOffset + g_hoveredSegmentSize)) {
                 // Segment hover highlighting (light yellow)
                 const ImU32 segCol = IM_COL32(255, 255, 120, 80);
                 dl->AddRectFilled(hexR.Min, hexR.Max, segCol, 2.0f);
@@ -235,6 +335,158 @@ bool SafeHookLogger::TryGetSelectedPacket(HookPacket& out)
 
 // === Decoding helpers using documented offsets ===
 namespace {
+    // Helper: format a Vector3 string
+    inline std::string Vec3f(float x, float y, float z) {
+        char b[96]; std::snprintf(b, sizeof(b), "(%.3f, %.3f, %.3f)", x, y, z); return b;
+    }
+    inline std::string Vec3u16(uint16_t x, uint16_t y, uint16_t z) {
+        char b[96]; std::snprintf(b, sizeof(b), "(%u, %u, %u)", (unsigned)x, (unsigned)y, (unsigned)z); return b;
+    }
+
+    // ActorControlType names (subset of most common entries)
+    const char* ActorControlCategoryName(uint16_t cat) {
+        switch (cat) {
+            case 0x00: return "ToggleWeapon";
+            case 0x01: return "AutoAttack";
+            case 0x02: return "SetStatus";
+            case 0x03: return "CastStart";
+            case 0x04: return "SetBattle";
+            case 0x05: return "ClassJobChange";
+            case 0x06: return "DefeatMsg";
+            case 0x07: return "GainExpMsg";
+            case 0x0A: return "LevelUpEffect";
+            case 0x0C: return "ExpChainMsg";
+            case 0x0D: return "HpSetStat";
+            case 0x0E: return "DeathAnimation";
+            case 0x0F: return "CastInterrupt";
+            case 0x11: return "ActionStart";
+            case 0x14: return "StatusEffectGain";
+            case 0x15: return "StatusEffectLose";
+            case 0x17: return "HPFloatingText";
+            case 0x1B: return "Flee";
+            case 0x22: return "CombatIndicationShow";
+            case 0x25: return "SpawnEffect";
+            case 0x26: return "ToggleInvisible";
+            case 0x27: return "DeadFadeOut";
+            case 0x29: return "SetRewardFlag";
+            case 0x2B: return "UpdateUiExp";
+            case 0x2D: return "SetFallDamage";
+            case 0x32: return "SetTarget";
+            case 0x36: return "ToggleNameHidden";
+            case 0x47: return "LimitbreakStart";
+            case 0x48: return "LimitbreakPartyStart";
+            case 0x49: return "BubbleText";
+            case 0x50: return "DamageEffect";
+            case 0x51: return "RaiseAnimation";
+            case 0x57: return "TreasureScreenMsg";
+            case 0x59: return "SetOwnerId";
+            case 0x5C: return "ItemRepairMsg";
+            case 0x63: return "BluActionLearn";
+            case 0x64: return "DirectorInit";
+            case 0x65: return "DirectorClear";
+            case 0x66: return "LeveStartAnim";
+            case 0x67: return "LeveStartError";
+            case 0x6A: return "DirectorEObjMod";
+            case 0x6D: return "DirectorUpdate";
+            case 0x74: return "SetFateState";
+            case 0x75: return "ObtainFateItem";
+            case 0x76: return "FateReqFailMsg";
+            case 0x7B: return "DutyQuestScreenMsg";
+            case 0x82: return "SetContentClearFlag";
+            case 0x83: return "SetContentOpenFlag";
+            case 0x84: return "ItemObtainIcon";
+            case 0x85: return "FateItemFailMsg";
+            case 0x86: return "ItemFailMsg";
+            case 0x87: return "ActionLearnMsg1";
+            case 0x8A: return "FreeEventPos";
+            case 0x8E: return "MoveType";
+            case 0x90: return "DailyQuestSeed";
+            case 0x9B: return "SetFateProgress";
+            case 0xA1: return "SetBGM";
+            case 0xA4: return "UnlockAetherCurrentMsg";
+            case 0xA8: return "RemoveName";
+            case 0xAA: return "ScreenFadeOut";
+            case 0xC8: return "Appear";
+            case 0xC9: return "ZoneInDefaultPos";
+            case 0xCB: return "OnExecuteTelepo";
+            case 0xCC: return "OnInvitationTelepo";
+            case 0xCD: return "OnExecuteTelepoAction";
+            case 0xCE: return "TownTranslate";
+            case 0xCF: return "WarpStart";
+            case 0xD2: return "InstanceSelectDlg";
+            case 0xD4: return "ActorDespawnEffect";
+            case 0xFD: return "CompanionUnlock";
+            case 0xFE: return "ObtainBarding";
+            case 0xFF: return "EquipBarding";
+            case 0x102: return "CompanionMsg1";
+            case 0x103: return "CompanionMsg2";
+            case 0x104: return "ShowPetHotbar";
+            case 0x109: return "ActionLearnMsg";
+            case 0x10A: return "ActorFadeOut";
+            case 0x10B: return "ActorFadeIn";
+            case 0x10C: return "WithdrawMsg";
+            case 0x10D: return "OrderCompanion";
+            case 0x10E: return "ToggleCompanion";
+            case 0x10F: return "LearnCompanion";
+            case 0x110: return "ActorFateOut1";
+            case 0x122: return "Emote";
+            case 0x123: return "EmoteInterrupt";
+            case 0x124: return "EmoteModeInterrupt";
+            case 0x125: return "EmoteModeInterruptNonImmediate";
+            case 0x127: return "SetPose";
+            case 0x12C: return "CraftingUnk";
+            case 0x130: return "GatheringSenseMsg";
+            case 0x131: return "PartyMsg";
+            case 0x132: return "GatheringSenseMsg1";
+            case 0x138: return "GatheringSenseMsg2";
+            case 0x140: return "FishingMsg";
+            case 0x142: return "FishingTotalFishCaught";
+            case 0x145: return "FishingBaitMsg";
+            case 0x147: return "FishingReachMsg";
+            case 0x148: return "FishingFailMsg";
+            case 0x15E: return "MateriaConvertMsg";
+            case 0x15F: return "MeldSuccessMsg";
+            case 0x160: return "MeldFailMsg";
+            case 0x161: return "MeldModeToggle";
+            case 0x163: return "AetherRestoreMsg";
+            case 0x168: return "DyeMsg";
+            case 0x16A: return "ToggleCrestMsg";
+            case 0x16B: return "ToggleBulkCrestMsg";
+            case 0x16C: return "MateriaRemoveMsg";
+            case 0x16D: return "GlamourCastMsg";
+            case 0x16E: return "GlamourRemoveMsg";
+            default: return "?";
+        }
+    }
+
+    // WarpType names  
+    const char* WarpTypeName(uint8_t t) {
+        switch (t) {
+            case 0x0: return "NON";
+            case 0x1: return "NORMAL";
+            case 0x2: return "NORMAL_POS";
+            case 0x3: return "EXIT_RANGE";
+            case 0x4: return "TELEPO";
+            case 0x5: return "REISE";
+            case 0x6: return "_";
+            case 0x7: return "DESION";
+            case 0x8: return "HOME_POINT";
+            case 0x9: return "RENTAL_CHOCOBO";
+            case 0xA: return "CHOCOBO_TAXI";
+            case 0xB: return "INSTANCE_CONTENT";
+            case 0xC: return "REJECT";
+            case 0xD: return "CONTENT_END_RETURN";
+            case 0xE: return "TOWN_TRANSLATE";
+            case 0xF: return "GM";
+            case 0x10: return "LOGIN";
+            case 0x11: return "LAYER_SET";
+            case 0x12: return "EMOTE";
+            case 0x13: return "HOUSING_TELEPO";
+            case 0x14: return "DEBUG";
+            default: return "?";
+        }
+    }
+
     inline bool read16(const uint8_t* b, size_t len, size_t off, uint16_t& out) {
         if (!b || off + 2 > len) return false; out = (uint16_t)(b[off] | (b[off+1] << 8)); return true;
     }
@@ -385,15 +637,62 @@ namespace {
         uint16_t opcode = 0;
         uint16_t segType = 0;
         uint16_t connType = 0xFFFF; // resolved connection type
+        std::vector<uint16_t> opcodes; // all IPC opcodes found in packet
+        std::string opcodeSummary;     // formatted label of all opcodes
     };
 
     DecodedHeader DecodeForList(const HookPacket& hp) {
-        DecodedHeader d{}; auto P = ParsePacket(hp); d.segType = P.seg_ok ? P.segType : 0; d.connType = ResolveConnType(hp, P);
-        if (!P.isCompressed && P.ipc_ok) { d.valid = true; d.opcode = P.opcode; return d; }
-        // If compressed or no first IPC header, parse from view to find first IPC
+        DecodedHeader d{}; 
+        auto P = ParsePacket(hp); 
+        d.segType = P.seg_ok ? P.segType : 0; 
+        d.connType = ResolveConnType(hp, P);
+
+        // Build segment view and enumerate all segments
         SegmentView v = GetSegmentView(hp);
-        std::vector<SegmentInfo> segs; ParseAllSegmentsBuffer(v.data, v.len, segs);
-        for (const auto& s : segs) { if (s.hasIpc) { d.valid = true; d.opcode = s.opcode; break; } }
+        std::vector<SegmentInfo> segs; 
+        ParseAllSegmentsBuffer(v.data, v.len, segs);
+
+        // If we couldn't enumerate segments (e.g., malformed/compression off), fall back to first header
+        if (segs.empty() && !P.isCompressed && P.ipc_ok) {
+            d.valid = true;
+            d.opcode = P.opcode;
+            d.opcodes.push_back(P.opcode);
+        }
+        else {
+            // Collect all IPC opcodes
+            for (const auto& s : segs) {
+                if (!s.hasIpc) continue;
+                if (!d.valid) { 
+                    d.valid = true; 
+                    d.opcode = s.opcode; 
+                }
+                d.opcodes.push_back(s.opcode);
+            }
+        }
+
+        // Build a human-friendly summary string (e.g., 0x0147(ActionResult), 0x0140(HudParam))
+        if (!d.opcodes.empty()) {
+            std::ostringstream os;
+            os.setf(std::ios::uppercase);
+            os << std::hex << std::setfill('0');
+            int shown = 0;
+            for (size_t i = 0; i < d.opcodes.size(); ++i) {
+                if (shown >= 12) { 
+                    os << ", ..."; 
+                    break; 
+                }
+                uint16_t op = d.opcodes[i];
+                if (i > 0) os << ", ";
+                os << "0x" << std::setw(4) << op;
+                const char* name = LookupOpcodeName(op, hp.outgoing, d.connType);
+                if (name && name[0] && name[0] != '?') {
+                    os << "(" << name << ")";
+                }
+                ++shown;
+            }
+            d.opcodeSummary = os.str();
+        }
+
         return d;
     }
 
@@ -407,36 +706,287 @@ namespace {
             ImGui::TableNextColumn(); ImGui::TextUnformatted(v.c_str());
         };
 
-        const uint8_t* buf = payload; size_t L = payloadLen; size_t base = 0; (void)base;
+        // Helper to format Vector3
+        auto Vec3f = [](float x, float y, float z) -> std::string {
+            char b[96]; 
+            std::snprintf(b, sizeof(b), "(%.3f, %.3f, %.3f)", x, y, z); 
+            return b;
+        };
 
-        // Client: ActionRequest (0x0196)
-        if (outgoing && opcode == 0x0196 && L >= 0x18) {
-            uint8_t execProc = *(buf + 0x00);
-            uint8_t actionKind = *(buf + 0x01);
+        const uint8_t* buf = payload; 
+        size_t L = payloadLen;
+
+        // Inside RenderPayload_KnownAt function, find the section with other decoders and ADD these properly:
+
+    // Client: ActionRequest (0x0190) - Player initiates action  
+        if (outgoing && opcode == 0x0190 && L >= 0x20) {
+            uint8_t actionKind = *(buf + 0x00);
+            uint8_t actionCategory = *(buf + 0x01);
             uint32_t actionKey = loadLE<uint32_t>(buf + 0x04);
-            uint32_t requestId = loadLE<uint32_t>(buf + 0x08);
-            uint16_t dir = loadLE<uint16_t>(buf + 0x0C);
-            uint16_t dirTarget = loadLE<uint16_t>(buf + 0x0E);
-            uint64_t target = loadLE<uint64_t>(buf + 0x10);
-            uint32_t arg = (L >= 0x1C) ? loadLE<uint32_t>(buf + 0x18) : 0;
-            rowKV("req.execProc", std::to_string(execProc));
-            rowKV("req.actionKind", std::to_string(actionKind));
-            rowKV("req.actionKey", std::to_string(actionKey));
-            rowKV("req.requestId", std::to_string(requestId));
-            rowKV("req.dir", std::to_string(dir));
-            rowKV("req.dirTarget", std::to_string(dirTarget));
-            {
-                std::ostringstream os; os << "0x" << std::hex << target; rowKV("req.target", os.str());
+            uint64_t targetId = loadLE<uint64_t>(buf + 0x08);
+            uint16_t sequence = loadLE<uint16_t>(buf + 0x10);
+            uint16_t rotation = loadLE<uint16_t>(buf + 0x12);
+            uint16_t targetRotation = loadLE<uint16_t>(buf + 0x14);
+            float x = loadLE<float>(buf + 0x18);
+            float y = loadLE<float>(buf + 0x1C);
+
+            const char* kindStr = "Unknown";
+            switch (actionKind) {
+            case 1: kindStr = "Spell"; break;
+            case 2: kindStr = "Item"; break;
+            case 3: kindStr = "KeyItem"; break;
+            case 4: kindStr = "Ability"; break;
+            case 7: kindStr = "Weaponskill"; break;
+            case 8: kindStr = "Trait"; break;
+            case 9: kindStr = "Companion"; break;
+            case 13: kindStr = "CraftAction"; break;
+            case 15: kindStr = "Mount"; break;
+            case 17: kindStr = "PvPAction"; break;
             }
-            if (L >= 0x1C) rowKV("req.arg", std::to_string(arg));
-            // Store correlation
-            ActionReqRec rec{ hp.connection_id, hp.ts, actionKind, actionKey, target, dir, dirTarget };
-            g_actionReqById[requestId] = rec;
+
+            rowKV("req.actionKind", std::to_string(actionKind) + " (" + kindStr + ")");
+            rowKV("req.actionCategory", std::to_string(actionCategory));
+            rowKV("req.actionKey", std::to_string(actionKey));
+            rowKV("req.targetId", "0x" + std::to_string(targetId));
+            rowKV("req.sequence", std::to_string(sequence));
+            rowKV("req.rotation", std::to_string(rotation * 360.0f / 65535.0f) + "°");
+            rowKV("req.targetRotation", std::to_string(targetRotation * 360.0f / 65535.0f) + "°");
+            rowKV("req.position", Vec3f(x, y, 0));
+
+            // Store for correlation
+            ActionReqRec rec{ hp.connection_id, hp.ts, actionKind, actionKey, targetId, rotation, targetRotation };
+            g_actionReqById[sequence] = rec;
+
+            // Update flow tracking
+            UpdatePacketCorrelation(opcode, outgoing, hp);
             return;
         }
 
-        // Server: ActionResult (0x0147) and ActionResult1 (0x0146)
-        if (!outgoing && (opcode == 0x0147 || opcode == 0x0146) && L >= 0x20) {
+        // Add all other packet decoders here INSIDE the function...
+
+        // Server: ActorControl (0x0142) - Based on ActorControlPacket.h structure
+        if (!outgoing && opcode == 0x0142 && L >= 0x14) {
+            uint16_t category = loadLE<uint16_t>(buf + 0x00);
+            // padding at 0x02
+            uint32_t param1 = loadLE<uint32_t>(buf + 0x04);
+            uint32_t param2 = loadLE<uint32_t>(buf + 0x08);
+            uint32_t param3 = loadLE<uint32_t>(buf + 0x0C);
+            uint32_t param4 = loadLE<uint32_t>(buf + 0x10);
+            
+            const char* catName = ActorControlCategoryName(category);
+            rowKV("actctl.category", std::to_string(category) + " (" + catName + ")");
+            rowKV("actctl.param1", std::to_string(param1));
+            rowKV("actctl.param2", std::to_string(param2));
+            rowKV("actctl.param3", std::to_string(param3));
+            rowKV("actctl.param4", std::to_string(param4));
+            
+            // Decode specific category params based on CommonActorControl.h
+            switch (category) {
+                case 0x02: // SetStatus
+                case 0x14: // StatusEffectGain
+                case 0x15: // StatusEffectLose
+                    rowKV("  -> statusId", std::to_string(param1));
+                    rowKV("  -> sourceActorId", std::to_string(param2));
+                    break;
+                case 0x17: // HPFloatingText
+                    rowKV("  -> value", std::to_string(param1));
+                    rowKV("  -> type", std::to_string(param2));
+                    break;
+                case 0x32: // SetTarget
+                    rowKV("  -> targetId", std::to_string(param1));
+                    break;
+            }
+            return;
+        }
+
+        // Server: ActorControlSelf (0x0143)
+        if (!outgoing && opcode == 0x0143 && L >= 0x1C) {
+            uint16_t category = loadLE<uint16_t>(buf + 0x00);
+            uint32_t param1 = loadLE<uint32_t>(buf + 0x04);
+            uint32_t param2 = loadLE<uint32_t>(buf + 0x08);
+            uint32_t param3 = loadLE<uint32_t>(buf + 0x0C);
+            uint32_t param4 = loadLE<uint32_t>(buf + 0x10);
+            uint32_t param5 = loadLE<uint32_t>(buf + 0x14);
+            uint32_t param6 = loadLE<uint32_t>(buf + 0x18);
+            
+            const char* catName = ActorControlCategoryName(category);
+            rowKV("actctl.category", std::to_string(category) + " (" + catName + ")");
+            rowKV("actctl.param1", std::to_string(param1));
+            rowKV("actctl.param2", std::to_string(param2));
+            rowKV("actctl.param3", std::to_string(param3));
+            rowKV("actctl.param4", std::to_string(param4));
+            rowKV("actctl.param5", std::to_string(param5));
+            rowKV("actctl.param6", std::to_string(param6));
+            return;
+        }
+
+        // Server: ActorControlTarget (0x0144)
+        if (!outgoing && opcode == 0x0144 && L >= 0x18) {
+            uint16_t category = loadLE<uint16_t>(buf + 0x00);
+            uint32_t param1 = loadLE<uint32_t>(buf + 0x04);
+            uint32_t param2 = loadLE<uint32_t>(buf + 0x08);
+            uint32_t param3 = loadLE<uint32_t>(buf + 0x0C);
+            uint32_t param4 = loadLE<uint32_t>(buf + 0x10);
+            uint64_t targetId = loadLE<uint64_t>(buf + 0x10); // Note: overlaps with param4/5
+                        
+            const char* catName = ActorControlCategoryName(category);
+            rowKV("actctl.category", std::to_string(category) + " (" + catName + ")");
+            rowKV("actctl.param1", std::to_string(param1));
+            rowKV("actctl.param2", std::to_string(param2));
+            rowKV("actctl.param3", std::to_string(param3));
+            rowKV("actctl.param4", std::to_string(param4));
+            rowKV("actctl.targetId", std::to_string((uint32_t)(targetId & 0xFFFFFFFF)));
+            return;
+        }
+
+        // Server: InitZone (0x019A) - Based on InitZonePacket.h
+        if (!outgoing && opcode == 0x019A && L >= 0x28) {
+            uint16_t zoneId = loadLE<uint16_t>(buf + 0x00);
+            uint16_t territoryType = loadLE<uint16_t>(buf + 0x02);
+            uint16_t territoryIndex = loadLE<uint16_t>(buf + 0x04);
+            // padding at 0x06
+            uint32_t layerSetId = loadLE<uint32_t>(buf + 0x08);
+            uint32_t layoutId = loadLE<uint32_t>(buf + 0x0C);
+            uint8_t weatherId = *(buf + 0x10);
+            uint8_t flag = *(buf + 0x11);
+            // padding at 0x12-0x17
+            float x = loadLE<float>(buf + 0x18);
+            float y = loadLE<float>(buf + 0x1C);
+            float z = loadLE<float>(buf + 0x20);
+            // reserved at 0x24
+                        
+            rowKV("init.zoneId", std::to_string(zoneId));
+            rowKV("init.territoryType", std::to_string(territoryType));
+            rowKV("init.territoryIndex", std::to_string(territoryIndex));
+            rowKV("init.layerSetId", std::to_string(layerSetId));
+            rowKV("init.layoutId", std::to_string(layoutId));
+            rowKV("init.weatherId", std::to_string(weatherId));
+            rowKV("init.flag", std::to_string(flag));
+            rowKV("init.pos", Vec3f(x, y, z));
+            return;
+        }
+
+        // Server: HudParam (0x0140) - Enhanced with better status formatting
+        if (!outgoing && opcode == 0x0140 && L >= 0x14) {
+            uint8_t classJob = *(buf + 0x00);
+            uint8_t level = *(buf + 0x01);
+            uint8_t levelCombined = *(buf + 0x02);
+            uint8_t levelSync = *(buf + 0x03);
+            uint32_t hp = loadLE<uint32_t>(buf + 0x04);
+            uint32_t hpMax = loadLE<uint32_t>(buf + 0x08);
+            uint16_t mp = loadLE<uint16_t>(buf + 0x0C);
+            uint16_t mpMax = loadLE<uint16_t>(buf + 0x0E);
+            uint16_t tp = loadLE<uint16_t>(buf + 0x10);
+            uint16_t gpMax = loadLE<uint16_t>(buf + 0x12);
+            
+            rowKV("hud.classJob", std::to_string(classJob));
+            rowKV("hud.level", std::to_string(level));
+            rowKV("hud.levelCombined", std::to_string(levelCombined));
+            rowKV("hud.levelSync", std::to_string(levelSync));
+            rowKV("hud.hp", std::to_string(hp) + "/" + std::to_string(hpMax));
+            rowKV("hud.mp", std::to_string(mp) + "/" + std::to_string(mpMax));
+            rowKV("hud.tp", std::to_string(tp));
+            rowKV("hud.gpMax", std::to_string(gpMax));
+            
+            // Enhanced status effects display - properly iterate through all 30 slots
+            size_t statusOff = 0x14;
+            int activeCount = 0;
+            
+            for (int i = 0; i < 30 && statusOff + 12 <= L; ++i) {
+                uint16_t id = loadLE<uint16_t>(buf + statusOff + 0);
+                int16_t systemParam = loadLE<int16_t>(buf + statusOff + 2);
+                float time = loadLE<float>(buf + statusOff + 4);
+                uint32_t source = loadLE<uint32_t>(buf + statusOff + 8);
+                
+                if (id != 0) {
+                    activeCount++;
+                    if (activeCount <= 10) { // Show first 10 active statuses
+                        char key[32];
+                        std::snprintf(key, sizeof(key), "hud.status[%d]", activeCount - 1);
+                        std::ostringstream os;
+                        os << "id=" << id 
+                           << " param=" << systemParam 
+                           << " time=" << std::fixed << std::setprecision(1) << time 
+                           << "s src=0x" << std::hex << source;
+                        rowKV(key, os.str());
+                    }
+                }
+                statusOff += 12;
+            }
+            
+            if (activeCount > 0) {
+                rowKV("hud.activeStatusCount", std::to_string(activeCount));
+            }
+            return;
+        }
+
+        // Server: Move (0x018E) / ActorMove (0x0191, 0x0192) - with proper Vector3 positions
+        if (!outgoing && (opcode == 0x018E || opcode == 0x0191 || opcode == 0x0192)) {
+            if (L >= 0x18) {  // Float-based movement
+                uint8_t dir = *(buf + 0x00);
+                uint8_t dirBeforeSlip = *(buf + 0x01);
+                uint8_t flag = *(buf + 0x02);
+                uint8_t flag2 = *(buf + 0x03);
+                uint8_t speed = *(buf + 0x04);
+                uint8_t speedBeforeSlip = *(buf + 0x05);
+                // padding at 0x06-0x07
+                float x = loadLE<float>(buf + 0x08);
+                float y = loadLE<float>(buf + 0x0C);
+                float z = loadLE<float>(buf + 0x10);
+                // reserved at 0x14
+                        
+                rowKV("move.dir", std::to_string(dir));
+                rowKV("move.dirBeforeSlip", std::to_string(dirBeforeSlip));
+                rowKV("move.flag", std::to_string(flag));
+                rowKV("move.flag2", std::to_string(flag2));
+                rowKV("move.speed", std::to_string(speed));
+                rowKV("move.speedBeforeSlip", std::to_string(speedBeforeSlip));
+                rowKV("move.pos", Vec3f(x, y, z));
+            } else if (L >= 0x0C) {  // Uint16-based movement
+                uint8_t dir = *(buf + 0x00);
+                uint8_t dirBeforeSlip = *(buf + 0x01);
+                uint8_t flag = *(buf + 0x02);
+                uint8_t flag2 = *(buf + 0x03);
+                uint8_t speed = *(buf + 0x04);
+                uint8_t speedBeforeSlip = *(buf + 0x05);
+                uint16_t x = loadLE<uint16_t>(buf + 0x06);
+                uint16_t y = loadLE<uint16_t>(buf + 0x08);
+                uint16_t z = loadLE<uint16_t>(buf + 0x0A);
+                
+                rowKV("move.dir", std::to_string(dir));
+                rowKV("move.dirBeforeSlip", std::to_string(dirBeforeSlip));
+                rowKV("move.flag", std::to_string(flag));
+                rowKV("move.flag2", std::to_string(flag2));
+                rowKV("move.speed", std::to_string(speed));
+                rowKV("move.speedBeforeSlip", std::to_string(speedBeforeSlip));
+                rowKV("move.pos", "(" + std::to_string(x) + ", " + std::to_string(y) + ", " + std::to_string(z) + ")");
+            }
+            return;
+        }
+
+        // Server: Warp (0x0194) - Based on Common.h WarpType enum
+        if (!outgoing && opcode == 0x0194 && L >= 0x14) {
+            uint16_t dir = loadLE<uint16_t>(buf + 0x00);
+            uint8_t type = *(buf + 0x02);
+            uint8_t typeArg = *(buf + 0x03);
+            uint32_t layerSet = loadLE<uint32_t>(buf + 0x04);
+            float x = loadLE<float>(buf + 0x08);
+            float y = loadLE<float>(buf + 0x0C);
+            float z = loadLE<float>(buf + 0x10);
+            
+            const char* typeName = WarpTypeName(type);
+            rowKV("warp.dir", std::to_string(dir));
+            rowKV("warp.type", std::to_string((int)type) + " (" + typeName + ")");
+            rowKV("warp.typeArg", std::to_string(typeArg));
+            rowKV("warp.layerSet", std::to_string(layerSet));
+            rowKV("warp.pos", Vec3f(x, y, z));
+            return;
+        }
+
+        // Enhanced combat packet decoders:
+
+        // Server: ActionResult with effect details (0x0146/0x0147)
+        if (!outgoing && (opcode == 0x0146 || opcode == 0x0147) && L >= 0x58) {
             uint64_t mainTarget = loadLE<uint64_t>(buf + 0x00);
             uint16_t action = loadLE<uint16_t>(buf + 0x08);
             uint8_t actionArg = *(buf + 0x0A);
@@ -459,162 +1009,92 @@ namespace {
                 auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(hp.ts - it->second.ts).count();
                 rowKV("res.correlatesWith", std::string("ActionRequest ") + std::to_string(requestId) + " (" + std::to_string(dt) + " ms)" );
             }
-            return;
-        }
-
-        // ChatHandler (client 0x0067)
-        if (outgoing && opcode == 0x0067 && L >= 0x18) {
-            uint32_t clientTime = loadLE<uint32_t>(buf + 0x00);
-            uint32_t origin = loadLE<uint32_t>(buf + 0x04);
-            float px = loadLE<float>(buf + 0x08);
-            float py = loadLE<float>(buf + 0x0C);
-            float pz = loadLE<float>(buf + 0x10);
-            float dir = loadLE<float>(buf + 0x14);
-            uint16_t chatType = (L >= 0x1A) ? loadLE<uint16_t>(buf + 0x18) : 0;
-            const char* msg = (L > 0x1A) ? reinterpret_cast<const char*>(buf + 0x1A) : "";
-            std::string smsg = msg; if (auto nz = smsg.find('\0'); nz != std::string::npos) smsg.resize(nz);
-            rowKV("chat.clientTime", std::to_string(clientTime));
-            { std::ostringstream os; os << "0x" << std::hex << origin; rowKV("chat.origin", os.str()); }
-            { std::ostringstream os; os << px << ", " << py << ", " << pz; rowKV("chat.pos", os.str()); }
-            rowKV("chat.dir", std::to_string(dir));
-            { std::ostringstream os; os << "0x" << std::hex << chatType; rowKV("chat.type", os.str()); }
-            rowKV("chat.message", smsg);
-            return;
-        }
-
-        // Client: Command (0x0191)
-        if (outgoing && opcode == 0x0191 && L >= 0x18) {
-            uint32_t id   = loadLE<uint32_t>(buf + 0x00);
-            uint32_t a0   = loadLE<uint32_t>(buf + 0x04);
-            uint32_t a1   = loadLE<uint32_t>(buf + 0x08);
-            uint32_t a2   = loadLE<uint32_t>(buf + 0x0C);
-            uint32_t a3   = loadLE<uint32_t>(buf + 0x10);
-            uint64_t tgt  = (L >= 0x20) ? loadLE<uint64_t>(buf + 0x10 + 4) : 0ULL;
-            auto hex32 = [](uint32_t v){ std::ostringstream os; os << "0x" << std::hex << v << " (" << std::dec << v << ")"; return os.str(); };
-            rowKV("cmd.Id", hex32(id)); rowKV("cmd.Arg0", hex32(a0)); rowKV("cmd.Arg1", hex32(a1)); rowKV("cmd.Arg2", hex32(a2)); rowKV("cmd.Arg3", hex32(a3));
-            { std::ostringstream os; os << "0x" << std::hex << tgt; rowKV("cmd.Target", os.str()); }
-            return;
-        }
-
-        // Server: ActorControl / Self / Target
-        if (!outgoing && (opcode == 0x0142 || opcode == 0x0143 || opcode == 0x0144) && L >= 0x14) {
-            uint16_t category = loadLE<uint16_t>(buf + 0x00);
-            uint32_t p1 = loadLE<uint32_t>(buf + 0x04);
-            uint32_t p2 = loadLE<uint32_t>(buf + 0x08);
-            uint32_t p3 = loadLE<uint32_t>(buf + 0x0C);
-            uint32_t p4 = loadLE<uint32_t>(buf + 0x10);
-            rowKV("actctl.category", std::to_string(category));
-            rowKV("actctl.param1", std::to_string(p1));
-            rowKV("actctl.param2", std::to_string(p2));
-            rowKV("actctl.param3", std::to_string(p3));
-            rowKV("actctl.param4", std::to_string(p4));
-            if (opcode == 0x0143 && L >= 0x1C) {
-                uint32_t p5 = loadLE<uint32_t>(buf + 0x14);
-                uint32_t p6 = loadLE<uint32_t>(buf + 0x18);
-                rowKV("actctl.param5", std::to_string(p5));
-                rowKV("actctl.param6", std::to_string(p6));
-            }
-            if (opcode == 0x0144 && L >= 0x20) {
-                uint64_t tgt = loadLE<uint64_t>(buf + 0x18);
-                { std::ostringstream os; os << "0x" << std::hex << tgt; rowKV("actctl.targetId", os.str()); }
+            
+            // Add effect parsing
+            uint8_t targetCount = *(buf + 0x21);
+            rowKV("res.targetCount", std::to_string(targetCount));
+            
+            // Parse first target effects
+            if (L >= 0x58 && targetCount > 0) {
+                size_t effectOffset = 0x28;
+                for (int i = 0; i < std::min(targetCount, uint8_t(8)); ++i) {
+                    if (effectOffset + 8 > L) break;
+                    
+                    uint8_t effectType = *(buf + effectOffset);
+                    uint8_t hitSeverity = *(buf + effectOffset + 1);
+                    uint8_t param = *(buf + effectOffset + 2);
+                    uint8_t bonusPercent = *(buf + effectOffset + 3);
+                    uint16_t value = loadLE<uint16_t>(buf + effectOffset + 4);
+                    
+                    char key[32];
+                    std::snprintf(key, sizeof(key), "res.effect[%d]", i);
+                    std::ostringstream os;
+                    
+                    const char* effectStr = "Unknown";
+                    switch(effectType) {
+                        case 1: effectStr = "Miss"; break;
+                        case 2: effectStr = "FullResist"; break;
+                        case 3: effectStr = "Damage"; break;
+                        case 4: effectStr = "Heal"; break;
+                        case 5: effectStr = "BlockedDamage"; break;
+                        case 6: effectStr = "ParriedDamage"; break;
+                        case 7: effectStr = "Invulnerable"; break;
+                        case 8: effectStr = "NoEffectText"; break;
+                        case 14: effectStr = "StatusNoEffect"; break;
+                        case 15: effectStr = "StatusGain"; break;
+                        case 16: effectStr = "StatusLose"; break;
+                    }
+                    
+                    os << effectStr << " val=" << value;
+                    if (hitSeverity > 0) {
+                        os << " (";
+                        if (hitSeverity & 0x01) os << "Critical ";
+                        if (hitSeverity & 0x02) os << "DirectHit ";
+                        os << ")";
+                    }
+                    rowKV(key, os.str());
+                    
+                    effectOffset += 8;
+                }
             }
             return;
         }
 
-        // Server: InitZone (0x019A)
-        if (!outgoing && opcode == 0x019A && L >= 0x20) {
-            uint16_t ZoneId = loadLE<uint16_t>(buf + 0x00);
-            uint16_t TerritoryType = loadLE<uint16_t>(buf + 0x02);
-            uint16_t TerritoryIndex = loadLE<uint16_t>(buf + 0x04);
-            uint32_t LayerSetId = loadLE<uint32_t>(buf + 0x08);
-            uint32_t LayoutId = loadLE<uint32_t>(buf + 0x0C);
-            uint8_t WeatherId = *(buf + 0x10);
-            uint8_t Flag = *(buf + 0x11);
-            float px = loadLE<float>(buf + 0x18);
-            float py = loadLE<float>(buf + 0x1C);
-            float pz = loadLE<float>(buf + 0x20);
-            rowKV("init.ZoneId", std::to_string(ZoneId));
-            rowKV("init.TerritoryType", std::to_string(TerritoryType));
-            rowKV("init.TerritoryIndex", std::to_string(TerritoryIndex));
-            rowKV("init.LayerSetId", std::to_string(LayerSetId));
-            rowKV("init.LayoutId", std::to_string(LayoutId));
-            rowKV("init.WeatherId", std::to_string(WeatherId));
-            rowKV("init.Flag", std::to_string(Flag));
-            {
-                std::ostringstream os; os << px << ", " << py << ", " << pz; rowKV("init.Pos", os.str());
+        // Server: HateList (0x019B) - Enmity values
+        if (!outgoing && opcode == 0x019B && L >= 0x08) {
+            uint8_t count = *(buf + 0x00);
+            rowKV("hate.count", std::to_string(count));
+            
+            size_t offset = 0x04;
+            for (int i = 0; i < std::min(count, uint8_t(8)); ++i) {
+                if (offset + 8 > L) break;
+                
+                uint32_t actorId = loadLE<uint32_t>(buf + offset);
+                uint8_t hatePercent = *(buf + offset + 4);
+                
+                char key[32];
+                std::snprintf(key, sizeof(key), "hate.entry[%d]", i);
+                std::ostringstream os;
+                os << "actor=0x" << std::hex << actorId << " hate=" << std::dec << (unsigned)hatePercent << "%";
+                rowKV(key, os.str());
+                
+                offset += 8;
             }
             return;
         }
 
-        // Server: Name (0x01A7)
-        if (!outgoing && opcode == 0x01A7 && L >= 0x28) {
-            uint64_t contentId = loadLE<uint64_t>(buf + 0x00);
-            const char* name = reinterpret_cast<const char*>(buf + 0x08);
-            std::string nm = name; if (auto nz = nm.find('\0'); nz != std::string::npos) nm.resize(nz);
-            { std::ostringstream os; os << "0x" << std::hex << contentId; rowKV("name.contentId", os.str()); }
-            rowKV("name.name", nm);
-            return;
-        }
-
-        // Server: ActorCast (0x0196)
-        if (!outgoing && opcode == 0x0196 && L >= 0x20) {
-            uint16_t action = loadLE<uint16_t>(buf + 0x00);
-            uint8_t actionKind = *(buf + 0x02);
-            uint32_t actionKey = loadLE<uint32_t>(buf + 0x04);
-            float castTime = loadLE<float>(buf + 0x08);
-            uint32_t target = loadLE<uint32_t>(buf + 0x0C);
-            float dir = loadLE<float>(buf + 0x10);
-            uint32_t ballistaId = loadLE<uint32_t>(buf + 0x14);
-            uint16_t tx = 0, ty = 0, tz = 0;
-            if (L >= 0x1A) tx = loadLE<uint16_t>(buf + 0x18);
-            if (L >= 0x1C) ty = loadLE<uint16_t>(buf + 0x1A);
-            if (L >= 0x1E) tz = loadLE<uint16_t>(buf + 0x1C);
-            rowKV("cast.action", std::to_string(action));
-            rowKV("cast.kind", std::to_string(actionKind));
-            { std::ostringstream os; os << "0x" << std::hex << actionKey << " (" << std::dec << actionKey << ")"; rowKV("cast.key", os.str()); }
-            rowKV("cast.time", std::to_string(castTime));
-            { std::ostringstream os; os << "0x" << std::hex << target << " (" << std::dec << target << ")"; rowKV("cast.target", os.str()); }
-            rowKV("cast.dir", std::to_string(dir));
-            rowKV("cast.ballista", std::to_string(ballistaId));
-            { char b[96]; std::snprintf(b,sizeof(b),"(%u,%u,%u)", tx,ty,tz); rowKV("cast.targetPos", b); }
-            return;
-        }
-
-        // Server: Warp (0x0194)
-        if (!outgoing && opcode == 0x0194 && L >= 0x10) {
-            uint16_t dir = loadLE<uint16_t>(buf + 0x00);
-            uint8_t type = *(buf + 0x02);
-            uint8_t typeArg = *(buf + 0x03);
-            uint32_t layerSet = loadLE<uint32_t>(buf + 0x04);
-            float x = 0, y = 0, z = 0;
-            if (L >= 0x10) { x = loadLE<float>(buf + 0x08); y = loadLE<float>(buf + 0x0C); z = loadLE<float>(buf + 0x10); }
-            rowKV("warp.dir", std::to_string(dir)); rowKV("warp.type", std::to_string(type)); rowKV("warp.typeArg", std::to_string(typeArg));
-            { std::ostringstream os; os << "0x" << std::hex << layerSet << " (" << std::dec << layerSet << ")"; rowKV("warp.layerSet", os.str()); }
-            { char b[96]; std::snprintf(b,sizeof(b),"(%.3f,%.3f,%.3f)", x,y,z); rowKV("warp.pos", b); }
-            return;
-        }
-
-        // Move / ActorMove: try float then byte-variant
-        if ((outgoing && opcode == 0x019A) || (!outgoing && opcode == 0x0192)) {
-            if (L >= 0x1C) {
-                float dir = loadLE<float>(buf + 0x00), dirBeforeSlip = loadLE<float>(buf + 0x04);
-                uint8_t flag = *(buf + 0x08), flag2 = *(buf + 0x09), flag_unshared = *(buf + 0x0A);
-                float px = loadLE<float>(buf + 0x0C), py = loadLE<float>(buf + 0x10), pz = loadLE<float>(buf + 0x14);
-                char b[256]; std::snprintf(b,sizeof(b),"dir=%.3f dirBeforeSlip=%.3f flag=%u flag2=%u flagU=%u", dir, dirBeforeSlip, flag, flag2, flag_unshared); rowKV("move.core", b);
-                std::snprintf(b,sizeof(b),"(%.3f, %.3f, %.3f)", px, py, pz); rowKV("move.pos", b);
-            } else if (L >= 0x20) {
-                uint8_t dir = *(buf + 0x14), dirBeforeSlip = *(buf + 0x15), flag = *(buf + 0x16), flag2 = *(buf + 0x17), speed = *(buf + 0x18);
-                uint16_t px = (uint16_t)(buf[0x1A] | (buf[0x1B] << 8));
-                uint16_t py = (uint16_t)(buf[0x1C] | (buf[0x1D] << 8));
-                uint16_t pz = (uint16_t)(buf[0x1E] | (buf[0x1F] << 8));
-                char b[256]; std::snprintf(b,sizeof(b),"dir=%u dirBeforeSlip=%u flag=%u flag2=%u speed=%u", dir, dirBeforeSlip, flag, flag2, speed); rowKV("move.core", b);
-                std::snprintf(b,sizeof(b),"(%u, %u, %u)", px, py, pz); rowKV("move.pos", b);
-            }
+        // Server: FirstAttack (0x01A2) - Battle engagement
+        if (!outgoing && opcode == 0x01A2 && L >= 0x08) {
+            uint32_t actorId = loadLE<uint32_t>(buf + 0x00);
+            uint32_t targetId = loadLE<uint32_t>(buf + 0x04);
+            
+            rowKV("firstAttack.actorId", "0x" + std::to_string(actorId));
+            rowKV("firstAttack.targetId", "0x" + std::to_string(targetId));
             return;
         }
     }
 
-    // Backward-compatible entry: find the appropriate payload slice when possible and call RenderPayload_KnownAt
+    // Backward-compatible entry: find the appropriate payload slice when possible and call RenderPayload_Known
     static void RenderPayload_Known(uint16_t opcode, bool outgoing, const HookPacket& hp)
     {
         auto view = GetSegmentView(hp);
@@ -969,6 +1449,8 @@ namespace {
     }
 }
 
+static void DrawPacketStatistics(const HookPacket& hp, const std::vector<SegmentInfo>& segs);
+
 static void DrawPacketListAndDetails(const std::vector<HookPacket>& display) {
     DrawFilters();
     auto& f = GetFilters();
@@ -1028,6 +1510,13 @@ static void DrawPacketListAndDetails(const std::vector<HookPacket>& display) {
         const HookPacket& hp = display[selIndex];
         const ParsedPacket P = ParsePacket(hp);
         uint16_t resolvedConn = ResolveConnType(hp, P);
+        
+        // Call the statistics function here
+        SegmentView v = GetSegmentView(hp);
+        std::vector<SegmentInfo> segs;
+        ParseAllSegmentsBuffer(v.data, v.len, segs);
+        DrawPacketStatistics(hp, segs);
+        
         ImGui::Text("Packet header");
         DrawPacketHeaderTable(P, resolvedConn);
         ImGui::Text("First segment header (raw-only)");
@@ -1085,27 +1574,112 @@ static void DrawPacketListAndDetails(const std::vector<HookPacket>& display) {
     }
 }
 
+// Add this function before DrawPacketListAndDetails
+static void DrawPacketStatistics(const HookPacket& hp, const std::vector<SegmentInfo>& segs) {
+    if (ImGui::CollapsingHeader("Packet Statistics", ImGuiTreeNodeFlags_DefaultOpen)) {
+        if (ImGui::BeginTable("pkt_stats", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+            auto row = [](const char* k, const std::string& v) {
+                ImGui::TableNextRow(); 
+                ImGui::TableNextColumn(); 
+                ImGui::TextUnformatted(k);
+                ImGui::TableNextColumn(); 
+                ImGui::TextUnformatted(v.c_str());
+            };
+            
+            // Count segment types and opcodes
+            std::unordered_map<uint16_t, int> segTypeCounts;
+            std::unordered_map<uint16_t, int> opcodeCounts;
+            size_t totalPayloadSize = 0;
+            size_t ipcCount = 0;
+            size_t compressedSize = hp.len - 0x28; // Size after header
+            
+            for (const auto& s : segs) {
+                segTypeCounts[s.type]++;
+                totalPayloadSize += s.size;
+                if (s.hasIpc) {
+                    opcodeCounts[s.opcode]++;
+                    ipcCount++;
+                }
+            }
+            
+            row("Total Segments", std::to_string(segs.size()));
+            row("IPC Segments", std::to_string(ipcCount));
+            row("Total Payload Size", std::to_string(totalPayloadSize) + " bytes");
+            
+            // Show compression ratio if inflated
+            auto P = ParsePacket(hp);
+            if (P.isCompressed && totalPayloadSize > 0) {
+                float ratio = (float)compressedSize / (float)totalPayloadSize;
+                std::ostringstream os;
+                os << std::fixed << std::setprecision(1) << (ratio * 100.0f) << "%";
+                row("Compression Ratio", os.str());
+            }
+            
+            // Segment type breakdown
+            std::ostringstream segTypes;
+            for (const auto& [type, count] : segTypeCounts) {
+                if (segTypes.tellp() > 0) segTypes << ", ";
+                segTypes << SegTypeName(type) << "(" << count << ")";
+            }
+            row("Segment Types", segTypes.str());
+            
+            // Most common opcodes
+            if (!opcodeCounts.empty()) {
+                std::vector<std::pair<uint16_t, int>> sortedOpcodes(opcodeCounts.begin(), opcodeCounts.end());
+                std::sort(sortedOpcodes.begin(), sortedOpcodes.end(), 
+                    [](const auto& a, const auto& b) { return a.second > b.second; });
+                
+                std::ostringstream opcodes;
+                int shown = 0;
+                for (const auto& [op, count] : sortedOpcodes) {
+                    if (shown++ >= 5) {
+                        opcodes << ", ...";
+                        break;
+                    }
+                    if (opcodes.tellp() > 0) opcodes << ", ";
+                    
+                    uint16_t resolvedConn = ResolveConnType(hp, P);
+                    const char* name = LookupOpcodeName(op, hp.outgoing, resolvedConn);
+                    opcodes << "0x" << std::hex << std::setfill('0') << std::setw(4) << op;
+                    if (name && name[0] && name[0] != '?') {
+                        opcodes << "(" << name << ")"; 
+                    }
+                    if (count > 1) opcodes << "×" << std::dec << count;
+                }
+                row("Opcodes", opcodes.str());
+            }
+            
+            ImGui::EndTable();
+        }
+    }
+}
+
+
+
+// Dont delete this, used by both embedded and simple modes
 void SafeHookLogger::DrawImGuiEmbedded() {
     static std::vector<HookPacket> ui_batch;
     DrainToVector(ui_batch);
 
     static std::vector<HookPacket> display;
     display.reserve(display.size() + ui_batch.size());
-    for (auto& p : ui_batch) display.push_back(std::move(p));
-    if (display.size() > 100000)
-        display.erase(display.begin(), display.begin() + (display.size() - 100000));
+    for ( auto& p : ui_batch ) display.push_back( std::move( p ) );
+    if ( display.size() > 100000 )
+        display.erase( display.begin(), display.begin() + ( display.size() - 100000 ) );
 
-    DrawPacketListAndDetails(display);
+    DrawPacketListAndDetails( display );
 }
 
+// Dont delete this, used by both embedded and simple modes
 void SafeHookLogger::DrawImGuiSimple() {
     ImGui::Begin("Network Monitor");
     DrawImGuiEmbedded();
     ImGui::End();
 }
 
-void SafeHookLogger::DrawImGuiSimple(bool* p_open) {
-    if (ImGui::Begin("Network Monitor", p_open)) {
+// Dont delete this, used by both embedded and simple modes
+void SafeHookLogger::DrawImGuiSimple( bool *p_open ) {
+    if ( ImGui::Begin("Network Monitor", p_open ) ) {
         DrawImGuiEmbedded();
     }
     ImGui::End();
