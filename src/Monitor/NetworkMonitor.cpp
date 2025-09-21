@@ -82,10 +82,12 @@ namespace {
 	};
 
 	static std::vector<PacketPattern> g_patterns = {
-		{"Teleport Sequence", {0x0194, 0x019A}, nullptr},
-		{"Combat Round", {0x0190, 0x0146}, nullptr},
-		{"Craft Step", {0x0190, 0x01B4}, nullptr},
-		{"Mount/Dismount", {0x01BF, 0x0142}, nullptr},
+		{"Teleport Sequence", {0x0194, 0x019A}, nullptr}, // Warp -> InitZone (correct)
+		{"Combat Round", {0x0196, 0x0146}, nullptr}, // ActionRequest -> ActionResult1 (fixed from 0x0190)
+		{"Craft Step", {0x0196, 0x01B4}, nullptr}, // ActionRequest -> TradeCommand (needs verification)
+		{"Movement Update", {0x019A, 0x0192}, nullptr}, // Move -> ActorMove
+		{"Event Interaction", {0x01C2, 0x1C2}, nullptr}, // StartTalkEvent -> EventPlayHeader
+		{"Zone Change", {0x019A, 0x0190}, nullptr}, // InitZone -> Create (spawn actors)
 	};
 
 	static void DetectPatterns(const std::vector<uint16_t>& recentOpcodes) {
@@ -105,24 +107,120 @@ namespace {
 		}
 	}
 
+	// Replace the existing UpdatePacketCorrelation function (around line 97)
 	static void UpdatePacketCorrelation(uint16_t opcode, bool outgoing, const HookPacket& hp) {
-		if (outgoing && opcode == 0x0190) {
-			g_currentFlow.opcodes.clear();
+		// Track all packets in current flow if one is active
+		if (!g_currentFlow.opcodes.empty()) {
 			g_currentFlow.opcodes.push_back(opcode);
-			g_currentFlow.startTime = hp.ts;
-			g_currentFlow.description = "Combat Action";
-		}
-		else if (!outgoing && (opcode == 0x0146 || opcode == 0x0147)) {
-			if (!g_currentFlow.opcodes.empty()) {
+			// Check if this completes a known flow pattern
+
+			// Combat flows - using correct opcodes from Sapphire
+			if (outgoing && opcode == 0x0196) { // ActionRequest (was incorrectly 0x0190)
+				g_currentFlow.opcodes.clear();
 				g_currentFlow.opcodes.push_back(opcode);
-				g_currentFlow.endTime = hp.ts;
-				g_flowHistory.push_back(g_currentFlow);
-				if (g_flowHistory.size() > 100) g_flowHistory.erase(g_flowHistory.begin());
+				g_currentFlow.startTime = hp.ts;
+				g_currentFlow.description = "Combat Action";
+			}
+			else if (!outgoing && (opcode == 0x0146 || opcode == 0x0147)) { // ActionResult1/ActionResult - these are correct
+				if (!g_currentFlow.opcodes.empty() && g_currentFlow.opcodes[0] == 0x0196) {
+					g_currentFlow.endTime = hp.ts;
+					if (g_flowHistory.size() >= 100) g_flowHistory.erase(g_flowHistory.begin());
+					g_flowHistory.push_back(g_currentFlow);
+					g_currentFlow.opcodes.clear();
+				}
+			}
+		}
+		else {
+			// Start tracking new flows based on common patterns
+			if (outgoing) {
+				switch (opcode) {
+				case 0x0196: // ActionRequest
+					g_currentFlow.opcodes.push_back(opcode);
+					g_currentFlow.startTime = hp.ts;
+					g_currentFlow.description = "Combat Action";
+					break;
+				case 0x019A: // Move
+					g_currentFlow.opcodes.push_back(opcode);
+					g_currentFlow.startTime = hp.ts;
+					g_currentFlow.description = "Movement";
+					break;
+				case 0x01C2: // StartTalkEvent
+				case 0x01C3: // StartEmoteEvent
+				case 0x01C4: // StartWithinRangeEvent
+				case 0x01C5: // StartOutsideRangeEvent
+					g_currentFlow.opcodes.push_back(opcode);
+					g_currentFlow.startTime = hp.ts;
+					g_currentFlow.description = "Event Interaction";
+					break;
+				case 0x01B3: // TradeCommand
+					g_currentFlow.opcodes.push_back(opcode);
+					g_currentFlow.startTime = hp.ts;
+					g_currentFlow.description = "Trade";
+					break;
+				case 0x0262: // Config
+					g_currentFlow.opcodes.push_back(opcode);
+					g_currentFlow.startTime = hp.ts;
+					g_currentFlow.description = "Configuration Change";
+					break;
+				}
+			}
+			else { // Server packets
+				switch (opcode) {
+				case 0x0194: // Warp
+					g_currentFlow.opcodes.push_back(opcode);
+					g_currentFlow.startTime = hp.ts;
+					g_currentFlow.description = "Teleport/Warp";
+					break;
+				case 0x019A: // InitZone
+					g_currentFlow.opcodes.push_back(opcode);
+					g_currentFlow.startTime = hp.ts;
+					g_currentFlow.description = "Zone Initialization";
+					break;
+				case 0x0190: // Create (Actor)
+				case 0x0191: // Delete (Actor)
+					g_currentFlow.opcodes.push_back(opcode);
+					g_currentFlow.startTime = hp.ts;
+					g_currentFlow.description = "Actor Spawn/Despawn";
+					break;
+				}
 			}
 		}
 
-		if (outgoing && opcode == 0x01C2) {
-			g_activeEvents.clear();
+		// Track packet relationships
+		static std::unordered_map<uint64_t, std::pair<uint16_t, std::chrono::system_clock::time_point>> pendingRequests;
+
+		if (outgoing) {
+			// Store outgoing packets as potential requests
+			pendingRequests[hp.connection_id] = { opcode, hp.ts };
+		}
+		else if (!pendingRequests.empty()) {
+			// Check if this incoming packet could be a response
+			auto it = pendingRequests.find(hp.connection_id);
+			if (it != pendingRequests.end()) {
+				auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(hp.ts - it->second.second);
+
+				// Create relationship key
+				uint64_t relKey = (uint64_t(it->second.first) << 32) | opcode;
+
+				// Update or create relationship
+				auto& rel = g_packetRelations[relKey];
+				if (rel.count == 0) {
+					rel.requestOpcode = it->second.first;
+					rel.responseOpcode = opcode;
+					rel.avgLatency = latency;
+					rel.count = 1;
+				}
+				else {
+					// Running average
+					rel.avgLatency = (rel.avgLatency * rel.count + latency) / (rel.count + 1);
+					rel.count++;
+				}
+
+				// Clean up old request
+				if (latency.count() < 5000) { // Only correlate if response within 5 seconds
+					pendingRequests.erase(it);
+				}
+			}
 		}
 	}
 }      
@@ -795,7 +893,7 @@ namespace {
 			return;
 		}
 
-		if (outgoing && opcode == 0x0190 && L >= 0x20) {
+		if (outgoing && opcode == 0x0196 && L >= 0x20) {
 			uint8_t actionKind = *(buf + 0x00);
 			uint8_t actionCategory = *(buf + 0x01);
 			uint32_t actionKey = loadLE<uint32_t>(buf + 0x04);
