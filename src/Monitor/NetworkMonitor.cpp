@@ -14,6 +14,7 @@
 #include <fstream>
 #include <chrono>
 #include <functional>      
+#include <iomanip>
 #include "../../vendor/miniz/miniz.h"
 #include "../../vendor/ImGuiFD/ImGuiFD.h"
 
@@ -1368,66 +1369,168 @@ static void DrawFilters() {
 	ImGui::InputTextWithHint("##search", "Search name/hex", f.search, sizeof(f.search));
 }
 
+
+namespace {
+	// Collapsible header helper with sensible default
+	static bool BeginDetailsSection(const char* label, bool defaultOpen = true) {
+		ImGui::SetNextItemOpen(defaultOpen, ImGuiCond_Appearing);
+		return ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_SpanAvailWidth);
+	}
+
+	// Small RAII table builder for key/value tables
+	struct KVTable {
+		bool open = false;
+		KVTable(const char* id, float keyWidth = 200.0f) {
+			ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(8.0f, 6.0f));
+			ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
+			const ImGuiTableFlags flags =
+				ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+				ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX |
+				ImGuiTableFlags_Resizable;
+			open = ImGui::BeginTable(id, 2, flags);
+			if (open) {
+				ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, keyWidth);
+				ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+				ImGui::TableHeadersRow();
+			}
+		}
+		~KVTable() {
+			if (open) ImGui::EndTable();
+			ImGui::PopStyleVar(2);
+		}
+		void Row(const char* k, const std::string& v) {
+			if (!open) return;
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn(); ImGui::TextUnformatted(k);
+			ImGui::TableNextColumn(); ImGui::TextUnformatted(v.c_str());
+		}
+	};
+
+	static void DrawPacketOverview(const HookPacket& hp,
+		const ParsedPacket& P,
+		const std::vector<SegmentInfo>& segs,
+		const DecodedHeader& dec,
+		uint16_t resolvedConn)
+	{
+		KVTable tbl("pkt_overview", 190.0f);
+		if (!tbl.open) return;
+
+		// Direction
+		tbl.Row("Direction", hp.outgoing ? "SEND" : "RECV");
+		// Connection / size
+		tbl.Row("Connection Id", std::to_string((unsigned long long)hp.connection_id));
+		tbl.Row("Length (bytes)", std::to_string(hp.len));
+		// Segments
+		tbl.Row("Segments", std::to_string(segs.size()));
+		size_t ipcCount = 0; for (const auto& s : segs) if (s.hasIpc) ++ipcCount;
+		tbl.Row("IPC segments", std::to_string(ipcCount));
+		// Connection type
+		tbl.Row("ConnType (header)", std::to_string(P.connType));
+		if (resolvedConn != 0xFFFF)
+			tbl.Row("ConnType (resolved)", std::to_string(resolvedConn));
+		// Compression
+		tbl.Row("Compressed", P.isCompressed ? "yes" : "no");
+
+		// Opcodes summary with names (first 6)
+		if (dec.valid && !dec.opcodes.empty()) {
+			std::ostringstream os;
+			os << std::hex << std::setfill('0');
+			const size_t limit = std::min<size_t>(dec.opcodes.size(), 6);
+			for (size_t i = 0; i < limit; ++i) {
+				if (i) os << ", ";
+				uint16_t op = dec.opcodes[i];
+				os << "0x" << std::setw(4) << op;
+				const char* nm = LookupOpcodeName(op, hp.outgoing, resolvedConn);
+				if (nm && nm[0] && nm[0] != '?') os << "(" << nm << ")";
+			}
+			if (dec.opcodes.size() > limit) os << ", ...";
+			tbl.Row("Opcodes", os.str());
+		}
+
+		// Capture time (human readable)
+		auto tt = std::chrono::system_clock::to_time_t(hp.ts);
+		char tbuf[64]{};
+		std::strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", std::localtime(&tt));
+		tbl.Row("Captured at", tbuf);
+	}
+}
+
 static void DrawPacketHeaderTable(const ParsedPacket& P, uint16_t resolvedConn) {
 	if (!P.hdr_ok) return;
-	if (ImGui::BeginTable("pkt_hdr_main", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-		auto row = [&](const char* k, const char* v) { ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::TextUnformatted(k); ImGui::TableNextColumn(); ImGui::TextUnformatted(v); };
-		char b[128];
-		std::snprintf(b, sizeof(b), "0x%016llX 0x%016llX", (unsigned long long)P.magic0, (unsigned long long)P.magic1); row("magic[2]", b);
-		std::snprintf(b, sizeof(b), "%llu", (unsigned long long)P.timestamp); row("timestamp(ms)", b);
-		std::snprintf(b, sizeof(b), "%u", P.size); row("size", b);
-		std::snprintf(b, sizeof(b), "%u", P.connType); row("connectionType (header)", b);
-		std::snprintf(b, sizeof(b), "%u", P.segCount); row("segmentCount", b);
-		std::snprintf(b, sizeof(b), "0x%02X", P.unknown20); row("unknown_20", b);
-		std::snprintf(b, sizeof(b), "%u", (unsigned)P.isCompressed); row("isCompressed", b);
-		std::snprintf(b, sizeof(b), "0x%08X", P.unknown24); row("unknown_24", b);
-		if (resolvedConn != 0xFFFF) { std::snprintf(b, sizeof(b), "%u", resolvedConn); row("connectionType (resolved)", b); }
-		ImGui::EndTable();
-	}
+	KVTable tbl("pkt_hdr_main", 190.0f);
+	if (!tbl.open) return;
+
+	char b[128];
+	std::snprintf(b, sizeof(b), "0x%016llX 0x%016llX", (unsigned long long)P.magic0, (unsigned long long)P.magic1);
+	tbl.Row("magic[2]", b);
+	std::snprintf(b, sizeof(b), "%llu", (unsigned long long)P.timestamp);
+	tbl.Row("timestamp(ms)", b);
+	tbl.Row("size", std::to_string(P.size));
+	tbl.Row("connectionType (header)", std::to_string(P.connType));
+	tbl.Row("segmentCount", std::to_string(P.segCount));
+	std::snprintf(b, sizeof(b), "0x%02X", P.unknown20);
+	tbl.Row("unknown_20", b);
+	tbl.Row("isCompressed", std::to_string((unsigned)P.isCompressed));
+	std::snprintf(b, sizeof(b), "0x%08X", P.unknown24);
+	tbl.Row("unknown_24", b);
+	if (resolvedConn != 0xFFFF)
+		tbl.Row("connectionType (resolved)", std::to_string(resolvedConn));
 }
 
 static void DrawSegmentHeaderTable(const ParsedPacket& P) {
 	if (!P.seg_ok) return;
-	if (ImGui::BeginTable("pkt_hdr_seg", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-		auto row = [&](const char* k, const char* v) { ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::TextUnformatted(k); ImGui::TableNextColumn(); ImGui::TextUnformatted(v); };
-		char b[128];
-		std::snprintf(b, sizeof(b), "%u", P.segSize); row("size", b);
-		std::snprintf(b, sizeof(b), "0x%08X (%u)", P.src, P.src); row("source_actor", b);
-		std::snprintf(b, sizeof(b), "0x%08X (%u)", P.tgt, P.tgt); row("target_actor", b);
-		std::snprintf(b, sizeof(b), "%u (%s)", P.segType, SegTypeName(P.segType)); row("type", b);
-		std::snprintf(b, sizeof(b), "0x%04X", P.segPad); row("padding", b);
-		ImGui::EndTable();
-	}
+	KVTable tbl("pkt_hdr_seg", 190.0f);
+	if (!tbl.open) return;
+
+	char b[128];
+	tbl.Row("size", std::to_string(P.segSize));
+	std::snprintf(b, sizeof(b), "0x%08X (%u)", P.src, P.src);
+	tbl.Row("source_actor", b);
+	std::snprintf(b, sizeof(b), "0x%08X (%u)", P.tgt, P.tgt);
+	tbl.Row("target_actor", b);
+	std::snprintf(b, sizeof(b), "%u (%s)", P.segType, SegTypeName(P.segType));
+	tbl.Row("type", b);
+	std::snprintf(b, sizeof(b), "0x%04X", P.segPad);
+	tbl.Row("padding", b);
 }
 
-static void DrawIPCHeaderTable(const ParsedPacket& , bool outgoing, const HookPacket& hp, uint16_t resolvedConn) {
+static void DrawIPCHeaderTable(const ParsedPacket&, bool outgoing, const HookPacket& hp, uint16_t resolvedConn) {
 	SegmentView v = GetSegmentView(hp);
 	std::vector<SegmentInfo> segs; ParseAllSegmentsBuffer(v.data, v.len, segs);
 
 	int ipcIndex = 0;
 	for (const auto& s : segs) if (s.hasIpc) {
-		ImGui::SeparatorText("IPC segment");
-		if (ImGui::BeginTable((std::string("pkt_hdr_ipc_") + std::to_string(ipcIndex)).c_str(), 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-			auto row = [&](const char* k, const char* v) { ImGui::TableNextRow(); ImGui::TableNextColumn(); ImGui::TextUnformatted(k); ImGui::TableNextColumn(); ImGui::TextUnformatted(v); };
-			char b[256];
-			const char* name = LookupOpcodeName(s.opcode, outgoing, resolvedConn);
-			std::snprintf(b, sizeof(b), "0x%04X (%s)", s.opcode, name); row("type (opcode)", b);
-			std::snprintf(b, sizeof(b), "%u", s.serverId); row("serverId", b);
-			std::snprintf(b, sizeof(b), "%u", s.ipcTimestamp); row("timestamp", b);
+		const char* name = LookupOpcodeName(s.opcode, outgoing, resolvedConn);
+		char hdrLabel[160];
+		std::snprintf(hdrLabel, sizeof(hdrLabel), "IPC segment #%d  0x%04X (%s)", ipcIndex, s.opcode, name ? name : "?");
 
+		ImGui::SetNextItemOpen(ipcIndex == 0, ImGuiCond_Appearing);
+		if (ImGui::CollapsingHeader(hdrLabel, ImGuiTreeNodeFlags_SpanAvailWidth)) {
+			// IPC header key/values
+			KVTable tbl((std::string("pkt_hdr_ipc_") + std::to_string(ipcIndex)).c_str(), 190.0f);
+			if (tbl.open) {
+				char b[128];
+				std::snprintf(b, sizeof(b), "0x%04X (%s)", s.opcode, name ? name : "?");
+				tbl.Row("type (opcode)", b);
+				tbl.Row("serverId", std::to_string(s.serverId));
+				tbl.Row("timestamp", std::to_string(s.ipcTimestamp));
+			}
+
+			// IPC payload details
 			const uint8_t* payload = v.data + s.offset + 0x20;
 			size_t payloadLen = (s.size > 0x20) ? (s.size - 0x20) : 0;
+			ImGui::Indent(8.0f);
 			RenderPayload_KnownAt(s.opcode, outgoing, hp, payload, payloadLen);
-			ImGui::EndTable();
+			ImGui::Unindent(8.0f);
 		}
 		++ipcIndex;
 	}
 
 	if (v.data && v.len) {
+		ImGui::Separator();
 		RenderPayload_Heuristics(v.data, v.len);
 	}
 }
-
 static void DrawAllSegmentsTable(const HookPacket& hp, uint16_t resolvedConn)
 {
 	SegmentView v = GetSegmentView(hp);
@@ -1727,186 +1830,205 @@ static void DrawPacketFlowAnalysis() {
 	}
 }
 
-// Fix for DrawPacketListAndDetails function (around line 1355)
 static void DrawPacketListAndDetails(const std::vector<HookPacket>& display) {
-	DrawFilters();
-	auto& f = GetFilters();
-	f.parseOpcodesIfChanged();
+    DrawFilters();
+    auto& f = GetFilters();
+    f.parseOpcodesIfChanged();
 
-	// Add auto-scroll controls
-	static bool s_autoScroll = true;
-	static bool s_paused = false;
-	static std::vector<HookPacket> s_pausedDisplay;
+    // Auto-scroll / pause controls
+    static bool s_autoScroll = true;
+    static bool s_paused = false;
+    static std::vector<HookPacket> s_pausedDisplay;
 
-	ImGui::Checkbox("Auto-scroll", &s_autoScroll);
-	ImGui::SameLine();
+    ImGui::Checkbox("Auto-scroll", &s_autoScroll);
+    ImGui::SameLine();
+    if (ImGui::Checkbox("Pause", &s_paused)) {
+        if (s_paused) s_pausedDisplay = display;
+        else s_pausedDisplay.clear();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear")) {
+        ImGui::SetScrollY(0);
+    }
 
-	if (ImGui::Checkbox("Pause", &s_paused)) {
-		if (s_paused) {
-			// Capture current display
-			s_pausedDisplay = display;
-		}
-		else {
-			// Clear paused display
-			s_pausedDisplay.clear();
-		}
-	}
+    const std::vector<HookPacket>& activeDisplay = s_paused ? s_pausedDisplay : display;
 
-	ImGui::SameLine();
-	if (ImGui::Button("Clear")) {
-		// This would need a way to clear the display vector
-		// For now, just scroll to top
-		ImGui::SetScrollY(0);
-	}
+    // Filtered list
+    static std::vector<int> filtered;
+    filtered.clear();
+    filtered.reserve(activeDisplay.size());
+    for (int i = 0; i < (int)activeDisplay.size(); ++i) {
+        const HookPacket& hp = activeDisplay[i];
+        auto dec = DecodeForList(hp);
+        if (Matches(hp, dec, f)) filtered.push_back(i);
+    }
 
-	// Use paused display if paused, otherwise live display
-	const std::vector<HookPacket>& activeDisplay = s_paused ? s_pausedDisplay : display;
+    ImGui::Text("Shown: %d / %zu %s", (int)filtered.size(), activeDisplay.size(), s_paused ? "(PAUSED)" : "");
 
-	// Build filtered index map
-	static std::vector<int> filtered;
-	filtered.clear();
-	filtered.reserve(activeDisplay.size());
-	for (int i = 0; i < (int)activeDisplay.size(); ++i) {
-		const HookPacket& hp = activeDisplay[i];
-		auto dec = DecodeForList(hp);
-		if (Matches(hp, dec, f)) filtered.push_back(i);
-	}
+    // Top list
+    ImGui::BeginChild("pkt_list", ImVec2(0, 260), true);
+    ImGuiListClipper clip;
+    clip.Begin((int)filtered.size());
+    static int selectedFiltered = -1;
 
-	ImGui::Text("Shown: %d / %zu %s", (int)filtered.size(), activeDisplay.size(),
-		s_paused ? "(PAUSED)" : "");
+    while (clip.Step()) {
+        for (int ri = clip.DisplayStart; ri < clip.DisplayEnd; ++ri) {
+            int i = filtered[ri];
+            const HookPacket& hp = activeDisplay[i];
+            const auto d = DecodeForList(hp);
+            const char* name = d.valid ? LookupOpcodeName(d.opcode, hp.outgoing, d.connType) : "?";
 
-	// Top: list with fixed height (room for scrolling)
-	ImGui::BeginChild("pkt_list", ImVec2(0, 260), true);
+            SegmentView v = GetSegmentView(hp);
+            std::vector<SegmentInfo> tmp;
+            ParseAllSegmentsBuffer(v.data, v.len, tmp);
 
-	ImGuiListClipper clip;
-	clip.Begin((int)filtered.size());
-	static int selectedFiltered = -1;
+            char label[300];
+            if (d.valid)
+                std::snprintf(label, sizeof(label), "%s op=%04x %-20s conn=%llu len=%u %s%zu segs",
+                    hp.outgoing ? "SEND" : "RECV",
+                    (unsigned)d.opcode, name,
+                    (unsigned long long)hp.connection_id, hp.len,
+                    (v.inflated ? "(inflated) " : (hp.len >= 0x22 && (hp.buf[0x21] != 0) ? "(compressed) " : "")), tmp.size());
+            else
+                std::snprintf(label, sizeof(label), "%s seg=%u(%s) conn=%llu len=%u %s%zu segs",
+                    hp.outgoing ? "SEND" : "RECV", (unsigned)d.segType, SegTypeName(d.segType),
+                    (unsigned long long)hp.connection_id, hp.len,
+                    (v.inflated ? "(inflated) " : (hp.len >= 0x22 && (hp.buf[0x21] != 0) ? "(compressed) " : "")), tmp.size());
 
-	while (clip.Step()) {
-		for (int ri = clip.DisplayStart; ri < clip.DisplayEnd; ++ri) {
-			int i = filtered[ri];
-			const HookPacket& hp = activeDisplay[i];
-			const auto d = DecodeForList(hp);
-			const char* name = d.valid ? LookupOpcodeName(d.opcode, hp.outgoing, d.connType) : "?";
+            ImGui::PushID(i);
+            if (ImGui::Selectable(label, selectedFiltered == ri)) {
+                selectedFiltered = ri;
+                g_lastSelected = hp;
+                g_hasSelection = true;
+                s_autoScroll = false;
+            }
+            ImGui::PopID();
+        }
+    }
 
-			// Compute number of segments using view
-			SegmentView v = GetSegmentView(hp);
-			std::vector<SegmentInfo> tmp;
-			ParseAllSegmentsBuffer(v.data, v.len, tmp);
+    if (s_autoScroll && !s_paused && !filtered.empty()) {
+        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20) {
+            ImGui::SetScrollHereY(1.0f);
+        }
+    }
 
-			char label[300];
-			if (d.valid)
-				std::snprintf(label, sizeof(label), "%s op=%04x %-20s conn=%llu len=%u %s%zu segs",
-					hp.outgoing ? "SEND" : "RECV",
-					(unsigned)d.opcode, name,
-					(unsigned long long)hp.connection_id, hp.len,
-					(v.inflated ? "(inflated) " : (hp.len >= 0x22 && (hp.buf[0x21] != 0) ? "(compressed) " : "")), tmp.size());
-			else
-				std::snprintf(label, sizeof(label), "%s seg=%u(%s) conn=%llu len=%u %s%zu segs",
-					hp.outgoing ? "SEND" : "RECV", (unsigned)d.segType, SegTypeName(d.segType),
-					(unsigned long long)hp.connection_id, hp.len,
-					(v.inflated ? "(inflated) " : (hp.len >= 0x22 && (hp.buf[0x21] != 0) ? "(compressed) " : "")), tmp.size());
+    ImGui::EndChild();
 
-			ImGui::PushID(i);
-			if (ImGui::Selectable(label, selectedFiltered == ri)) {
-				selectedFiltered = ri;
-				g_lastSelected = hp;
-				g_hasSelection = true;
-				// Disable auto-scroll when user selects something
-				s_autoScroll = false;
-			}
-			ImGui::PopID();
-		}
-	}
+    // Export dialogs state
+    static bool s_openJsonDialog = false;
+    static bool s_openPcapDialog = false;
+    static HookPacket s_pendingJson{};
+    static HookPacket s_pendingPcap{};
 
-	// Auto-scroll to bottom if enabled
-	if (s_autoScroll && !s_paused && !filtered.empty()) {
-		if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20) {
-			ImGui::SetScrollHereY(1.0f);
-		}
-	}
+    // Bottom: details
+    ImGui::BeginChild("pkt_details", ImVec2(0, 0), true);
+    if (selectedFiltered >= 0 && selectedFiltered < (int)filtered.size()) {
+        int selIndex = filtered[selectedFiltered];
+        const HookPacket& hp = activeDisplay[selIndex];
+        const ParsedPacket P = ParsePacket(hp);
+        uint16_t resolvedConn = ResolveConnType(hp, P);
 
-	ImGui::EndChild();
+        // Details toolbar (readability)
+        static float s_detailsScale = 1.05f;   // slightly larger by default
+        static bool  s_compactCells = false;
+        ImGui::SeparatorText("Selected Packet Details");
+        ImGui::SetNextItemWidth(140.0f);
+        ImGui::SliderFloat("Text scale", &s_detailsScale, 0.9f, 1.5f, "%.2fx");
+        ImGui::SameLine();
+        ImGui::Checkbox("Compact", &s_compactCells);
 
-	// Persistent state for export dialogs
-	static bool s_openJsonDialog = false;
-	static bool s_openPcapDialog = false;
-	static HookPacket s_pendingJson{};
-	static HookPacket s_pendingPcap{};
+        ImGui::SetWindowFontScale(s_detailsScale);
+        ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, s_compactCells ? ImVec2(4.0f, 2.0f) : ImVec2(8.0f, 6.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, s_compactCells ? ImVec2(6.0f, 3.0f) : ImVec2(10.0f, 6.0f));
 
-	// Bottom: details view fills all remaining height
-	ImGui::BeginChild("pkt_details", ImVec2(0, 0), true);
-	if (selectedFiltered >= 0 && selectedFiltered < (int)filtered.size()) {
-		int selIndex = filtered[selectedFiltered];
-		const HookPacket& hp = activeDisplay[selIndex];  // FIX: Use activeDisplay instead of display
-		const ParsedPacket P = ParsePacket(hp);
-		uint16_t resolvedConn = ResolveConnType(hp, P);
+        // Precompute segs once (used by multiple sections)
+        SegmentView v = GetSegmentView(hp);
+        std::vector<SegmentInfo> segs;
+        ParseAllSegmentsBuffer(v.data, v.len, segs);
+        DecodedHeader dec = DecodeForList(hp);
 
-		// Call the statistics function here
-		SegmentView v = GetSegmentView(hp);
-		std::vector<SegmentInfo> segs;
-		ParseAllSegmentsBuffer(v.data, v.len, segs);
-		DrawPacketStatistics(hp, segs);
-		DrawPacketFlowAnalysis();
+        // Overview section (new)
+        if (BeginDetailsSection("Overview", true)) {
+            DrawPacketOverview(hp, P, segs, dec, resolvedConn);
+        }
 
-		ImGui::Text("Packet header");
-		DrawPacketHeaderTable(P, resolvedConn);
-		ImGui::Text("First segment header (raw-only)");
-		DrawSegmentHeaderTable(P);
-		ImGui::Text("All segments");
-		DrawAllSegmentsTable(hp, resolvedConn);
-		ImGui::Text("IPC segments");
-		DrawIPCHeaderTable(P, hp.outgoing, hp, resolvedConn);
-		ImGui::Separator();
-		if (ImGui::Button("Export JSON")) { s_pendingJson = hp; s_openJsonDialog = true; ImGuiFD::OpenDialog("Export JSON", ImGuiFDMode_SaveFile, "exports", "{JSON Files:*.json}, {*.*}"); }
-		ImGui::SameLine();
-		if (ImGui::Button("Export PCAP")) { s_pendingPcap = hp; s_openPcapDialog = true; ImGuiFD::OpenDialog("Export PCAP", ImGuiFDMode_SaveFile, "exports", "{PCAP Files:*.pcap}, {*.*}"); }
-		ImGui::Separator();
-	}
-	else {
-		ImGui::TextDisabled("Select a packet to view headers and hex dump");
-	}
-	ImGui::EndChild();
+        // Stats and flow
+        if (BeginDetailsSection("Statistics & Analysis", true)) {
+            DrawPacketStatistics(hp, segs);
+            DrawPacketFlowAnalysis();
+        }
 
-	// Handle JSON save dialog lifecycle
-	if (ImGuiFD::BeginDialog("Export JSON")) {
-		if (ImGuiFD::ActionDone()) {
-			if (ImGuiFD::SelectionMade()) {
-				// Expect a single selection
-				const char* selPath = ImGuiFD::GetSelectionPathString(0);
-				std::string path = selPath ? std::string(selPath) : std::string();
-				if (!path.empty()) {
-					// Ensure .json extension
-					if (path.size() < 5 || path.substr(path.size() - 5) != ".json")
-						path += ".json";
-					(void)ExportToJsonAs(s_pendingJson, path);
-				}
-			}
-			ImGuiFD::CloseCurrentDialog();
-			s_openJsonDialog = false;
-		}
-		ImGuiFD::EndDialog();
-	}
+        // Packet header
+        if (BeginDetailsSection("Packet header", true)) {
+            DrawPacketHeaderTable(P, resolvedConn);
+        }
 
-	// Handle PCAP save dialog lifecycle
-	if (ImGuiFD::BeginDialog("Export PCAP")) {
-		if (ImGuiFD::ActionDone()) {
-			if (ImGuiFD::SelectionMade()) {
-				const char* selPath = ImGuiFD::GetSelectionPathString(0);
-				std::string path = selPath ? std::string(selPath) : std::string();
-				if (!path.empty()) {
-					if (path.size() < 5 || path.substr(path.size() - 5) != ".pcap")
-						path += ".pcap";
-					(void)ExportToPcapAs(s_pendingPcap, path);
-				}
-			}
-			ImGuiFD::CloseCurrentDialog();
-			s_openPcapDialog = false;
-		}
-		ImGuiFD::EndDialog();
-	}
+        // First segment header (raw)
+        if (P.seg_ok && BeginDetailsSection("First segment header (raw-only)", false)) {
+            DrawSegmentHeaderTable(P);
+        }
+
+        // All segments list
+        if (BeginDetailsSection("All segments", true)) {
+            DrawAllSegmentsTable(hp, resolvedConn);
+        }
+
+        // IPC segments (collapsible per item)
+        if (BeginDetailsSection("IPC segments", true)) {
+            DrawIPCHeaderTable(P, hp.outgoing, hp, resolvedConn);
+        }
+
+        ImGui::PopStyleVar(2);
+        ImGui::SetWindowFontScale(1.0f);
+
+        ImGui::Separator();
+        if (ImGui::Button("Export JSON")) { s_pendingJson = hp; s_openJsonDialog = true; ImGuiFD::OpenDialog("Export JSON", ImGuiFDMode_SaveFile, "exports", "{JSON Files:*.json}, {*.*}"); }
+        ImGui::SameLine();
+        if (ImGui::Button("Export PCAP")) { s_pendingPcap = hp; s_openPcapDialog = true; ImGuiFD::OpenDialog("Export PCAP", ImGuiFDMode_SaveFile, "exports", "{PCAP Files:*.pcap}, {*.*}"); }
+        ImGui::Separator();
+    }
+    else {
+        ImGui::TextDisabled("Select a packet to view headers and hex dump");
+    }
+    ImGui::EndChild();
+
+    // Save dialogs
+    if (ImGuiFD::BeginDialog("Export JSON")) {
+        if (ImGuiFD::ActionDone()) {
+            if (ImGuiFD::SelectionMade()) {
+                const char* selPath = ImGuiFD::GetSelectionPathString(0);
+                std::string path = selPath ? std::string(selPath) : std::string();
+                if (!path.empty()) {
+                    if (path.size() < 5 || path.substr(path.size() - 5) != ".json")
+                        path += ".json";
+                    (void)ExportToJsonAs(s_pendingJson, path);
+                }
+            }
+            ImGuiFD::CloseCurrentDialog();
+            s_openJsonDialog = false;
+        }
+        ImGuiFD::EndDialog();
+    }
+
+    if (ImGuiFD::BeginDialog("Export PCAP")) {
+        if (ImGuiFD::ActionDone()) {
+            if (ImGuiFD::SelectionMade()) {
+                const char* selPath = ImGuiFD::GetSelectionPathString(0);
+                std::string path = selPath ? std::string(selPath) : std::string();
+                if (!path.empty()) {
+                    if (path.size() < 5 || path.substr(path.size() - 5) != ".pcap")
+                        path += ".pcap";
+                    (void)ExportToPcapAs(s_pendingPcap, path);
+                }
+            }
+            ImGuiFD::CloseCurrentDialog();
+            s_openPcapDialog = false;
+        }
+        ImGuiFD::EndDialog();
+    }
 }
-
+//DONT REMOVE THIS FUNCTION< IT IS USED BY DrawPacketStatistics
+// It is referenced in the ImGui UI to show detailed statistics. 
 static void DrawPacketStatistics(const HookPacket& hp, const std::vector<SegmentInfo>& segs) {
 	if (ImGui::CollapsingHeader("Packet Statistics", ImGuiTreeNodeFlags_DefaultOpen)) {
 		if (ImGui::BeginTable("pkt_stats", 2, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
@@ -1983,6 +2105,8 @@ static void DrawPacketStatistics(const HookPacket& hp, const std::vector<Segment
 }
 
 
+//DONT REMOVE THIS FUNCTION< IT IS USED BY DrawPacketStatistics
+// It is referenced in the ImGui UI to show detailed statistics. 
 // Update DrawImGuiEmbedded to better track flows
 void SafeHookLogger::DrawImGuiEmbedded() {
 	static std::vector<HookPacket> ui_batch;
@@ -2020,12 +2144,17 @@ void SafeHookLogger::DrawImGuiEmbedded() {
 	DrawPacketListAndDetails(display);
 }
 
+//DONT REMOVE THIS FUNCTION< IT IS USED BY DrawPacketStatistics
+// It is referenced in the ImGui UI to show detailed statistics. 
 void SafeHookLogger::DrawImGuiSimple() {
 	ImGui::Begin("Network Monitor");
 	DrawImGuiEmbedded();
 	ImGui::End();
 }
 
+
+//DONT REMOVE THIS FUNCTION< IT IS USED BY DrawPacketStatistics
+// It is referenced in the ImGui UI to show detailed statistics. 
 void SafeHookLogger::DrawImGuiSimple(bool* p_open) {
 	if (ImGui::Begin("Network Monitor", p_open)) {
 		DrawImGuiEmbedded();
