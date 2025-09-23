@@ -68,13 +68,13 @@
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\Core\AsyncPatternScanner.cpp" />
     <ClCompile Include="src\Core\CommandInvoker.cpp" />
     <ClCompile Include="src\Core\dynamic_hook_engine.cpp" />
     <ClCompile Include="src\Core\FunctionAnalyzer.cpp" />
     <ClCompile Include="src\Core\FunctionCallMonitor.cpp" />
     <ClCompile Include="src\Core\FunctionDatabase.cpp" />
     <ClCompile Include="src\Core\FunctionScanner.cpp" />
+    <ClCompile Include="src\Hooking\hook_manager.cpp" />
     <ClCompile Include="src\Monitor\NetworkMonitor.cpp" />
     <ClCompile Include="src\Monitor\NetworkMonitor.h" />
     <ClCompile Include="src\Core\PacketInjector.cpp" />
@@ -82,19 +82,16 @@
     <ClCompile Include="src\Core\SafeMemory.cpp" />
     <ClCompile Include="src\Core\SignatureDatabase.cpp" />
     <ClCompile Include="src\Core\SimpleJSON.cpp" />
-    <ClCompile Include="src\Core\string_xref_scanner.cpp" />
     <ClCompile Include="src\Core\WindowsAPIWrapper.cpp" />
-    <ClCompile Include="src\Core\patternscanner.cpp" />
+    <ClCompile Include="src\Core\PatternScanner.cpp" />
     <ClCompile Include="src\Modules\DebugCommandsModule.cpp" />
     <ClCompile Include="src\Modules\GMCommandsModule.cpp" />
-    <ClCompile Include="src\Modules\IPCCommandsModule.cpp" />
     <ClCompile Include="src\Modules\CommandInterface.cpp" />
     <ClCompile Include="src\Modules\MemoryViewerModule.cpp" />
     <ClCompile Include="src\Modules\NetDiagnosticsModule.cpp" />
     <ClCompile Include="src\Monitor\OpcodeNames.cpp" />
     <ClCompile Include="src\UI\imgui_overlay.cpp" />
     <ClCompile Include="src\UI\UIManager.cpp" />
-    <ClCompile Include="src\Hooking\hook_manager.cpp" />
     <ClCompile Include="src\Hooking\lua_hook.cpp" />
     <ClCompile Include="src\Entry\dllmain.cpp" />
     <ClCompile Include="vendor\hex_editor\imgui_hex.cpp" />
@@ -116,29 +113,26 @@
     <ClCompile Include="vendor\miniz\miniz.c" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\Core\AsyncPatternScanner.h" />
     <ClInclude Include="src\Core\CommandInvoker.h" />
     <ClInclude Include="src\Core\dynamic_hook_engine.h" />
     <ClInclude Include="src\Core\FunctionAnalyzer.h" />
     <ClInclude Include="src\Core\FunctionCallMonitor.h" />
     <ClInclude Include="src\Core\FunctionDatabase.h" />
     <ClInclude Include="src\Core\FunctionScanner.h" />
-    <ClInclude Include="src\Core\Json.h" />
     <ClInclude Include="src\Core\PacketInjector.h" />
     <ClInclude Include="src\Core\ResourceLoader.h" />
     <ClInclude Include="src\Core\SafeMemory.h" />
     <ClInclude Include="src\Core\ServiceManager.h" />
     <ClInclude Include="src\Core\SignatureDatabase.h" />
-    <ClInclude Include="src\Core\patternscanner.h" />
+    <ClInclude Include="src\Core\PatternScanner.h" />
     <ClInclude Include="src\Core\SignatureScanner.h" />
     <ClInclude Include="src\Core\SimpleJSON.h" />
-    <ClInclude Include="src\Core\string_xref_scanner.h" />
     <ClInclude Include="src\Core\WindowsApiWrapper.h" />
     <ClInclude Include="src\Hooking\hook_factory_impl.h" />
+    <ClInclude Include="src\Hooking\hook_manager.h" />
     <ClInclude Include="src\Modules\DebugCommandsModule.h" />
     <ClInclude Include="src\Modules\GMCommandList.h" />
     <ClInclude Include="src\Modules\GMCommandsModule.h" />
-    <ClInclude Include="src\Modules\IPCCommandsModule.h" />
     <ClInclude Include="src\Modules\CommandInterface.h" />
     <ClInclude Include="src\Modules\MemoryViewerModule.h" />
     <ClInclude Include="src\Modules\NetDiagnosticsModule.h" />
@@ -146,7 +140,6 @@
     <ClInclude Include="src\UI\imgui_overlay.h" />
     <ClInclude Include="src\UI\UIManager.h" />
     <ClInclude Include="src\UI\UIModule.h" />
-    <ClInclude Include="src\Hooking\hook_manager.h" />
     <ClInclude Include="src\Hooking\lua_hook.h" />
     <ClInclude Include="vendor\hex_editor\imgui_hex.h" />
     <ClInclude Include="vendor\ImGuiFD\ImGuiFD.h" />

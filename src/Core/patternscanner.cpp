@@ -1,4 +1,4 @@
-#include "patternscanner.h"
+#include "PatternScanner.h"
 #include "../Logger/Logger.h"
 #include "../Core/WindowsAPIWrapper.h"
 #include <algorithm>
@@ -539,20 +539,20 @@ namespace SapphireHook {
     {
         std::vector<int> bytes;
         std::string patternStr(pattern);
-        
+
         // Split the pattern by spaces manually
         size_t start = 0;
         size_t end = 0;
-        
+
         while (end != std::string::npos)
         {
             end = patternStr.find(' ', start);
             std::string token = patternStr.substr(start, (end == std::string::npos) ? std::string::npos : end - start);
-            
+
             // Trim whitespace
             token.erase(0, token.find_first_not_of(" \t\r\n"));
             token.erase(token.find_last_not_of(" \t\r\n") + 1);
-            
+
             if (!token.empty())
             {
                 if (token == "?" || token == "??")
@@ -579,7 +579,7 @@ namespace SapphireHook {
                     }
                 }
             }
-            
+
             start = (end == std::string::npos) ? end : end + 1;
         }
 
@@ -750,12 +750,795 @@ namespace SapphireHook {
         return true;
     }
 
+    // ===== ASYNC PATTERN SCANNING IMPLEMENTATION =====
+
+    std::future<AsyncScanResult> AsyncPatternScanner::ScanPatternAsync(
+        uintptr_t start,
+        size_t length,
+        std::string_view pattern,
+        CancellationToken cancellation,
+        const ScanConfig& config,
+        ProgressCallback progress)
+    {
+        return std::async(std::launch::async, [=]()
+            {
+                return PerformScan(start, length, pattern, cancellation, config, progress);
+            });
+    }
+
+    std::future<AsyncScanResult> AsyncPatternScanner::ScanModuleAsync(
+        const wchar_t* moduleName,
+        std::string_view pattern,
+        CancellationToken cancellation,
+        const ScanConfig& config,
+        ProgressCallback progress)
+    {
+        return std::async(std::launch::async, [=]()
+            {
+                // Convert wide string to narrow string for GetModuleHandleWrapper
+                std::string moduleNameStr;
+                for (const wchar_t* p = moduleName; *p; ++p)
+                {
+                    if (*p <= 127) moduleNameStr += static_cast<char>(*p);
+                    else moduleNameStr += '?';
+                }
+
+                // Get module information
+                void* hModule = GetModuleHandleWrapper(moduleNameStr.c_str());
+                if (!hModule)
+                {
+                    AsyncScanResult result;
+                    result.error = ScanError::ModuleNotFound;
+                    result.pattern = std::string(pattern);
+                    result.was_cancelled = false;
+
+                    LogError("Failed to get module handle for: " + moduleNameStr);
+                    return result;
+                }
+
+                // For simplicity, we'll use a reasonable default module size
+                // In a real implementation, you'd use GetModuleInformation to get the actual size
+                uintptr_t moduleBase = reinterpret_cast<uintptr_t>(hModule);
+                size_t moduleSize = 0x10000000; // 256MB default - should be determined properly
+
+                if (config.enable_logging)
+                {
+                    LogInfo("Scanning module at 0x" + std::to_string(moduleBase) + " for pattern: " + std::string(pattern));
+                }
+
+                return PerformScan(moduleBase, moduleSize, pattern, cancellation, config, progress);
+            });
+    }
+
+    std::future<std::vector<AsyncScanResult>> AsyncPatternScanner::ScanPatternsAsync(
+        uintptr_t start,
+        size_t length,
+        const std::vector<std::string>& patterns,
+        CancellationToken cancellation,
+        const ScanConfig& config,
+        ProgressCallback progress)
+    {
+        return std::async(std::launch::async, [=]()
+            {
+                std::vector<AsyncScanResult> results;
+                results.reserve(patterns.size());
+
+                if (config.enable_logging)
+                {
+                    LogInfo("Starting batch scan of " + std::to_string(patterns.size()) + " patterns");
+                }
+
+                for (size_t i = 0; i < patterns.size(); ++i)
+                {
+                    if (cancellation.IsCancelled())
+                    {
+                        // Add cancelled results for remaining patterns
+                        for (size_t j = i; j < patterns.size(); ++j)
+                        {
+                            AsyncScanResult cancelledResult;
+                            cancelledResult.pattern = patterns[j];
+                            cancelledResult.was_cancelled = true;
+                            cancelledResult.error = ScanError::NotFound;
+                            results.push_back(cancelledResult);
+                        }
+                        break;
+                    }
+
+                    // Update progress if callback provided
+                    if (progress)
+                    {
+                        progress(i, patterns.size(), patterns[i]);
+                    }
+
+                    // Perform individual scan
+                    AsyncScanResult result = PerformScan(start, length, patterns[i], cancellation, config, nullptr);
+                    results.push_back(result);
+
+                    if (config.enable_logging && result)
+                    {
+                        LogInfo("Pattern " + std::to_string(i + 1) + "/" + std::to_string(patterns.size()) +
+                            " found at 0x" + std::to_string(result.result->address));
+                    }
+                }
+
+                return results;
+            });
+    }
+
+    AsyncScanResult AsyncPatternScanner::PerformScan(
+        uintptr_t start,
+        size_t length,
+        std::string_view pattern,
+        CancellationToken cancellation,
+        const ScanConfig& config,
+        ProgressCallback progress)
+    {
+        AsyncScanResult result;
+        result.pattern = std::string(pattern);
+
+        auto startTime = std::chrono::steady_clock::now();
+
+        // Validate memory region
+        if (!ValidateMemoryRegion(start, length))
+        {
+            result.error = ScanError::MemoryAccessViolation;
+            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - startTime);
+            LogScanResult(result);
+            return result;
+        }
+
+        // Log scan start
+        if (config.enable_logging)
+        {
+            LogScanStart(pattern, start, length);
+        }
+
+        try
+        {
+            // Create timeout cancellation if specified
+            CancellationToken timeoutToken = CancellationToken::CreateWithTimeout(config.timeout);
+
+            // Use PatternScanner to perform the actual scan
+            auto scanResult = PatternScanner::ScanPattern(start, length, std::string(pattern));
+
+            // Check for cancellation
+            if (cancellation.IsCancelled() || timeoutToken.IsCancelled())
+            {
+                result.was_cancelled = true;
+                result.error = ScanError::NotFound;
+            }
+            else if (scanResult)
+            {
+                result.result = *scanResult;
+                // Success is indicated by result.result.has_value()
+            }
+            else
+            {
+                result.error = ScanError::NotFound;
+            }
+        }
+        catch (const std::exception& ex)
+        {
+            result.error = ScanError::MemoryAccessViolation;
+            if (config.enable_logging)
+            {
+                LogError("Exception during pattern scan: " + std::string(ex.what()));
+            }
+        }
+
+        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - startTime);
+
+        if (config.enable_logging)
+        {
+            LogScanResult(result);
+        }
+
+        return result;
+    }
+
+    bool AsyncPatternScanner::ValidateMemoryRegion(uintptr_t start, size_t length)
+    {
+        if (start == 0 || length == 0)
+        {
+            return false;
+        }
+
+        // Use the wrapper function to avoid Windows header dependencies
+        try
+        {
+            // Simple validation using the wrapper - just check if we can query the memory
+            char dummyBuffer[64]; // Small buffer for VirtualQuery result
+            return VirtualQueryWrapper(reinterpret_cast<const void*>(start), dummyBuffer, sizeof(dummyBuffer));
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
+    void AsyncPatternScanner::LogScanStart(std::string_view pattern, uintptr_t start, size_t length)
+    {
+        std::ostringstream oss;
+        oss << "Starting pattern scan: '" << pattern << "' at 0x"
+            << std::hex << start << " (length: 0x" << length << ")";
+        LogInfo(oss.str());
+    }
+
+    void AsyncPatternScanner::LogScanResult(const AsyncScanResult& result)
+    {
+        std::ostringstream oss;
+
+        if (result.was_cancelled)
+        {
+            oss << "Pattern scan cancelled: '" << result.pattern << "'";
+        }
+        else if (result.result.has_value())
+        {
+            oss << "Pattern scan successful: '" << result.pattern
+                << "' found at 0x" << std::hex << result.result->address;
+        }
+        else
+        {
+            oss << "Pattern scan failed: '" << result.pattern << "' - ";
+            switch (result.error)
+            {
+            case ScanError::NotFound:
+                oss << "Not found";
+                break;
+            case ScanError::MemoryAccessViolation:
+                oss << "Memory access violation";
+                break;
+            case ScanError::InvalidAddress:
+                oss << "Invalid address";
+                break;
+            case ScanError::InvalidPattern:
+                oss << "Invalid pattern";
+                break;
+            case ScanError::ModuleNotFound:
+                oss << "Module not found";
+                break;
+            case ScanError::CacheCorrupted:
+                oss << "Cache corrupted";
+                break;
+            default:
+                oss << "Unknown error";
+                break;
+            }
+        }
+
+        oss << " (Duration: " << result.duration.count() << "ms)";
+
+        if (result.result.has_value())
+        {
+            LogInfo(oss.str());
+        }
+        else
+        {
+            LogWarning(oss.str());
+        }
+    }
+
+    // ===== STRING XREF FUNCTIONALITY IMPLEMENTATION =====
+
+    PESection PatternScanner::GetPESection(HMODULE module, const char* sectionName)
+    {
+        PESection result;
+
+        auto base = reinterpret_cast<std::byte*>(module);
+        auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+        if (!dos || dos->e_magic != IMAGE_DOS_SIGNATURE) return result;
+
+        auto nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+        if (!nt || nt->Signature != IMAGE_NT_SIGNATURE) return result;
+
+        auto sec = IMAGE_FIRST_SECTION(nt);
+        for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i)
+        {
+            char secName[9] = { 0 };
+            std::memcpy(secName, sec[i].Name, 8);
+
+            if (std::string_view(secName) == sectionName)
+            {
+                result.baseAddress = base + sec[i].VirtualAddress;
+                result.size = sec[i].Misc.VirtualSize ? sec[i].Misc.VirtualSize : sec[i].SizeOfRawData;
+                result.name = secName;
+                break;
+            }
+        }
+
+        return result;
+    }
+
+    std::vector<std::byte*> PatternScanner::FindAsciiInBuffer(std::byte* buffer, size_t length, std::string_view needle)
+    {
+        std::vector<std::byte*> hits;
+        if (needle.empty() || !buffer || length < needle.size()) return hits;
+
+        auto* b = reinterpret_cast<const char*>(buffer);
+        auto* e = b + length - needle.size() + 1;
+
+        for (auto* p = b; p < e; ++p)
+        {
+            if (p[0] == needle[0] && std::memcmp(p, needle.data(), needle.size()) == 0)
+            {
+                hits.push_back(reinterpret_cast<std::byte*>(const_cast<char*>(p)));
+            }
+        }
+
+        return hits;
+    }
+
+    std::vector<std::byte*> PatternScanner::FindUtf16InBuffer(std::byte* buffer, size_t length, std::wstring_view needle)
+    {
+        std::vector<std::byte*> hits;
+        if (needle.empty() || !buffer) return hits;
+
+        const size_t needleBytes = needle.size() * sizeof(wchar_t);
+        if (length < needleBytes) return hits;
+
+        auto* b = reinterpret_cast<const wchar_t*>(buffer);
+        auto wlen = length / sizeof(wchar_t);
+        auto* e = b + wlen - needle.size() + 1;
+
+        for (auto* p = b; p < e; ++p)
+        {
+            if (p[0] == needle[0] && std::memcmp(p, needle.data(), needleBytes) == 0)
+            {
+                hits.push_back(reinterpret_cast<std::byte*>(const_cast<wchar_t*>(p)));
+            }
+        }
+
+        return hits;
+    }
+
+    bool PatternScanner::ParseRipRelativeInstruction(const std::byte* instruction, uintptr_t& target, size_t& instructionLength)
+    {
+        // Parse LEA/MOV RIP-relative instructions: [REX] 8D/8B ModRM(00 101 r) disp32
+        const bool hasRex = (instruction[0] >= std::byte{ 0x40 } && instruction[0] <= std::byte{ 0x4F });
+        const size_t opOffset = hasRex ? 1 : 0;
+        const size_t modrmOffset = opOffset + 1;
+        const size_t dispOffset = modrmOffset + 1;
+        const size_t minLength = hasRex ? 7 : 6;
+
+        const std::byte opcode = instruction[opOffset];
+        if (!(opcode == std::byte{ 0x8D } || opcode == std::byte{ 0x8B })) return false;
+
+        const unsigned modrm = static_cast<unsigned>(instruction[modrmOffset]);
+        const unsigned mod = (modrm >> 6) & 0x3;
+        const unsigned rm = modrm & 0x7;
+        if (!(mod == 0 && rm == 5)) return false; // Must be RIP-relative
+
+        const int32_t displacement = *reinterpret_cast<const int32_t*>(instruction + dispOffset);
+        const auto* nextInstruction = instruction + minLength;
+        const auto nextAddress = reinterpret_cast<uintptr_t>(nextInstruction);
+
+        target = static_cast<uintptr_t>(static_cast<intptr_t>(nextAddress) + displacement);
+        instructionLength = minLength;
+        return true;
+    }
+
+    std::vector<uintptr_t> PatternScanner::FindRipReferencesTo(HMODULE module, uintptr_t targetAddress)
+    {
+        std::vector<uintptr_t> references;
+
+        auto textSection = GetPESection(module, ".text");
+        if (!textSection || textSection.size < 6) return references;
+
+        const auto* begin = textSection.baseAddress;
+        const auto* end = textSection.baseAddress + textSection.size - 6; // minimum instruction size
+
+        for (const auto* p = begin; p <= end; ++p)
+        {
+            uintptr_t target = 0;
+            size_t instructionLength = 0;
+
+            if (!ParseRipRelativeInstruction(p, target, instructionLength)) continue;
+
+            if (target == targetAddress)
+            {
+                references.push_back(reinterpret_cast<uintptr_t>(p));
+            }
+        }
+
+        return references;
+    }
+
+    uintptr_t PatternScanner::GetFunctionStartFromRva(HMODULE module, uint32_t rva)
+    {
+        auto base = reinterpret_cast<std::byte*>(module);
+        auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
+        auto nt = reinterpret_cast<IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+
+        const IMAGE_DATA_DIRECTORY& exceptionDir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+        if (exceptionDir.VirtualAddress == 0 || exceptionDir.Size == 0) return 0;
+
+        using RUNTIME_FUNCTION = IMAGE_RUNTIME_FUNCTION_ENTRY;
+        auto* runtimeFunctions = reinterpret_cast<RUNTIME_FUNCTION*>(base + exceptionDir.VirtualAddress);
+        auto count = exceptionDir.Size / sizeof(RUNTIME_FUNCTION);
+
+        // Binary search over sorted RUNTIME_FUNCTION entries
+        size_t low = 0, high = count;
+        while (low < high)
+        {
+            size_t mid = (low + high) / 2;
+            auto begin = runtimeFunctions[mid].BeginAddress;
+            auto end = runtimeFunctions[mid].EndAddress;
+
+            if (rva < begin)
+            {
+                high = mid;
+            }
+            else if (rva >= end)
+            {
+                low = mid + 1;
+            }
+            else
+            {
+                return reinterpret_cast<uintptr_t>(module) + begin;
+            }
+        }
+        return 0;
+    }
+
+    std::vector<std::pair<uintptr_t, std::string>> PatternScanner::EnumerateAsciiStrings(HMODULE module, size_t minLength)
+    {
+        std::vector<std::pair<uintptr_t, std::string>> result;
+
+        auto rdataSection = GetPESection(module, ".rdata");
+        if (!rdataSection) return result;
+
+        const auto* bytes = reinterpret_cast<const unsigned char*>(rdataSection.baseAddress);
+        size_t i = 0;
+
+        while (i < rdataSection.size)
+        {
+            size_t start = i;
+            size_t length = 0;
+
+            // Collect printable ASCII characters
+            while (i < rdataSection.size)
+            {
+                unsigned char c = bytes[i];
+                if (c >= 0x20 && c <= 0x7E) // printable ASCII
+                {
+                    ++i;
+                    ++length;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            // Require null terminator and minimum length
+            if (length >= minLength && i < rdataSection.size && bytes[i] == 0x00)
+            {
+                auto address = reinterpret_cast<uintptr_t>(rdataSection.baseAddress + start);
+                std::string text(reinterpret_cast<const char*>(bytes + start), length);
+                result.emplace_back(address, std::move(text));
+                ++i; // skip null terminator
+            }
+            else
+            {
+                // Skip to next potential string
+                if (i < rdataSection.size && bytes[i] == 0x00) ++i;
+                else i = start + 1;
+            }
+        }
+
+        return result;
+    }
+
+    std::vector<std::pair<uintptr_t, std::string>> PatternScanner::EnumerateUtf16Strings(HMODULE module, size_t minLength)
+    {
+        std::vector<std::pair<uintptr_t, std::string>> result;
+
+        auto rdataSection = GetPESection(module, ".rdata");
+        if (!rdataSection || rdataSection.size < 4) return result;
+
+        const auto* bytes = reinterpret_cast<const unsigned char*>(rdataSection.baseAddress);
+        size_t i = 0;
+
+        while (i + 1 < rdataSection.size)
+        {
+            size_t start = i;
+            size_t charCount = 0;
+
+            // Collect ASCII-range UTF-16LE characters (xx 00)
+            while (i + 1 < rdataSection.size)
+            {
+                unsigned char low = bytes[i];
+                unsigned char high = bytes[i + 1];
+
+                if (high == 0x00 && low >= 0x20 && low <= 0x7E) // ASCII in UTF-16LE
+                {
+                    i += 2;
+                    ++charCount;
+                }
+                else
+                {
+                    break;
+                }
+            }
+
+            // Require wide null terminator (00 00) and minimum length
+            if (charCount >= minLength && i + 1 < rdataSection.size &&
+                bytes[i] == 0x00 && bytes[i + 1] == 0x00)
+            {
+                auto address = reinterpret_cast<uintptr_t>(rdataSection.baseAddress + start);
+
+                // Convert UTF-16LE to narrow string
+                std::string text;
+                text.reserve(charCount);
+                for (size_t j = 0; j < charCount; ++j)
+                {
+                    text.push_back(static_cast<char>(bytes[start + j * 2]));
+                }
+
+                result.emplace_back(address, std::move(text));
+                i += 2; // skip wide null terminator
+            }
+            else
+            {
+                // Skip to next potential string
+                if (i + 1 < rdataSection.size && bytes[i] == 0x00 && bytes[i + 1] == 0x00) i += 2;
+                else ++i;
+            }
+        }
+
+        return result;
+    }
+
+    std::vector<uintptr_t> PatternScanner::FindFunctionsReferencingString(HMODULE module, std::string_view searchString)
+    {
+        std::vector<uintptr_t> result;
+
+        auto rdataSection = GetPESection(module, ".rdata");
+        if (!rdataSection) return result;
+
+        // Find ASCII occurrences
+        auto asciiHits = FindAsciiInBuffer(rdataSection.baseAddress, rdataSection.size, searchString);
+
+        // Find UTF-16LE occurrences
+        std::wstring wideNeedle(searchString.begin(), searchString.end());
+        auto utf16Hits = FindUtf16InBuffer(rdataSection.baseAddress, rdataSection.size, wideNeedle);
+
+        // Collect all target addresses
+        std::vector<uintptr_t> targets;
+        targets.reserve(asciiHits.size() + utf16Hits.size());
+
+        for (auto* ptr : asciiHits)
+        {
+            targets.push_back(reinterpret_cast<uintptr_t>(ptr));
+        }
+        for (auto* ptr : utf16Hits)
+        {
+            targets.push_back(reinterpret_cast<uintptr_t>(ptr));
+        }
+
+        // For each string address, find functions that reference it
+        for (auto address : targets)
+        {
+            auto references = FindRipReferencesTo(module, address);
+            for (auto ref : references)
+            {
+                auto rva = static_cast<uint32_t>(ref - reinterpret_cast<uintptr_t>(module));
+                auto functionStart = GetFunctionStartFromRva(module, rva);
+                if (functionStart != 0)
+                {
+                    result.push_back(functionStart);
+                }
+            }
+        }
+
+        // Remove duplicates and sort
+        std::sort(result.begin(), result.end());
+        result.erase(std::unique(result.begin(), result.end()), result.end());
+
+        return result;
+    }
+
+    FunctionStringMap PatternScanner::MapFunctionsToStrings(HMODULE module, size_t minStringLength)
+    {
+        FunctionStringMap result;
+
+        // Enumerate all strings
+        auto asciiStrings = EnumerateAsciiStrings(module, minStringLength);
+        auto utf16Strings = EnumerateUtf16Strings(module, minStringLength);
+
+        result.asciiStringCount = asciiStrings.size();
+        result.utf16StringCount = utf16Strings.size();
+
+        // For deduplication per function
+        std::unordered_map<uintptr_t, std::unordered_set<std::string>> functionStringsSeen;
+
+        auto processString = [&](uintptr_t stringAddress, const std::string& text)
+            {
+                auto references = FindRipReferencesTo(module, stringAddress);
+                for (auto ref : references)
+                {
+                    auto rva = static_cast<uint32_t>(ref - reinterpret_cast<uintptr_t>(module));
+                    auto functionStart = GetFunctionStartFromRva(module, rva);
+                    if (!functionStart) continue;
+
+                    // Add to function->strings mapping (with dedup)
+                    auto& seenStrings = functionStringsSeen[functionStart];
+                    if (seenStrings.insert(text).second)
+                    {
+                        result.functionsToStrings[functionStart].push_back(text);
+                    }
+
+                    // Add to string->functions mapping
+                    auto& functionVector = result.stringsToFunctions[text];
+                    if (functionVector.empty() || functionVector.back() != functionStart)
+                    {
+                        functionVector.push_back(functionStart);
+                    }
+                }
+            };
+
+        // Process all strings
+        for (const auto& [addr, text] : asciiStrings)
+        {
+            processString(addr, text);
+        }
+        for (const auto& [addr, text] : utf16Strings)
+        {
+            processString(addr, text);
+        }
+
+        // Sort vectors for determinism
+        for (auto& [func, strings] : result.functionsToStrings)
+        {
+            std::sort(strings.begin(), strings.end());
+            strings.erase(std::unique(strings.begin(), strings.end()), strings.end());
+        }
+        for (auto& [text, functions] : result.stringsToFunctions)
+        {
+            std::sort(functions.begin(), functions.end());
+            functions.erase(std::unique(functions.begin(), functions.end()), functions.end());
+        }
+
+        return result;
+    }
+
+    std::optional<StringXrefResult> PatternScanner::GuessNameFromStringReferences(uintptr_t functionAddress, size_t maxScanBytes)
+    {
+        auto textSection = GetPESection(GetModuleHandleW(nullptr), ".text");
+        auto rdataSection = GetPESection(GetModuleHandleW(nullptr), ".rdata");
+        if (!textSection || !rdataSection) return std::nullopt;
+
+        // Validate function address is in .text section
+        if (functionAddress < reinterpret_cast<uintptr_t>(textSection.baseAddress) ||
+            functionAddress >= reinterpret_cast<uintptr_t>(textSection.baseAddress) + textSection.size)
+        {
+            return std::nullopt;
+        }
+
+        const auto* code = reinterpret_cast<const std::byte*>(functionAddress);
+        const auto* textEnd = textSection.baseAddress + textSection.size;
+        const size_t maxScan = std::min(maxScanBytes,
+            static_cast<size_t>(textEnd - reinterpret_cast<const std::byte*>(code)));
+
+        std::string bestCandidate;
+        uintptr_t bestStringAddress = 0;
+        uintptr_t bestReferenceAddress = 0;
+        bool bestIsUtf16 = false;
+
+        for (size_t i = 0; i + 6 <= maxScan; )
+        {
+            uintptr_t target = 0;
+            size_t instructionLength = 0;
+
+            if (!ParseRipRelativeInstruction(code + i, target, instructionLength))
+            {
+                ++i;
+                continue;
+            }
+            i += instructionLength;
+
+            // Check if target is in .rdata section
+            if (target < reinterpret_cast<uintptr_t>(rdataSection.baseAddress) ||
+                target >= reinterpret_cast<uintptr_t>(rdataSection.baseAddress) + rdataSection.size)
+            {
+                continue;
+            }
+
+            // Try to read as ASCII string
+            const char* str = reinterpret_cast<const char*>(target);
+            std::string candidate;
+
+            // Safely read ASCII string (bounded by section end)
+            size_t maxLen = std::min<size_t>(128,
+                reinterpret_cast<const char*>(rdataSection.baseAddress + rdataSection.size) - str);
+
+            for (size_t j = 0; j < maxLen; ++j)
+            {
+                char c = str[j];
+                if (c == '\0') break;
+                if (c < 0x20 || c > 0x7E) // not printable ASCII
+                {
+                    candidate.clear();
+                    break;
+                }
+                candidate.push_back(c);
+            }
+
+            // If ASCII failed, try UTF-16LE
+            bool isUtf16 = false;
+            if (candidate.empty())
+            {
+                const unsigned char* ptr = reinterpret_cast<const unsigned char*>(target);
+                std::string utf8Candidate;
+                maxLen = std::min<size_t>(256,
+                    reinterpret_cast<const unsigned char*>(rdataSection.baseAddress + rdataSection.size) - ptr);
+
+                for (size_t j = 0; j + 1 < maxLen; j += 2)
+                {
+                    unsigned char low = ptr[j], high = ptr[j + 1];
+                    if (low == 0x00 && high == 0x00) break; // null terminator
+                    if (high != 0x00 || low < 0x20 || low > 0x7E) // not ASCII range
+                    {
+                        utf8Candidate.clear();
+                        break;
+                    }
+                    utf8Candidate.push_back(static_cast<char>(low));
+                }
+
+                if (!utf8Candidate.empty())
+                {
+                    candidate = std::move(utf8Candidate);
+                    isUtf16 = true;
+                }
+                else
+                {
+                    continue;
+                }
+            }
+
+            // Clean up the candidate string
+            while (!candidate.empty() &&
+                (candidate.back() == '.' || candidate.back() == ':' || candidate.back() == ' '))
+            {
+                candidate.pop_back();
+            }
+
+            // Keep the longest/best candidate
+            if (!candidate.empty() && (bestCandidate.empty() || candidate.size() > bestCandidate.size()))
+            {
+                bestCandidate = candidate;
+                bestStringAddress = target;
+                bestReferenceAddress = functionAddress + i - instructionLength;
+                bestIsUtf16 = isUtf16;
+            }
+        }
+
+        if (bestCandidate.empty()) return std::nullopt;
+
+        StringXrefResult result;
+        result.text = bestCandidate;
+        result.stringAddress = bestStringAddress;
+        result.referenceAddress = bestReferenceAddress;
+        result.isUtf16 = bestIsUtf16;
+
+        return result;
+    }
+
+    // ===== ScanOperation Implementation =====
+
+    void ScanOperation::Cancel()
+    {
+        LogWarning("Cancelling scan operation for pattern: " + m_pattern);
+        m_cancellation.Cancel();
+    }
+
     // ===== ModuleInfo Implementation =====
 
     ModuleInfo::ModuleInfo(const wchar_t* moduleName)
         : m_baseAddress(0), m_size(0), m_scanned(std::chrono::system_clock::now())
     {
-
         if (moduleName)
         {
             m_name = moduleName;
@@ -853,7 +1636,6 @@ namespace SapphireHook {
     std::shared_ptr<EnhancedPatternScanner> ScannerFactory::CreateCachedScanner(
         const std::filesystem::path& cacheDir, const std::string& gameVersion)
     {
-
         std::filesystem::create_directories(cacheDir);
         std::filesystem::path cacheFile = cacheDir / "pattern_cache.json";
 
@@ -869,7 +1651,6 @@ namespace SapphireHook {
     std::shared_ptr<EnhancedPatternScanner> ScannerFactory::CreateModuleScanner(
         const std::wstring& moduleName, bool enableCaching)
     {
-
         // Would implement module-specific scanner
         std::filesystem::path cacheFile;
         if (enableCaching)

@@ -1,6 +1,5 @@
 #include "../UI/UIManager.h"
 #include "../UI/UIModule.h"
-#include "../Modules/IPCCommandsModule.h"
 #include "../Modules/DebugCommandsModule.h"
 #include "../Core/FunctionCallMonitor.h"
 #include "../Logger/Logger.h"
@@ -139,31 +138,6 @@ void UIManager::RegisterDefaultModules()
 
 	try
 	{
-		if (GetModule("ipc_commands") == nullptr)
-		{
-			LogInfo("Creating IPC Commands module...");
-			auto ipcModule = std::make_unique<IPCCommandsModule>();
-			RegisterModule(std::move(ipcModule));
-			LogInfo("[OK] IPC Commands module registered");
-			successCount++;
-		}
-		else
-		{
-			LogInfo("IPC Commands module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register IPC Commands: " + std::string(e.what()));
-	}
-	catch (...)
-	{
-		LogError("Failed to register IPC Commands: unknown exception");
-	}
-
-	try
-	{
 		if (GetModule("debug_commands") == nullptr)
 		{
 			LogInfo("Creating Debug Commands module...");
@@ -289,7 +263,7 @@ void UIManager::RegisterDefaultModules()
 	}
 
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
-	LogInfo("Successfully registered: " + std::to_string(successCount) + "/6 modules");
+	LogInfo("Successfully registered: " + std::to_string(successCount) + "/5 modules");
 	LogInfo("Final module count on instance " + std::to_string(reinterpret_cast<uintptr_t>(this)) +
 		": " + std::to_string(m_modules.size()));
 

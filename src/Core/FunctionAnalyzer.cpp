@@ -1,8 +1,8 @@
 #include "FunctionAnalyzer.h"
 #include "FunctionDatabase.h"
 #include "SignatureDatabase.h"
+#include "PatternScanner.h"  // Add this include for the consolidated string xref functionality
 #include "../Logger/Logger.h"
-#include "string_xref_scanner.h"
 #include <sstream>
 #include <iomanip>
 #include <map>
@@ -445,21 +445,25 @@ namespace SapphireHook {
         HMODULE self = GetModuleHandleW(nullptr);
         const size_t minStringLen = 6; // tune if needed
 
-        auto xmap = xref::mapFunctionsToStrings(self, minStringLen);
+        // Use the consolidated PatternScanner string xref functionality
+        auto functionStringMap = PatternScanner::MapFunctionsToStrings(self, minStringLen);
 
         size_t totalFnRefs = 0;
-        for (const auto& kv : xmap.functionsToStrings) totalFnRefs += kv.second.size();
+        for (const auto& kv : functionStringMap.functionsToStrings)
+        {
+            totalFnRefs += kv.second.size();
+        }
 
         std::stringstream ss;
-        ss << "String XREF summary: ASCII=" << xmap.asciiCount
-           << ", UTF16=" << xmap.utf16Count
-           << ", FunctionsWithRefs=" << xmap.functionsToStrings.size()
+        ss << "String XREF summary: ASCII=" << functionStringMap.asciiStringCount
+           << ", UTF16=" << functionStringMap.utf16StringCount
+           << ", FunctionsWithRefs=" << functionStringMap.functionsToStrings.size()
            << ", TotalFn->String edges=" << totalFnRefs;
         LogInfo(ss.str());
 
         // Integrate into discovered set (avoid duplicates)
         size_t added = 0, preview = 0;
-        for (const auto& kv : xmap.functionsToStrings)
+        for (const auto& kv : functionStringMap.functionsToStrings)
         {
             auto fn = kv.first;
             const auto& texts = kv.second;
