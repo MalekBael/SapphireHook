@@ -494,18 +494,12 @@ void UIManager::RenderMainMenu()
 	{
 		if (ImGui::BeginMenu("SapphireHook"))
 		{
-			ImGui::MenuItem("Show Demo Window", nullptr, &m_showDemoWindow);
-			ImGui::Separator();
-			
 			// Enhanced unload option with confirmation
 			if (ImGui::MenuItem("Unload DLL"))
 			{
 				ImGui::OpenPopup("Confirm Unload");
 			}
 			
-			if (ImGui::MenuItem("Exit"))
-			{
-			}
 			ImGui::EndMenu();
 		}
 
@@ -680,15 +674,7 @@ void UIManager::RenderAllWindows()
   }
  }
 
- if (m_showDemoWindow)
- {
-  ImGui::ShowDemoWindow(&m_showDemoWindow);
- }
-}
-
-size_t UIManager::GetModuleCount() const
-{
- return m_modules.size();
+ // Removed the demo window rendering since it's no longer needed
 }
 
 void UIManager::RequestUnload()

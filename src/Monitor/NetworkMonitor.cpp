@@ -17,6 +17,9 @@
 #include <iomanip>
 #include "../../vendor/miniz/miniz.h"
 #include "../../vendor/ImGuiFD/ImGuiFD.h"
+#include "../Logger/Logger.h"
+
+using namespace SapphireHook;
 
 SafeHookLogger& SafeHookLogger::Instance() {
 	static SafeHookLogger inst{};
@@ -223,6 +226,7 @@ namespace {
 				}
 			}
 		}
+		LogDebug("SafeHookLogger: Packet correlation updated for opcode: " + std::to_string(opcode));
 	}
 }      
 
@@ -235,7 +239,10 @@ SafeHookLogger::~SafeHookLogger() = default;
 
 bool SafeHookLogger::TryEnqueueFromHook(const void* data, size_t len,
 	bool outgoing, uint64_t conn_id) noexcept {
-	if (!data || len == 0) return false;
+	if (!data || len == 0) {
+		LogDebug("SafeHookLogger: Invalid data provided to TryEnqueueFromHook");
+		return false;
+	}
 	size_t tocopy = (len > SLOT_PAYLOAD_CAP) ? SLOT_PAYLOAD_CAP : len;
 
 	size_t start = producer_fetch_.fetch_add(1, std::memory_order_relaxed) % SLOT_COUNT;
@@ -252,6 +259,8 @@ bool SafeHookLogger::TryEnqueueFromHook(const void* data, size_t len,
 			slot.packet.len = (uint32_t)tocopy;
 			std::memcpy(slot.packet.buf.data(), data, tocopy);
 			slot.state.store(uint8_t(SlotState::READY), std::memory_order_release);
+			LogDebug("SafeHookLogger: Packet enqueued (" + std::to_string(tocopy) + " bytes, " + 
+				(outgoing ? "outgoing" : "incoming") + ")");
 			return true;
 		}
 	}
@@ -352,8 +361,8 @@ void SafeHookLogger::DumpHexAsciiColored(const HookPacket& hp, const std::vector
 		}
 		if (ImGui::IsMouseClicked(1)) { s_selStart = s_selEnd = -1; s_dragging = false; }
 
-		const int selMin = (s_selStart >= 0 && s_selEnd >= 0) ? std::min(s_selStart, s_selEnd) : -1;
-		const int selMax = (s_selStart >= 0 && s_selEnd >= 0) ? std::max(s_selStart, s_selEnd) : -1;
+		const int selMin = (std::min)(s_selStart, s_selEnd);
+		const int selMax = (std::max)(s_selStart, s_selEnd);
 
 		for (int j = 0; j < bytesPerLine; ++j) {
 			size_t i = off + j;
@@ -1059,7 +1068,7 @@ namespace {
 
 				if (id != 0) {
 					activeCount++;
-					if (activeCount <= 10) {      
+					if (activeCount <= 10) {
 						char key[32];
 						std::snprintf(key, sizeof(key), "hud.status[%d]", activeCount - 1);
 						std::ostringstream os;
@@ -1166,7 +1175,7 @@ namespace {
 
 			if (L >= 0x58 && targetCount > 0) {
 				size_t effectOffset = 0x28;
-				for (int i = 0; i < std::min(targetCount, uint8_t(8)); ++i) {
+				for (int i = 0; i < (std::min)(targetCount, uint8_t(8)); ++i) {
 					if (effectOffset + 8 > L) break;
 
 					uint8_t effectType = *(buf + effectOffset);
@@ -1214,7 +1223,7 @@ namespace {
 			rowKV("hate.count", std::to_string(count));
 
 			size_t offset = 0x04;
-			for (int i = 0; i < std::min(count, uint8_t(8)); ++i) {
+			for (int i = 0; i < (std::min)(count, uint8_t(8)); ++i) {
 				if (offset + 8 > L) break;
 
 				uint32_t actorId = loadLE<uint32_t>(buf + offset);
@@ -1741,7 +1750,7 @@ static void DrawPacketFlowAnalysis() {
 				ImGui::TableNextColumn();
 				std::ostringstream os;
 				os << std::hex << std::setfill('0');
-				for (size_t i = 0; i < std::min(flow.opcodes.size(), size_t(5)); ++i) {
+				for (size_t i = 0; i < (std::min)(flow.opcodes.size(), size_t(5)); ++i) {
 					if (i > 0) os << " → ";
 					os << "0x" << std::setw(4) << flow.opcodes[i];
 				}

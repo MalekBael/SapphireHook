@@ -25,7 +25,11 @@ namespace SapphireHook
 
         void ToggleMenu() { m_showMenu = !m_showMenu; }
         bool IsMenuVisible() const { return m_showMenu; }
-        size_t GetModuleCount() const;
+        size_t GetModuleCount() const { return m_modules.size(); }
+
+        static void RequestUnload();
+        static bool IsUnloadRequested();
+        const std::vector<std::unique_ptr<UIModule>>& GetModules() const { return m_modules; }
 
     private:
         UIManager();
@@ -37,10 +41,5 @@ namespace SapphireHook
         static bool s_unloadRequested;
         std::vector<std::unique_ptr<UIModule>> m_modules;
         bool m_showMenu = false;
-        bool m_showDemoWindow = false;
-    public:
-        static void RequestUnload();
-        static bool IsUnloadRequested();
-        const std::vector<std::unique_ptr<UIModule>>& GetModules() const { return m_modules; }
     };
 }

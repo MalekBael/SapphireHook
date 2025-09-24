@@ -1,4 +1,3 @@
-// Hygiene and include order
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -6,11 +5,9 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
-// Force full winsock2 inclusion FIRST
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
-// EXPLICIT: Ensure WSAAPI is defined exactly as in WinSock2.h
 #if !defined(WSAAPI)
 #if !defined(FAR)
 #define FAR
@@ -21,7 +18,6 @@
 #define WSAAPI FAR PASCAL
 #endif
 
-// Verify it's defined
 #ifndef WSAAPI
 #error "WSAAPI still not defined after explicit setup"
 #endif
@@ -32,9 +28,9 @@
 #include <mutex>
 #include <atomic>
 #include <algorithm>
-#include <cstring>   // std::memcmp, std::memcpy
-#include <cstdlib>   // std::getenv
-#include <sstream>   // std::ostringstream
+#include <cstring>     
+#include <cstdlib>    
+#include <sstream>    
 #include <vector>
 #include <cstdio>
 #include "../Logger/Logger.h"
@@ -42,1031 +38,1021 @@
 
 #include "PacketInjector.h"
 #include "MinHook.h"
-#include "../Monitor/NetworkMonitor.h" // Enqueue packets for UI Network Monitor
+#include "../Monitor/NetworkMonitor.h"       
 
 #pragma comment(lib, "Ws2_32.lib")
 #pragma comment(lib, "Psapi.lib")
 
-// Diagnostics counters for UI plots
-static std::atomic<uint64_t> g_sendOk{0}, g_sendFail{0}, g_bytesSent{0};
-static std::atomic<uint64_t> g_recvOk{0}, g_bytesRecv{0};
-static std::atomic<uint64_t> g_wsa10038{0}, g_wsa10054{0}, g_wsa10035{0}, g_wsa10057{0};
+using namespace SapphireHook;
+
+static std::atomic<uint64_t> g_sendOk{ 0 }, g_sendFail{ 0 }, g_bytesSent{ 0 };
+static std::atomic<uint64_t> g_recvOk{ 0 }, g_bytesRecv{ 0 };
+static std::atomic<uint64_t> g_wsa10038{ 0 }, g_wsa10054{ 0 }, g_wsa10035{ 0 }, g_wsa10057{ 0 };
 
 static inline void CountWsa(int wsa) {
-    switch (wsa) {
-    case WSAENOTSOCK: g_wsa10038.fetch_add(1, std::memory_order_relaxed); break;
-    case WSAECONNRESET: g_wsa10054.fetch_add(1, std::memory_order_relaxed); break;
-    case WSAEWOULDBLOCK: g_wsa10035.fetch_add(1, std::memory_order_relaxed); break;
-    case WSAENOTCONN: g_wsa10057.fetch_add(1, std::memory_order_relaxed); break;
-    default: break;
-    }
+	switch (wsa) {
+	case WSAENOTSOCK: g_wsa10038.fetch_add(1, std::memory_order_relaxed); break;
+	case WSAECONNRESET: g_wsa10054.fetch_add(1, std::memory_order_relaxed); break;
+	case WSAEWOULDBLOCK: g_wsa10035.fetch_add(1, std::memory_order_relaxed); break;
+	case WSAENOTCONN: g_wsa10057.fetch_add(1, std::memory_order_relaxed); break;
+	default: break;
+	}
 }
 
-// ADD near top
 #include <atomic>
 #include <winsock2.h>
 
 namespace {
-    std::atomic<SOCKET> g_zoneSocket{ INVALID_SOCKET };
-    std::atomic<SOCKET> g_chatSocket{ INVALID_SOCKET };
-    std::atomic<SOCKET> g_lastZoneCandidate{ INVALID_SOCKET };
-    std::atomic<SOCKET> g_lastChatCandidate{ INVALID_SOCKET };
+	std::atomic<SOCKET> g_zoneSocket{ INVALID_SOCKET };
+	std::atomic<SOCKET> g_chatSocket{ INVALID_SOCKET };
+	std::atomic<SOCKET> g_lastZoneCandidate{ INVALID_SOCKET };
+	std::atomic<SOCKET> g_lastChatCandidate{ INVALID_SOCKET };
 }
 
 static inline bool IsFfxivHeader(const uint8_t* b, int len) {
-    return len >= 0x34 && b[0] == 0x52 && b[1] == 0x52 && b[2] == 0xA0 && b[3] == 0x41;
+	return len >= 0x34 && b[0] == 0x52 && b[1] == 0x52 && b[2] == 0xA0 && b[3] == 0x41;
 }
 static inline uint16_t ReadOpcodeLE(const uint8_t* b) {
-    return static_cast<uint16_t>(b[0x30] | (b[0x31] << 8));
+	return static_cast<uint16_t>(b[0x30] | (b[0x31] << 8));
 }
-static inline bool IsChatOpcode(uint16_t op) { return op == 0x0067; } // ChatHandler
+static inline bool IsChatOpcode(uint16_t op) { return op == 0x0067; }  
+
+void ConfigurePacketLogger() {
+    LoggerConfig config;
+    config.enableAsyncLogging = true;     
+    config.enabledCategories = static_cast<uint32_t>(LogCategory::Network | LogCategory::Packets);
+    config.minLevel = LogLevel::Information;
+    
+    Logger::Instance().ApplyConfig(config);
+    Logger::Instance().EnableCategory(LogCategory::Network);
+}
 
 static void ObserveTrafficAndMaybeLearn(SOCKET s, const uint8_t* buf, int len)
 {
-    if (!buf || len < 0x34 || !IsFfxivHeader(buf, len)) return;
-    const uint16_t op = ReadOpcodeLE(buf);
-    if (IsChatOpcode(op)) {
-        g_lastChatCandidate.store(s, std::memory_order_relaxed);
-        if (g_chatSocket.load(std::memory_order_relaxed) == INVALID_SOCKET) {
-            g_chatSocket.store(s, std::memory_order_relaxed);
-            printf("[PacketInjector] Learned chat socket (traffic): 0x%Ix\n", (uintptr_t)s);
-        }
-    } else {
-        g_lastZoneCandidate.store(s, std::memory_order_relaxed);
-        if (g_zoneSocket.load(std::memory_order_relaxed) == INVALID_SOCKET) {
-            g_zoneSocket.store(s, std::memory_order_relaxed);
-            printf("[PacketInjector] Learned zone socket (traffic): 0x%Ix\n", (uintptr_t)s);
-        }
+	if (!buf || len < 0x34 || !IsFfxivHeader(buf, len)) return;
+
+	const uint16_t op = ReadOpcodeLE(buf);
+	if (IsChatOpcode(op)) {
+		g_lastChatCandidate.store(s, std::memory_order_relaxed);
+		if (g_chatSocket.load(std::memory_order_relaxed) == INVALID_SOCKET) {
+			g_chatSocket.store(s, std::memory_order_relaxed);
+
+			LogInfoWithContext("Socket learned",
+				LogContext()
+				.Add("component", "PacketInjector")
+				.Add("socket_type", "chat")
+				.Add("socket_id", Logger::HexFormat(static_cast<uintptr_t>(s)))
+				.Add("opcode", Logger::HexFormat(op))
+				.Add("packet_len", len));
+		}
+	}
+	else {
+		g_lastZoneCandidate.store(s, std::memory_order_relaxed);
+		if (g_zoneSocket.load(std::memory_order_relaxed) == INVALID_SOCKET) {
+			g_zoneSocket.store(s, std::memory_order_relaxed);
+			LogInfo("[PacketInjector] Learned zone socket (traffic): 0x" + std::to_string(static_cast<uintptr_t>(s)));
+		}
+	}
+}
+
+void LogPacketBinary(const uint8_t* data, size_t len, bool outgoing) {
+    if (Logger::Instance().IsEnabledCategory(LogCategory::Packets)) {
+        struct PacketHeader {
+            uint64_t timestamp;
+            uint32_t length;
+            uint8_t outgoing;
+            uint8_t reserved[3];
+        };
+        
+        PacketHeader header;
+        header.timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        header.length = static_cast<uint32_t>(len);
+        header.outgoing = outgoing ? 1 : 0;
+        
+        Logger::Instance().GetBinaryLogger().LogBinary(&header, sizeof(header), 1);
+        Logger::Instance().GetBinaryLogger().LogBinary(data, len, 2);
     }
 }
 
-// HOOK glue (call this from your existing send/recv hooks)
 int WSAAPI Hook_send(SOCKET s, const char* buf, int len, int flags) {
-    ObserveTrafficAndMaybeLearn(s, reinterpret_cast<const uint8_t*>(buf), len);
-    return ::send(s, buf, len, flags);
+	ObserveTrafficAndMaybeLearn(s, reinterpret_cast<const uint8_t*>(buf), len);
+	return ::send(s, buf, len, flags);
 }
 int WSAAPI Hook_recv(SOCKET s, char* buf, int len, int flags) {
-    const int ret = ::recv(s, buf, len, flags);
-    if (ret > 0) ObserveTrafficAndMaybeLearn(s, reinterpret_cast<const uint8_t*>(buf), ret);
-    return ret;
+	const int ret = ::recv(s, buf, len, flags);
+	if (ret > 0) ObserveTrafficAndMaybeLearn(s, reinterpret_cast<const uint8_t*>(buf), ret);
+	return ret;
 }
 
-// closesocket hook: clear stale learned handles on rotation
 static decltype(&::closesocket) Real_closesocket = ::closesocket;
 static int WSAAPI Hook_closesocket(SOCKET s)
 {
-    if (s == g_zoneSocket.load()) {
-        g_zoneSocket.store(INVALID_SOCKET);
-        printf("[PacketInjector] Zone socket closed -> cleared\n");
-    }
-    if (s == g_chatSocket.load()) {
-        g_chatSocket.store(INVALID_SOCKET);
-        printf("[PacketInjector] Chat socket closed -> cleared\n");
-    }
-    if (s == g_lastZoneCandidate.load()) g_lastZoneCandidate.store(INVALID_SOCKET);
-    if (s == g_lastChatCandidate.load()) g_lastChatCandidate.store(INVALID_SOCKET);
-    return Real_closesocket(s);
+	if (s == g_zoneSocket.load()) {
+		g_zoneSocket.store(INVALID_SOCKET);
+		LogInfo("[PacketInjector] Zone socket closed -> cleared");
+	}
+	if (s == g_chatSocket.load()) {
+		g_chatSocket.store(INVALID_SOCKET);
+		LogInfo("[PacketInjector] Chat socket closed -> cleared");
+	}
+	if (s == g_lastZoneCandidate.load()) g_lastZoneCandidate.store(INVALID_SOCKET);
+	if (s == g_lastChatCandidate.load()) g_lastChatCandidate.store(INVALID_SOCKET);
+	return Real_closesocket(s);
 }
-// Ensure you install the closesocket hook next to send/recv hooks.
-
-// Pick socket by opcode (chat vs zone), with candidate fallback
 static SOCKET PickSocketForPacket(const uint8_t* buf, size_t len)
 {
-    if (buf && len >= 0x34 && IsFfxivHeader(buf, (int)len) && IsChatOpcode(ReadOpcodeLE(buf))) {
-        SOCKET s = g_chatSocket.load();
-        return (s != INVALID_SOCKET) ? s : g_lastChatCandidate.load();
-    } else {
-        SOCKET s = g_zoneSocket.load();
-        return (s != INVALID_SOCKET) ? s : g_lastZoneCandidate.load();
-    }
+	if (buf && len >= 0x34 && IsFfxivHeader(buf, (int)len) && IsChatOpcode(ReadOpcodeLE(buf))) {
+		SOCKET s = g_chatSocket.load();
+		return (s != INVALID_SOCKET) ? s : g_lastChatCandidate.load();
+	}
+	else {
+		SOCKET s = g_zoneSocket.load();
+		return (s != INVALID_SOCKET) ? s : g_lastZoneCandidate.load();
+	}
 }
 
-// Hardened send: on 10038, invalidate and retry once with candidate
 static bool SendHardenedInternal(const void* data, size_t bytes)
 {
-    if (!data || bytes == 0) return false;
-    const uint8_t* buf = static_cast<const uint8_t*>(data);
+	if (!data || bytes == 0) return false;
+	const uint8_t* buf = static_cast<const uint8_t*>(data);
 
-    auto trySend = [&](SOCKET s) -> bool {
-        if (s == INVALID_SOCKET) return false;
-        int sent = ::send(s, reinterpret_cast<const char*>(buf), (int)bytes, 0);
-        if (sent == SOCKET_ERROR) {
-            const int wsa = WSAGetLastError();
-            CountWsa(wsa);
-            printf("[PacketInjector] Send failed on 0x%Ix (WSA=%d)\n", (uintptr_t)s, wsa);
-            if (wsa == WSAENOTSOCK) {
-                if (s == g_zoneSocket.load()) g_zoneSocket.store(INVALID_SOCKET);
-                if (s == g_chatSocket.load()) g_chatSocket.store(INVALID_SOCKET);
-            }
-            g_sendFail.fetch_add(1, std::memory_order_relaxed);
-            return false;
-        }
-        g_sendOk.fetch_add(1, std::memory_order_relaxed);
-        g_bytesSent.fetch_add(static_cast<uint64_t>(sent), std::memory_order_relaxed);
-        return true;
-    };
+	auto trySend = [&](SOCKET s) -> bool {
+		if (s == INVALID_SOCKET) return false;
+		int sent = ::send(s, reinterpret_cast<const char*>(buf), (int)bytes, 0);
+		if (sent == SOCKET_ERROR) {
+			const int wsa = WSAGetLastError();
+			CountWsa(wsa);
+			LogError("[PacketInjector] Send failed on 0x" + std::to_string(static_cast<uintptr_t>(s)) + " (WSA=" + std::to_string(wsa) + ")");
+			if (wsa == WSAENOTSOCK) {
+				if (s == g_zoneSocket.load()) g_zoneSocket.store(INVALID_SOCKET);
+				if (s == g_chatSocket.load()) g_chatSocket.store(INVALID_SOCKET);
+			}
+			g_sendFail.fetch_add(1, std::memory_order_relaxed);
+			return false;
+		}
+		g_sendOk.fetch_add(1, std::memory_order_relaxed);
+		g_bytesSent.fetch_add(static_cast<uint64_t>(sent), std::memory_order_relaxed);
+		return true;
+		};
 
-    SOCKET primary = PickSocketForPacket(buf, bytes);
-    if (trySend(primary)) return true;
+	SOCKET primary = PickSocketForPacket(buf, bytes);
+	if (trySend(primary)) return true;
 
-    SOCKET fallback;
-    const bool isChat = (buf && bytes >= 0x34 && IsFfxivHeader(buf, (int)bytes) && IsChatOpcode(ReadOpcodeLE(buf)));
-    fallback = isChat ? g_lastChatCandidate.load() : g_lastZoneCandidate.load();
-    if (fallback != primary && trySend(fallback)) {
-        printf("[PacketInjector] Retried send via fallback socket 0x%Ix\n", (uintptr_t)fallback);
-        return true;
-    }
+	SOCKET fallback;
+	const bool isChat = (buf && bytes >= 0x34 && IsFfxivHeader(buf, (int)bytes) && IsChatOpcode(ReadOpcodeLE(buf)));
+	fallback = isChat ? g_lastChatCandidate.load() : g_lastZoneCandidate.load();
+	if (fallback != primary && trySend(fallback)) {
+		LogInfo("[PacketInjector] Retried send via fallback socket 0x" + std::to_string(static_cast<uintptr_t>(fallback)));
+		return true;
+	}
 
-    printf("[PacketInjector] Aborted: no viable socket\n");
-    return false;
+	LogError("[PacketInjector] Aborted: no viable socket");
+	return false;
 }
 
-// Duplicate include block existed below in original; keep only once.
-
-// Readable check (file-scope, before any uses)
 static bool IsReadable(const void* ptr, size_t minLen) noexcept
 {
-    MEMORY_BASIC_INFORMATION mbi{};
-    if (!ptr) return false;
-    if (!VirtualQuery(ptr, &mbi, sizeof(mbi))) return false;
-    if (mbi.State != MEM_COMMIT) return false;
+	MEMORY_BASIC_INFORMATION mbi{};
+	if (!ptr) return false;
+	if (!VirtualQuery(ptr, &mbi, sizeof(mbi))) return false;
+	if (mbi.State != MEM_COMMIT) return false;
 
-    const DWORD acc = mbi.Protect & 0xFF;
-    const bool readable =
-        acc == PAGE_READONLY || acc == PAGE_READWRITE ||
-        acc == PAGE_EXECUTE_READ || acc == PAGE_EXECUTE_READWRITE ||
-        acc == PAGE_WRITECOPY || acc == PAGE_EXECUTE_WRITECOPY;
-    return readable && (mbi.RegionSize >= minLen);
+	const DWORD acc = mbi.Protect & 0xFF;
+	const bool readable =
+		acc == PAGE_READONLY || acc == PAGE_READWRITE ||
+		acc == PAGE_EXECUTE_READ || acc == PAGE_EXECUTE_READWRITE ||
+		acc == PAGE_WRITECOPY || acc == PAGE_EXECUTE_WRITECOPY;
+	return readable && (mbi.RegionSize >= minLen);
 }
 
-// Make IPC detour/original visible at global scope (real namespace)
 namespace SapphireHook {
-    void __fastcall HookedHandleIPC(void* thisPtr, uint16_t opcode, void* data);
-    extern void(__fastcall* originalHandleIPC)(void*, uint16_t, void*);
+	void __fastcall HookedHandleIPC(void* thisPtr, uint16_t opcode, void* data);
+	extern void(__fastcall* originalHandleIPC)(void*, uint16_t, void*);
 }
 
-namespace { // helpers and learning (single definition, above usage)
+using namespace SapphireHook;
 
-    inline bool IsEnvEnabled(const char* name) noexcept
-    {
-        if (const char* v = std::getenv(name))
-        {
-            const char c = v[0];
-            return c == '1' || c == 't' || c == 'T' || c == 'y' || c == 'Y';
-        }
-        return false;
-    }
+namespace {        
 
-    static bool GetMainModuleRange(uintptr_t& base, size_t& size) noexcept
-    {
-        HMODULE hMod = GetModuleHandleW(nullptr);
-        if (!hMod) return false;
-        MODULEINFO mi{};
-        if (!GetModuleInformation(GetCurrentProcess(), hMod, &mi, sizeof(mi)))
-            return false;
-        base = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
-        size = static_cast<size_t>(mi.SizeOfImage);
-        return true;
-    }
+	inline bool IsEnvEnabled(const char* name) noexcept
+	{
+		if (const char* v = std::getenv(name))
+		{
+			const char c = v[0];
+			return c == '1' || c == 't' || c == 'T' || c == 'y' || c == 'Y';
+		}
+		return false;
+	}
 
-    // Find .text section to filter frames
-    static bool GetTextSectionRange(uintptr_t& textBase, uintptr_t& textEnd) noexcept
-    {
-        HMODULE hMod = GetModuleHandleW(nullptr);
-        if (!hMod) return false;
-        auto base = reinterpret_cast<uintptr_t>(hMod);
+	static bool GetMainModuleRange(uintptr_t& base, size_t& size) noexcept
+	{
+		HMODULE hMod = GetModuleHandleW(nullptr);
+		if (!hMod) return false;
+		MODULEINFO mi{};
+		if (!GetModuleInformation(GetCurrentProcess(), hMod, &mi, sizeof(mi)))
+			return false;
+		base = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
+		size = static_cast<size_t>(mi.SizeOfImage);
+		return true;
+	}
 
-        auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-        if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
+	static bool GetTextSectionRange(uintptr_t& textBase, uintptr_t& textEnd) noexcept
+	{
+		HMODULE hMod = GetModuleHandleW(nullptr);
+		if (!hMod) return false;
+		auto base = reinterpret_cast<uintptr_t>(hMod);
 
-        auto nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
-        if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
+		auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+		if (dos->e_magic != IMAGE_DOS_SIGNATURE) return false;
 
-        auto sect = IMAGE_FIRST_SECTION(nt);
-        for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++sect)
-        {
-            if (std::memcmp(sect->Name, ".text", 5) == 0)
-            {
-                textBase = base + sect->VirtualAddress;
-                textEnd = textBase + sect->Misc.VirtualSize;
-                return true;
-            }
-        }
-        return false;
-    }
+		auto nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + dos->e_lfanew);
+		if (nt->Signature != IMAGE_NT_SIGNATURE) return false;
 
-    // Very light function-start guess by scanning back for common prologues
-    static uintptr_t FindFunctionStart(uintptr_t addr, uintptr_t textBase) noexcept
-    {
-        uintptr_t cursor = addr;
-        const uintptr_t minAddr = (addr > textBase + 0x100) ? addr - 0x100 : textBase;
-        while (cursor > minAddr)
-        {
-            --cursor;
-            const uint8_t* p = reinterpret_cast<const uint8_t*>(cursor);
+		auto sect = IMAGE_FIRST_SECTION(nt);
+		for (unsigned i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++sect)
+		{
+			if (std::memcmp(sect->Name, ".text", 5) == 0)
+			{
+				textBase = base + sect->VirtualAddress;
+				textEnd = textBase + sect->Misc.VirtualSize;
+				return true;
+			}
+		}
+		return false;
+	}
 
-            // We only scan within .text range
-            if (p[0] == 0x55) return cursor;                         // push rbp
-            if (p[0] == 0x48 && p[1] == 0x83 && p[2] == 0xEC) return cursor; // sub rsp, imm8
-            if (p[0] >= 0x50 && p[0] <= 0x57) return cursor;         // push r?
-            if (p[0] == 0x40 && p[1] >= 0x50 && p[1] <= 0x57) return cursor; // REX + push
-        }
-        return addr;
-    }
+	static uintptr_t FindFunctionStart(uintptr_t addr, uintptr_t textBase) noexcept
+	{
+		uintptr_t cursor = addr;
+		const uintptr_t minAddr = (addr > textBase + 0x100) ? addr - 0x100 : textBase;
+		while (cursor > minAddr)
+		{
+			--cursor;
+			const uint8_t* p = reinterpret_cast<const uint8_t*>(cursor);
 
-    static std::unordered_map<uintptr_t, size_t> g_FrameHits;
-    static std::mutex g_FrameHitsMutex;
-    static std::atomic<size_t> g_Samples{ 0 };
-    static std::atomic<uintptr_t> g_SelectedFrame{ 0 };
+			if (p[0] == 0x55) return cursor;                           
+			if (p[0] == 0x48 && p[1] == 0x83 && p[2] == 0xEC) return cursor;    
+			if (p[0] >= 0x50 && p[0] <= 0x57) return cursor;           
+			if (p[0] == 0x40 && p[1] >= 0x50 && p[1] <= 0x57) return cursor;    
+		}
+		return addr;
+	}
 
-    static void LearnFramesFromWSASend()
-    {
-        if (!IsEnvEnabled("SAPPHIRE_AUTOFIND_IPC")) return;
+	static std::unordered_map<uintptr_t, size_t> g_FrameHits;
+	static std::mutex g_FrameHitsMutex;
+	static std::atomic<size_t> g_Samples{ 0 };
+	static std::atomic<uintptr_t> g_SelectedFrame{ 0 };
 
-        // Capture stack
-        void* frames[32] = {};
-        USHORT captured = RtlCaptureStackBackTrace(0, 32, frames, nullptr);
+	static void LearnFramesFromWSASend()
+	{
+		if (!IsEnvEnabled("SAPPHIRE_AUTOFIND_IPC")) return;
 
-        uintptr_t textBase = 0, textEnd = 0;
-        if (!GetTextSectionRange(textBase, textEnd)) return;
+		void* frames[32] = {};
+		USHORT captured = RtlCaptureStackBackTrace(0, 32, frames, nullptr);
 
-        size_t added = 0;
-        for (USHORT i = 0; i < captured; ++i)
-        {
-            uintptr_t f = reinterpret_cast<uintptr_t>(frames[i]);
-            if (f >= textBase && f < textEnd)
-            {
-                std::lock_guard<std::mutex> lock(g_FrameHitsMutex);
-                g_FrameHits[f]++;
-                added++;
-            }
-        }
-        if (added > 0) g_Samples.fetch_add(1, std::memory_order_relaxed);
+		uintptr_t textBase = 0, textEnd = 0;
+		if (!GetTextSectionRange(textBase, textEnd)) return;
 
-        // Report when enough samples gathered
-        size_t minSamples = 50;
-        if (const char* v = std::getenv("SAPPHIRE_AUTOFIND_MIN"))
-        {
-            minSamples = std::max<size_t>(10, std::strtoul(v, nullptr, 10));
-        }
+		size_t added = 0;
+		for (USHORT i = 0; i < captured; ++i)
+		{
+			uintptr_t f = reinterpret_cast<uintptr_t>(frames[i]);
+			if (f >= textBase && f < textEnd)
+			{
+				std::lock_guard<std::mutex> lock(g_FrameHitsMutex);
+				g_FrameHits[f]++;
+				added++;
+			}
+		}
+		if (added > 0) g_Samples.fetch_add(1, std::memory_order_relaxed);
 
-        if (g_Samples.load(std::memory_order_relaxed) >= minSamples && g_SelectedFrame.load() == 0)
-        {
-            std::pair<uintptr_t, size_t> best{ 0,0 };
-            {
-                std::lock_guard<std::mutex> lock(g_FrameHitsMutex);
-                for (auto& kv : g_FrameHits)
-                {
-                    if (kv.second > best.second) best = kv;
-                }
-            }
-            if (best.first != 0)
-            {
-                uintptr_t funcStart = FindFunctionStart(best.first, textBase);
-                g_SelectedFrame.store(funcStart, std::memory_order_relaxed);
+		size_t minSamples = 50;
+		if (const char* v = std::getenv("SAPPHIRE_AUTOFIND_MIN"))
+		{
+			minSamples = std::max<size_t>(10, std::strtoul(v, nullptr, 10));
+		}
 
-                std::ostringstream oss;
-                oss << "[AutoFind] WSASend backtrace selected candidate frame: 0x" << std::hex << best.first
-                    << " -> function start: 0x" << funcStart << " (samples=" << std::dec << best.second << ")";
-                ::SapphireHook::LogInfo(oss.str());
+		if (g_Samples.load(std::memory_order_relaxed) >= minSamples && g_SelectedFrame.load() == 0)
+		{
+			std::pair<uintptr_t, size_t> best{ 0,0 };
+			{
+				std::lock_guard<std::mutex> lock(g_FrameHitsMutex);
+				for (auto& kv : g_FrameHits)
+				{
+					if (kv.second > best.second) best = kv;
+				}
+			}
+			if (best.first != 0)
+			{
+				uintptr_t funcStart = FindFunctionStart(best.first, textBase);
+				g_SelectedFrame.store(funcStart, std::memory_order_relaxed);
 
-                // Optional: auto-install IPC hook when asked
-                if (IsEnvEnabled("SAPPHIRE_INSTALL_LEARNED_IPC"))
-                {
-                    void* target = reinterpret_cast<void*>(funcStart);
-                    MH_STATUS cr = MH_CreateHook(
-                        target,
-                        reinterpret_cast<void*>(&::SapphireHook::HookedHandleIPC),
-                        reinterpret_cast<void**>(&::SapphireHook::originalHandleIPC)
-                    );
-                    if (cr != MH_OK)
-                    {
-                        ::SapphireHook::LogError("[AutoFind] MH_CreateHook failed at learned address");
-                    }
-                    else
-                    {
-                        MH_STATUS en = MH_EnableHook(target);
-                        if (en != MH_OK)
-                        {
-                            ::SapphireHook::LogError("[AutoFind] MH_EnableHook failed at learned address");
-                            MH_RemoveHook(target);
-                        }
-                        else
-                        {
-                            ::SapphireHook::HookManager::RegisterHook("IPC_AutoFound", funcStart, ::SapphireHook::originalHandleIPC, "AutoFind");
-                            ::SapphireHook::LogInfo("[AutoFind] Installed hook at learned address via MinHook");
-                        }
-                    }
-                }
-            }
-        }
-    }
+				std::ostringstream oss;
+				oss << "[AutoFind] WSASend backtrace selected candidate frame: 0x" << std::hex << best.first
+					<< " -> function start: 0x" << funcStart << " (samples=" << std::dec << best.second << ")";
+				::SapphireHook::LogInfo(oss.str());
 
-    // Track last known valid sockets seen in traffic
-    static std::atomic<uint32_t> g_localActorId{ 0 };
-    static std::atomic<std::uintptr_t> g_lastZoneSock{ static_cast<std::uintptr_t>(INVALID_SOCKET) };
-    static std::atomic<std::uintptr_t> g_lastChatSock{ static_cast<std::uintptr_t>(INVALID_SOCKET) };
+				if (IsEnvEnabled("SAPPHIRE_INSTALL_LEARNED_IPC"))
+				{
+					void* target = reinterpret_cast<void*>(funcStart);
+					MH_STATUS cr = MH_CreateHook(
+						target,
+						reinterpret_cast<void*>(&::SapphireHook::HookedHandleIPC),
+						reinterpret_cast<void**>(&::SapphireHook::originalHandleIPC)
+					);
+					if (cr != MH_OK)
+					{
+						::SapphireHook::LogError("[AutoFind] MH_CreateHook failed at learned address");
+					}
+					else
+					{
+						MH_STATUS en = MH_EnableHook(target);
+						if (en != MH_OK)
+						{
+							::SapphireHook::LogError("[AutoFind] MH_EnableHook failed at learned address");
+							MH_RemoveHook(target);
+						}
+						else
+						{
+							::SapphireHook::HookManager::RegisterHook("IPC_AutoFound", funcStart, ::SapphireHook::originalHandleIPC, "AutoFind");
+							::SapphireHook::LogInfo("[AutoFind] Installed hook at learned address via MinHook");
+						}
+					}
+				}
+			}
+		}
+	}
 
-    // Active socket discovery (used only as a fallback)
-    static std::vector<SOCKET> FindActiveSockets()
-    {
-        std::vector<SOCKET> activeSockets;
+	static std::atomic<uint32_t> g_localActorId{ 0 };
+	static std::atomic<std::uintptr_t> g_lastZoneSock{ static_cast<std::uintptr_t>(INVALID_SOCKET) };
+	static std::atomic<std::uintptr_t> g_lastChatSock{ static_cast<std::uintptr_t>(INVALID_SOCKET) };
 
-        // Heuristic ranges observed in your logs
-        std::vector<SOCKET> candidateRanges = { 7000, 7050, 7100, 6500, 6600, 6700 };
+	static std::vector<SOCKET> FindActiveSockets()
+	{
+		std::vector<SOCKET> activeSockets;
 
-        for (SOCKET baseSocket : candidateRanges)
-        {
-            for (int offset = -100; offset <= 100; offset++)
-            {
-                SOCKET testSocket = baseSocket + offset;
-                if (testSocket == INVALID_SOCKET || testSocket <= 0) continue;
+		std::vector<SOCKET> candidateRanges = { 7000, 7050, 7100, 6500, 6600, 6700 };
 
-                int optval = 0;
-                int optlen = sizeof(optval);
-                if (getsockopt(testSocket, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&optval), &optlen) == 0)
-                {
-                    if (optval == SOCK_STREAM)
-                    {
-                        activeSockets.push_back(testSocket);
-                        std::printf("[PacketInjector] Found active TCP socket: %llu\n",
-                            static_cast<unsigned long long>(testSocket));
-                    }
-                }
-            }
-        }
+		for (SOCKET baseSocket : candidateRanges)
+		{
+			for (int offset = -100; offset <= 100; offset++)
+			{
+				SOCKET testSocket = baseSocket + offset;
+				if (testSocket == INVALID_SOCKET || testSocket <= 0) continue;
 
-        std::sort(activeSockets.begin(), activeSockets.end());
-        activeSockets.erase(std::unique(activeSockets.begin(), activeSockets.end()), activeSockets.end());
+				int optval = 0;
+				int optlen = sizeof(optval);
+				if (getsockopt(testSocket, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&optval), &optlen) == 0)
+				{
+					if (optval == SOCK_STREAM)
+					{
+						activeSockets.push_back(testSocket);
+						LogInfo("[PacketInjector] Found active TCP socket: " + std::to_string(static_cast<unsigned long long>(testSocket)));
+					}
+				}
+			}
+		}
 
-        std::printf("[PacketInjector] Found %zu total active sockets\n", activeSockets.size());
-        return activeSockets;
-    }
+		std::sort(activeSockets.begin(), activeSockets.end());
+		activeSockets.erase(std::unique(activeSockets.begin(), activeSockets.end()), activeSockets.end());
 
-    // Read a little-endian POD from a buffer with bounds + readability checks
-    template <typename T>
-    static inline bool ReadLE(const uint8_t* data, size_t len, size_t off, T& out) noexcept
-    {
-        if (!data) return false;
-        if (off + sizeof(T) > len) return false;
-        if (!::IsReadable(data + off, sizeof(T))) return false;
-        std::memcpy(&out, data + off, sizeof(T));
-        return true;
-    }
+		LogInfo("[PacketInjector] Found " + std::to_string(activeSockets.size()) + " total active sockets");
+		return activeSockets;
+	}
 
-} // anonymous namespace
+	template <typename T>
+	static inline bool ReadLE(const uint8_t* data, size_t len, size_t off, T& out) noexcept
+	{
+		if (!data) return false;
+		if (off + sizeof(T) > len) return false;
+		if (!::IsReadable(data + off, sizeof(T))) return false;
+		std::memcpy(&out, data + off, sizeof(T));
+		return true;
+	}
+
+}   
 
 namespace SapphireHook {
 
-    bool PacketInjector::s_installed = false;
-    std::uintptr_t PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(INVALID_SOCKET);
-    std::uintptr_t PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(INVALID_SOCKET);
-
-    // Real WSASend pointer (kept internal to this TU)
-    using WSASend_t = int(__stdcall*)(SOCKET, LPWSABUF, DWORD, LPDWORD, DWORD,
-        LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
-    static WSASend_t g_realWSASend = nullptr;
-
-    // Add function pointers for send/recv APIs
-    using send_t = int(__stdcall*)(SOCKET, const char*, int, int);
-    using recv_t = int(__stdcall*)(SOCKET, char*, int, int);
-    using sendto_t = int(__stdcall*)(SOCKET, const char*, int, int, const sockaddr*, int);
-    using recvfrom_t = int(__stdcall*)(SOCKET, char*, int, int, sockaddr*, int*);
-
-    static send_t g_realSend = nullptr;
-    static recv_t g_realRecv = nullptr;
-    static sendto_t g_realSendTo = nullptr;
-    static recvfrom_t g_realRecvFrom = nullptr;
-
-    // Forward declaration
-    static int __stdcall WSASend_Detour(SOCKET s,
-        LPWSABUF lpBuffers,
-        DWORD dwBufferCount,
-        LPDWORD lpNumberOfBytesSent,
-        DWORD dwFlags,
-        LPWSAOVERLAPPED lpOverlapped,
-        LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);
-
-    // Export hook fallback using MinHook
-    static bool InstallWSASendHookExport()
-    {
-        if (g_realWSASend) return true;
-
-        HMODULE hWs2 = GetModuleHandleA("ws2_32.dll");
-        if (!hWs2)
-        {
-            hWs2 = LoadLibraryA("ws2_32.dll");
-        }
-        if (!hWs2)
-        {
-            std::printf("[PacketInjector] ws2_32.dll not loaded and could not be loaded\n");
-            return false;
-        }
-
-        auto pWSASend = reinterpret_cast<LPVOID>(GetProcAddress(hWs2, "WSASend"));
-        if (!pWSASend)
-        {
-            std::printf("[PacketInjector] GetProcAddress(WSASend) failed\n");
-            return false;
-        }
-
-        if (MH_Initialize() != MH_OK && MH_Initialize() != MH_ERROR_ALREADY_INITIALIZED)
-        {
-            std::printf("[PacketInjector] MH_Initialize failed\n");
-            return false;
-        }
-
-        const MH_STATUS cr = MH_CreateHook(pWSASend, reinterpret_cast<LPVOID>(&WSASend_Detour),
-            reinterpret_cast<LPVOID*>(&g_realWSASend));
-        if (cr != MH_OK)
-        {
-            std::printf("[PacketInjector] MH_CreateHook failed: %d\n", cr);
-            return false;
-        }
-
-        const MH_STATUS en = MH_EnableHook(pWSASend);
-        if (en != MH_OK)
-        {
-            std::printf("[PacketInjector] MH_EnableHook failed: %d\n", en);
-            return false;
-        }
-
-        std::printf("[PacketInjector] WSASend hooked via export. Real=0x%p\n", g_realWSASend);
-        return true;
-    }
-
-    bool PacketInjector::InstallWSASendHook()
-    {
-        // TEMP: bypass IAT while stabilizing
-        // if (InstallWSASendHookIAT()) return true;
-        return InstallWSASendHookExport();
-    }
-
-    // Updated classifier supporting observed header layout
-    bool PacketInjector::ClassifyPacket(const uint8_t* data, size_t len, bool& isChat)
-    {
-        isChat = false;
-        if (!data || len < 0x3C) return false;
-
-        auto read16 = [&](size_t off) -> uint16_t { return *reinterpret_cast<const uint16_t*>(data + off); };
-        auto read32 = [&](size_t off) -> uint32_t { return *reinterpret_cast<const uint32_t*>(data + off); };
-
-        // Primary check (observed layout)
-        uint32_t segType32 = read32(0x34);
-        uint16_t reserved16 = read16(0x38);
-        uint16_t ipcType = read16(0x3A);
-        if (segType32 == 3 && reserved16 == 0x0014)
-        {
-            switch (ipcType)
-            {
-            case 0x0067: // ChatHandler (Zone)
-            case 0x0191: // Command (Zone)
-            case 0x0197: // GMCommand (Zone)
-                isChat = false; // explicitly Zone (not Chat socket)
-                return true;
-            default:
-                isChat = false;
-                return true;
-            }
-        }
-
-        // Fallback older assumption (keep same semantics: default to Zone)
-        if (len >= 0x38)
-        {
-            uint16_t segType = read16(0x30);
-            uint16_t reserved = read16(0x34);
-            uint16_t ipcTypeA = read16(0x36);
-            if (segType == 3 && reserved == 0x0014)
-            {
-                switch (ipcTypeA)
-                {
-                case 0x0067:
-                case 0x0191:
-                case 0x0197:
-                    isChat = false;
-                    return true;
-                default:
-                    isChat = false;
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    // Detour: learn sockets and forward to the real WSASend
-    static int __stdcall WSASend_Detour(SOCKET s,
-        LPWSABUF lpBuffers,
-        DWORD dwBufferCount,
-        LPDWORD lpNumberOfBytesSent,
-        DWORD dwFlags,
-        LPWSAOVERLAPPED lpOverlapped,
-        LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine)
-    {
-        static bool s_logged = false;
-        if (!s_logged && IsEnvEnabled("SAPPHIRE_AUTOFIND_IPC"))
-        {
-            ::SapphireHook::LogInfo("[AutoFind] Learning enabled (SAPPHIRE_AUTOFIND_IPC=1). Collecting WSASend call stacks...");
-            s_logged = true;
-        }
-        LearnFramesFromWSASend();
-
-        if (lpBuffers && dwBufferCount > 0)
-        {
-            for (DWORD i = 0; i < dwBufferCount; ++i)
-            {
-                const uint8_t* buf = reinterpret_cast<const uint8_t*>(lpBuffers[i].buf);
-                const size_t len = lpBuffers[i].len;
-                if (!buf || len == 0) continue;
-
-                // Log to Network Monitor UI (safe check)
-                if (::IsReadable(buf, 1)) {
-                    SafeHookLogger::Instance().TryEnqueueFromHook(buf, len, /*outgoing=*/true, (uint64_t)s);
-                }
-
-                if (len < 0x40 || !::IsReadable(buf, 0x40)) continue;
-
-                uint16_t connType = 0;
-                (void)ReadLE<uint16_t>(buf, len, 0x1C, connType);
-
-                bool isChat = false;
-                const bool looksZoneIpc = PacketInjector::ClassifyPacket(buf, len, isChat);
-
-                if (connType == 1 || looksZoneIpc)
-                {
-                    if (PacketInjector::s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
-                    {
-                        PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(s);
-                        std::printf("[PacketInjector] Learned zone socket: 0x%llx\n", static_cast<unsigned long long>(s));
-                    }
-                    g_lastZoneSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
-                }
-                else if (connType == 2)
-                {
-                    if (PacketInjector::s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
-                    {
-                        PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(s);
-                        std::printf("[PacketInjector] Learned chat socket: 0x%llx\n", static_cast<unsigned long long>(s));
-                    }
-                    g_lastChatSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
-                }
-            }
-        }
-
-        int rc = g_realWSASend
-            ? g_realWSASend(s, lpBuffers, dwBufferCount, lpNumberOfBytesSent, dwFlags, lpOverlapped, lpCompletionRoutine)
-            : SOCKET_ERROR;
-
-        if (rc == SOCKET_ERROR)
-        {
-            CountWsa(WSAGetLastError());
-            g_sendFail.fetch_add(1, std::memory_order_relaxed);
-        }
-        else
-        {
-            g_sendOk.fetch_add(1, std::memory_order_relaxed);
-            uint64_t total = 0;
-            if (lpNumberOfBytesSent) total = *lpNumberOfBytesSent;
-            else for (DWORD i=0;i<dwBufferCount;i++) total += lpBuffers[i].len;
-            g_bytesSent.fetch_add(total, std::memory_order_relaxed);
-        }
-
-        return rc;
-    }
-
-    // Replace the body of send_Detour with metrics and learning
-    static int __stdcall send_Detour(SOCKET s, const char* buf, int len, int flags)
-    {
-        std::printf("[PacketInjector] *** send() called on socket %lld, len=%d ***\n",
-            static_cast<long long>(s), len);
-
-        if (buf && len > 0 && ::IsReadable(buf, 1))
-        {
-            // Enqueue for UI
-            SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(len), /*outgoing=*/true, (uint64_t)s);
-        }
-
-        if (buf && len >= 0x50 && ::IsReadable(buf, 0x50))
-        {
-            const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
-
-            // Learn LocalActorId from outbound ChatHandler (0x0067): payload originEntityId at 0x4C
-            uint32_t segType32 = 0;
-            uint16_t reserved16 = 0, ipcType = 0;
-            (void)ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x34, segType32);
-            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x38, reserved16);
-            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x3A, ipcType);
-            if (segType32 == 3 && reserved16 == 0x0014)
-            {
-                if (ipcType == 0x0067)
-                {
-                    uint32_t originEntityId = 0;
-                    if (ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x4C, originEntityId))
-                    {
-                        if (originEntityId != 0 && originEntityId != 0xFFFFFFFF)
-                        {
-                            g_localActorId.store(originEntityId, std::memory_order_relaxed);
-                            std::printf("[PacketInjector] Learned LocalActorId from ChatHandler: 0x%X (%u)\n",
-                                originEntityId, originEntityId);
-                        }
-                    }
-                }
-            }
-
-            // Existing classification and socket learning
-            uint16_t connType = 0;
-            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x1C, connType);
-
-            bool isChat = false;
-            const bool looksZoneIpc = PacketInjector::ClassifyPacket(p, static_cast<size_t>(len), isChat);
-
-            if (connType == 1 || looksZoneIpc)
-            {
-                if (PacketInjector::s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
-                {
-                    PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(s);
-                    std::printf("[PacketInjector] Learned zone socket (send): 0x%llx\n",
-                        static_cast<unsigned long long>(s));
-                }
-                g_lastZoneSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
-            }
-            else if (connType == 2)
-            {
-                if (PacketInjector::s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
-                {
-                    PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(s);
-                    std::printf("[PacketInjector] Learned chat socket (send): 0x%llx\n",
-                        static_cast<unsigned long long>(s));
-                }
-                g_lastChatSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
-            }
-
-            // Existing manual packet preview
-            if (len > 40)
-            {
-                std::string sample(reinterpret_cast<const char*>(p), std::min(static_cast<size_t>(len), size_t(1024)));
-                if (sample.find('!') != std::string::npos)
-                {
-                    std::printf("[PacketInjector] === MANUAL COMMAND PACKET (send) ===\n");
-                    std::printf("[PacketInjector] Socket: 0x%llx, Length: %d\n",
-                        static_cast<unsigned long long>(s), len);
-
-                    uint16_t ctDump = 0;
-                    if (ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x1C, ctDump))
-                    {
-                        std::printf("[PacketInjector] Connection Type: %u\n", ctDump);
-                    }
-
-                    std::string preview;
-                    preview.reserve(120);
-                    for (char c : sample)
-                    {
-                        if (c == '\0') break;
-                        preview.push_back(isprint(static_cast<unsigned char>(c)) ? c : '.');
-                        if (preview.size() >= 100) break;
-                    }
-                    std::printf("[PacketInjector] Content preview: %s\n", preview.c_str());
-                    std::printf("[PacketInjector] First 128 bytes:\n");
-                    for (size_t j = 0; j < std::min(static_cast<size_t>(len), size_t(128)); ++j)
-                    {
-                        if (j % 16 == 0) std::printf("\n%04zx: ", j);
-                        std::printf("%02X ", p[j]);
-                    }
-                    std::printf("\n===========================================\n");
-                }
-            }
-        }
-
-        int rc = g_realSend ? g_realSend(s, buf, len, flags) : SOCKET_ERROR;
-        if (rc == SOCKET_ERROR)
-        {
-            CountWsa(WSAGetLastError());
-            g_sendFail.fetch_add(1, std::memory_order_relaxed);
-        }
-        else if (rc > 0)
-        {
-            g_sendOk.fetch_add(1, std::memory_order_relaxed);
-            g_bytesSent.fetch_add(static_cast<uint64_t>(rc), std::memory_order_relaxed);
-        }
-        return rc;
-    }
-
-    static int __stdcall recv_Detour(SOCKET s, char* buf, int len, int flags)
-    {
-        std::printf("[PacketInjector] *** recv() called on socket %lld, len=%d ***\n",
-            static_cast<long long>(s), len);
-        int rc = g_realRecv ? g_realRecv(s, buf, len, flags) : SOCKET_ERROR;
-        if (rc > 0)
-        {
-            // Enqueue received bytes for UI
-            if (buf && ::IsReadable(buf, 1))
-            {
-                SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(rc), /*outgoing=*/false, (uint64_t)s);
-            }
-
-            g_recvOk.fetch_add(1, std::memory_order_relaxed);
-            g_bytesRecv.fetch_add(static_cast<uint64_t>(rc), std::memory_order_relaxed);
-        }
-        return rc;
-    }
-
-    static int __stdcall sendto_Detour(SOCKET s, const char* buf, int len, int flags, const sockaddr* to, int tolen)
-    {
-        std::printf("[PacketInjector] *** sendto() called on socket %lld, len=%d ***\n",
-            static_cast<long long>(s), len);
-        if (buf && len > 0 && ::IsReadable(buf, 1))
-        {
-            SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(len), /*outgoing=*/true, (uint64_t)s);
-        }
-        if (PacketInjector::s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
-        {
-            PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(s);
-            std::printf("[PacketInjector] *** LEARNED ZONE SOCKET from sendto(): %lld ***\n",
-                static_cast<long long>(s));
-        }
-        return g_realSendTo ? g_realSendTo(s, buf, len, flags, to, tolen) : SOCKET_ERROR;
-    }
-
-    static int __stdcall recvfrom_Detour(SOCKET s, char* buf, int len, int flags, sockaddr* from, int* fromlen)
-    {
-        std::printf("[PacketInjector] *** recvfrom() called on socket %lld, len=%d ***\n",
-            static_cast<long long>(s), len);
-        int rc = g_realRecvFrom ? g_realRecvFrom(s, buf, len, flags, from, fromlen) : SOCKET_ERROR;
-        if (rc > 0 && buf && ::IsReadable(buf, 1))
-        {
-            SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(rc), /*outgoing=*/false, (uint64_t)s);
-        }
-        return rc;
-    }
-
-    // Send helper (prefers given socket; fallback to discovery if needed)
-    static bool SendOnSocket(std::uintptr_t sockVal, const uint8_t* data, size_t len)
-    {
-        SOCKET sock = static_cast<SOCKET>(sockVal);
-
-        // Try provided socket first if valid
-        if (sock != INVALID_SOCKET)
-        {
-            int optval = 0, optlen = sizeof(optval);
-            if (getsockopt(sock, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&optval), &optlen) == 0)
-            {
-                if (g_realSend)
-                {
-                    int rc = g_realSend(sock, reinterpret_cast<const char*>(data), static_cast<int>(len), 0);
-                    if (rc == static_cast<int>(len))
-                    {
-                        std::printf("[PacketInjector] *** Injected %d bytes via send() on socket 0x%llx ***\n",
-                            rc, static_cast<unsigned long long>(sock));
-                        return true;
-                    }
-                    int wsa = WSAGetLastError();
-                    CountWsa(wsa);
-                    std::printf("[PacketInjector] send() failed: %d (WSAGetLastError=%d)\n", rc, wsa);
-                }
-                if (g_realWSASend)
-                {
-                    WSABUF wsaBuf{};
-                    wsaBuf.len = static_cast<ULONG>(len);
-                    wsaBuf.buf = reinterpret_cast<char*>(const_cast<uint8_t*>(data));
-
-                    DWORD sent = 0;
-                    int rc = g_realWSASend(sock, &wsaBuf, 1, &sent, 0, nullptr, nullptr);
-                    if (rc == 0 && sent == len)
-                    {
-                        std::printf("[PacketInjector] Injected %lu bytes via WSASend on socket 0x%llx\n",
-                            sent, static_cast<unsigned long long>(sock));
-                        g_sendOk.fetch_add(1, std::memory_order_relaxed);
-                        g_bytesSent.fetch_add(static_cast<uint64_t>(sent), std::memory_order_relaxed);
-                        return true;
-                    }
-                    int wsa = WSAGetLastError();
-                    CountWsa(wsa);
-                    std::printf("[PacketInjector] WSASend failed: %d (WSAGetLastError=%d)\n", rc, wsa);
-                    g_sendFail.fetch_add(1, std::memory_order_relaxed);
-                }
-            }
-            else
-            {
-                std::printf("[PacketInjector] Socket 0x%llx is no longer valid (WSAGetLastError=%d)\n",
-                    static_cast<unsigned long long>(sock), WSAGetLastError());
-            }
-        }
-
-        // Fallback: try to find active sockets (this worked in your earlier logs)
-        std::printf("[PacketInjector] Searching for active sockets...\n");
-        auto activeSockets = FindActiveSockets();
-
-        for (SOCKET activeSocket : activeSockets)
-        {
-            if (g_realSend)
-            {
-                int rc = g_realSend(activeSocket, reinterpret_cast<const char*>(data), static_cast<int>(len), 0);
-                if (rc == static_cast<int>(len))
-                {
-                    std::printf("[PacketInjector] *** SUCCESS: Injected %d bytes on discovered socket 0x%llx ***\n",
-                        rc, static_cast<unsigned long long>(activeSocket));
-                    return true;
-                }
-                int wsa = WSAGetLastError();
-                CountWsa(wsa);
-                std::printf("[PacketInjector] Socket 0x%llx failed with error %d, trying next...\n",
-                    static_cast<unsigned long long>(activeSocket), wsa);
-            }
-        }
-
-        std::printf("[PacketInjector] *** FAILED: No active sockets found for injection ***\n");
-        return false;
-    }
-
-    // Replace the Initialize function to hook ALL socket APIs
-    bool PacketInjector::Initialize()
-    {
-        if (s_installed) return true;
-
-        std::printf("[PacketInjector] *** HOOKING ALL SOCKET APIs (send/recv/WSASend) ***\n");
-
-        HMODULE hWs2 = GetModuleHandleA("ws2_32.dll");
-        if (!hWs2)
-        {
-            hWs2 = LoadLibraryA("ws2_32.dll");
-        }
-        if (!hWs2)
-        {
-            std::printf("[PacketInjector] Failed to load ws2_32.dll\n");
-            return false;
-        }
-
-        if (MH_Initialize() != MH_OK && MH_Initialize() != MH_ERROR_ALREADY_INITIALIZED)
-        {
-            std::printf("[PacketInjector] MH_Initialize failed\n");
-            return false;
-        }
-
-        bool anySuccess = false;
-
-        // Hook send() - This is what IDA shows the game using
-        auto pSend = GetProcAddress(hWs2, "send");
-        if (pSend)
-        {
-            if (MH_CreateHook(pSend, &send_Detour, reinterpret_cast<LPVOID*>(&g_realSend)) == MH_OK)
-            {
-                if (MH_EnableHook(pSend) == MH_OK)
-                {
-                    std::printf("[PacketInjector] *** HOOKED send() - GAME USES THIS! ***\n");
-                    anySuccess = true;
-                }
-            }
-        }
-
-        // Hook recv()
-        auto pRecv = GetProcAddress(hWs2, "recv");
-        if (pRecv)
-        {
-            if (MH_CreateHook(pRecv, &recv_Detour, reinterpret_cast<LPVOID*>(&g_realRecv)) == MH_OK)
-            {
-                if (MH_EnableHook(pRecv) == MH_OK)
-                {
-                    std::printf("[PacketInjector] *** HOOKED recv() - GAME USES THIS! ***\n");
-                    anySuccess = true;
-                }
-            }
-        }
-
-        // Hook sendto()
-        auto pSendTo = GetProcAddress(hWs2, "sendto");
-        if (pSendTo)
-        {
-            if (MH_CreateHook(pSendTo, &sendto_Detour, reinterpret_cast<LPVOID*>(&g_realSendTo)) == MH_OK)
-            {
-                if (MH_EnableHook(pSendTo) == MH_OK)
-                {
-                    std::printf("[PacketInjector] *** HOOKED sendto() ***\n");
-                    anySuccess = true;
-                }
-            }
-        }
-
-        // Hook recvfrom()
-        auto pRecvFrom = GetProcAddress(hWs2, "recvfrom");
-        if (pRecvFrom)
-        {
-            if (MH_CreateHook(pRecvFrom, &recvfrom_Detour, reinterpret_cast<LPVOID*>(&g_realRecvFrom)) == MH_OK)
-            {
-                if (MH_EnableHook(pRecvFrom) == MH_OK)
-                {
-                    std::printf("[PacketInjector] *** HOOKED recvfrom() ***\n");
-                    anySuccess = true;
-                }
-            }
-        }
-
-        // Hook closesocket()
-        auto pClose = GetProcAddress(hWs2, "closesocket");
-        if (pClose)
-        {
-            if (MH_CreateHook(pClose, &Hook_closesocket, reinterpret_cast<LPVOID*>(&Real_closesocket)) == MH_OK)
-            {
-                if (MH_EnableHook(pClose) == MH_OK)
-                {
-                    std::printf("[PacketInjector] *** HOOKED closesocket() ***\n");
-                    anySuccess = true;
-                }
-            }
-        }
-
-        // Keep WSASend hook as fallback
-        if (InstallWSASendHook())
-        {
-            std::printf("[PacketInjector] *** HOOKED WSASend() (fallback) ***\n");
-            anySuccess = true;
-        }
-
-        s_installed = anySuccess;
-        if (s_installed)
-        {
-            std::printf("[PacketInjector] *** ALL SOCKET API HOOKS INSTALLED ***\n");
-        }
-        else
-        {
-            std::printf("[PacketInjector] *** FAILED TO HOOK ANY SOCKET APIs ***\n");
-        }
-
-        return s_installed;
-    }
-
-    // Send with socket discovery fallback
-    bool PacketInjector::Send(const uint8_t* data, size_t len)
-    {
-        if (!data || len == 0)
-        {
-            std::printf("[PacketInjector] Send failed - data=%p, len=%zu\n", data, len);
-            return false;
-        }
-
-        // Check if we have ANY send function hooked
-        if (!g_realSend && !g_realWSASend)
-        {
-            std::printf("[PacketInjector] Send failed - no send functions hooked (send=%p, WSASend=%p)\n",
-                g_realSend, g_realWSASend);
-            return false;
-        }
-
-        // Learn sockets if still unknown (use last seen)
-        if (s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
-        {
-            auto last = g_lastZoneSock.load(std::memory_order_relaxed);
-            if (last != static_cast<std::uintptr_t>(INVALID_SOCKET)) s_zoneSocket = last;
-        }
-        if (s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
-        {
-            auto last = g_lastChatSock.load(std::memory_order_relaxed);
-            if (last != static_cast<std::uintptr_t>(INVALID_SOCKET)) s_chatSocket = last;
-        }
-
-        bool isChat{};
-        (void)ClassifyPacket(data, len, isChat);
-
-        // Default to Zone if classification fails
-        const std::uintptr_t targetSock = isChat ? s_chatSocket : s_zoneSocket;
-
-        // Try learned socket, then discovery fallback
-        if (SendOnSocket(targetSock, data, len)) return true;
-
-        // If that failed, attempt discovery explicitly
-        std::printf("[PacketInjector] No luck with learned socket; attempting discovery fallback\n");
-        return SendOnSocket(static_cast<std::uintptr_t>(INVALID_SOCKET), data, len);
-    }
-
-    bool PacketInjector::SendZone(const uint8_t* data, size_t len)
-    {
-        return SendOnSocket(s_zoneSocket, data, len);
-    }
-
-    bool PacketInjector::SendChat(const uint8_t* data, size_t len)
-    {
-        return SendOnSocket(s_chatSocket, data, len);
-    }
-
-    // Expose learned actor id to other modules
-    uint32_t GetLearnedLocalActorId()
-    {
-        return g_localActorId.load(std::memory_order_relaxed);
-    }
-
-    PacketInjector::MetricsSnapshot PacketInjector::GetMetricsSnapshot()
-    {
-        MetricsSnapshot s{};
-        s.t_ms      = GetTickCount64();
-        s.sendOk    = g_sendOk.load(std::memory_order_relaxed);
-        s.sendFail  = g_sendFail.load(std::memory_order_relaxed);
-        s.bytesSent = g_bytesSent.load(std::memory_order_relaxed);
-        s.recvOk    = g_recvOk.load(std::memory_order_relaxed);
-        s.bytesRecv = g_bytesRecv.load(std::memory_order_relaxed);
-        s.wsa10038  = g_wsa10038.load(std::memory_order_relaxed);
-        s.wsa10054  = g_wsa10054.load(std::memory_order_relaxed);
-        s.wsa10035  = g_wsa10035.load(std::memory_order_relaxed);
-        s.wsa10057  = g_wsa10057.load(std::memory_order_relaxed);
-        return s;
-    }
-} // namespace SapphireHook
+	bool PacketInjector::s_installed = false;
+	std::uintptr_t PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(INVALID_SOCKET);
+	std::uintptr_t PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(INVALID_SOCKET);
+
+	using WSASend_t = int(__stdcall*)(SOCKET, LPWSABUF, DWORD, LPDWORD, DWORD,
+		LPWSAOVERLAPPED, LPWSAOVERLAPPED_COMPLETION_ROUTINE);
+	static WSASend_t g_realWSASend = nullptr;
+
+	using send_t = int(__stdcall*)(SOCKET, const char*, int, int);
+	using recv_t = int(__stdcall*)(SOCKET, char*, int, int);
+	using sendto_t = int(__stdcall*)(SOCKET, const char*, int, int, const sockaddr*, int);
+	using recvfrom_t = int(__stdcall*)(SOCKET, char*, int, int, sockaddr*, int*);
+
+	static send_t g_realSend = nullptr;
+	static recv_t g_realRecv = nullptr;
+	static sendto_t g_realSendTo = nullptr;
+	static recvfrom_t g_realRecvFrom = nullptr;
+
+	static int __stdcall WSASend_Detour(SOCKET s,
+		LPWSABUF lpBuffers,
+		DWORD dwBufferCount,
+		LPDWORD lpNumberOfBytesSent,
+		DWORD dwFlags,
+		LPWSAOVERLAPPED lpOverlapped,
+		LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine);
+
+	static bool InstallWSASendHookExport()
+	{
+		if (g_realWSASend) return true;
+
+		HMODULE hWs2 = GetModuleHandleA("ws2_32.dll");
+		if (!hWs2)
+		{
+			hWs2 = LoadLibraryA("ws2_32.dll");
+		}
+		if (!hWs2)
+		{
+			LogError("[PacketInjector] ws2_32.dll not loaded and could not be loaded");
+			return false;
+		}
+
+		auto pWSASend = reinterpret_cast<LPVOID>(GetProcAddress(hWs2, "WSASend"));
+		if (!pWSASend)
+		{
+			LogError("[PacketInjector] GetProcAddress(WSASend) failed");
+			return false;
+		}
+
+		if (MH_Initialize() != MH_OK && MH_Initialize() != MH_ERROR_ALREADY_INITIALIZED)
+		{
+			LogError("[PacketInjector] MH_Initialize failed");
+			return false;
+		}
+
+		const MH_STATUS cr = MH_CreateHook(pWSASend, reinterpret_cast<LPVOID>(&WSASend_Detour),
+			reinterpret_cast<LPVOID*>(&g_realWSASend));
+		if (cr != MH_OK)
+		{
+			LogError("[PacketInjector] MH_CreateHook failed: " + std::to_string(cr));
+			return false;
+		}
+
+		const MH_STATUS en = MH_EnableHook(pWSASend);
+		if (en != MH_OK)
+		{
+			LogError("[PacketInjector] MH_EnableHook failed: " + std::to_string(en));
+			return false;
+		}
+
+		LogInfo("[PacketInjector] WSASend hooked via export. Real=" + Logger::HexFormat(reinterpret_cast<uintptr_t>(g_realWSASend)));
+		return true;
+	}
+
+	bool PacketInjector::InstallWSASendHook()
+	{
+		return InstallWSASendHookExport();
+	}
+
+	bool PacketInjector::ClassifyPacket(const uint8_t* data, size_t len, bool& isChat)
+	{
+		isChat = false;
+		if (!data || len < 0x3C) return false;
+
+		auto read16 = [&](size_t off) -> uint16_t { return *reinterpret_cast<const uint16_t*>(data + off); };
+		auto read32 = [&](size_t off) -> uint32_t { return *reinterpret_cast<const uint32_t*>(data + off); };
+
+		uint32_t segType32 = read32(0x34);
+		uint16_t reserved16 = read16(0x38);
+		uint16_t ipcType = read16(0x3A);
+		if (segType32 == 3 && reserved16 == 0x0014)
+		{
+			switch (ipcType)
+			{
+			case 0x0067:   
+			case 0x0191:   
+			case 0x0197:   
+				isChat = false;      
+				return true;
+			default:
+				isChat = false;
+				return true;
+			}
+		}
+
+		if (len >= 0x38)
+		{
+			uint16_t segType = read16(0x30);
+			uint16_t reserved = read16(0x34);
+			uint16_t ipcTypeA = read16(0x36);
+			if (segType == 3 && reserved == 0x0014)
+			{
+				switch (ipcTypeA)
+				{
+				case 0x0067:
+				case 0x0191:
+				case 0x0197:
+					isChat = false;
+					return true;
+				default:
+					isChat = false;
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	static int __stdcall WSASend_Detour(SOCKET s,
+		LPWSABUF lpBuffers,
+		DWORD dwBufferCount,
+		LPDWORD lpNumberOfBytesSent,
+		DWORD dwFlags,
+		LPWSAOVERLAPPED lpOverlapped,
+		LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine)
+	{
+		static bool s_logged = false;
+		if (!s_logged && IsEnvEnabled("SAPPHIRE_AUTOFIND_IPC"))
+		{
+			::SapphireHook::LogInfo("[AutoFind] Learning enabled (SAPPHIRE_AUTOFIND_IPC=1). Collecting WSASend call stacks...");
+			s_logged = true;
+		}
+		LearnFramesFromWSASend();
+
+		if (lpBuffers && dwBufferCount > 0)
+		{
+			for (DWORD i = 0; i < dwBufferCount; ++i)
+			{
+				const uint8_t* buf = reinterpret_cast<const uint8_t*>(lpBuffers[i].buf);
+				const size_t len = lpBuffers[i].len;
+				if (!buf || len == 0) continue;
+
+				if (::IsReadable(buf, 1)) {
+					SafeHookLogger::Instance().TryEnqueueFromHook(buf, len, true, (uint64_t)s);
+				}
+
+				if (len < 0x40 || !::IsReadable(buf, 0x40)) continue;
+
+				uint16_t connType = 0;
+				(void)ReadLE<uint16_t>(buf, len, 0x1C, connType);
+
+				bool isChat = false;
+				const bool looksZoneIpc = PacketInjector::ClassifyPacket(buf, len, isChat);
+
+				if (connType == 1 || looksZoneIpc)
+				{
+					if (PacketInjector::s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
+					{
+						PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(s);
+						LogInfoWithContext("Socket learned",
+							LogContext()
+							.Add("component", "PacketInjector")
+							.Add("socket_type", "zone")
+							.Add("socket_id", static_cast<uintptr_t>(s))
+							.Add("connection_type", connType));
+					}
+					g_lastZoneSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
+				}
+				else if (connType == 2)
+				{
+					if (PacketInjector::s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
+					{
+						PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(s);
+						LogInfo("[PacketInjector] Learned chat socket: 0x" + std::to_string(static_cast<uintptr_t>(s)));
+					}
+					g_lastChatSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
+				}
+			}
+		}
+
+		int rc = g_realWSASend
+			? g_realWSASend(s, lpBuffers, dwBufferCount, lpNumberOfBytesSent, dwFlags, lpOverlapped, lpCompletionRoutine)
+			: SOCKET_ERROR;
+
+		if (rc == SOCKET_ERROR)
+		{
+			CountWsa(WSAGetLastError());
+			g_sendFail.fetch_add(1, std::memory_order_relaxed);
+		}
+		else
+		{
+			g_sendOk.fetch_add(1, std::memory_order_relaxed);
+			uint64_t total = 0;
+			if (lpNumberOfBytesSent) {
+				total = *lpNumberOfBytesSent;
+			}
+			else if (lpBuffers && dwBufferCount > 0) {
+				for (DWORD i = 0; i < dwBufferCount; i++) {
+					total += lpBuffers[i].len;
+				}
+			}
+			g_bytesSent.fetch_add(total, std::memory_order_relaxed);
+		}
+
+		return rc;
+	}
+
+	static int __stdcall send_Detour(SOCKET s, const char* buf, int len, int flags)
+	{
+		LogInfo("[PacketInjector] send() called on socket " + std::to_string(static_cast<uint64_t>(s)) + ", len=" + std::to_string(len));
+
+		if (buf && len > 0 && ::IsReadable(buf, 1))
+		{
+			SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(len), true, (uint64_t)s);
+		}
+
+		if (buf && len >= 0x50 && ::IsReadable(buf, 0x50))
+		{
+			const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
+
+			uint32_t segType32 = 0;
+			uint16_t reserved16 = 0, ipcType = 0;
+			(void)ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x34, segType32);
+			(void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x38, reserved16);
+			(void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x3A, ipcType);
+			if (segType32 == 3 && reserved16 == 0x0014)
+			{
+				if (ipcType == 0x0067)
+				{
+					uint32_t originEntityId = 0;
+					if (ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x4C, originEntityId))
+					{
+						if (originEntityId != 0 && originEntityId != 0xFFFFFFFF)
+						{
+							g_localActorId.store(originEntityId, std::memory_order_relaxed);
+							LogInfo("[PacketInjector] Learned LocalActorId from ChatHandler: 0x" + std::to_string(originEntityId) + " (" + std::to_string(originEntityId) + ")");
+						}
+					}
+				}
+			}
+
+			uint16_t connType = 0;
+			(void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x1C, connType);
+
+			bool isChat = false;
+			const bool looksZoneIpc = PacketInjector::ClassifyPacket(p, static_cast<size_t>(len), isChat);
+
+			if (connType == 1 || looksZoneIpc)
+			{
+				if (PacketInjector::s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
+				{
+					PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(s);
+					LogInfoWithContext("Socket learned",
+						LogContext()
+						.Add("component", "PacketInjector")
+						.Add("socket_type", "zone")
+						.Add("socket_id", static_cast<uintptr_t>(s))
+						.Add("connection_type", connType));
+				}
+				g_lastZoneSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
+			}
+			else if (connType == 2)
+			{
+				if (PacketInjector::s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
+				{
+					PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(s);
+					LogInfo("[PacketInjector] Learned chat socket: 0x" + std::to_string(static_cast<uintptr_t>(s)));
+				}
+				g_lastChatSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
+			}
+
+			if (len > 40)
+			{
+				std::string sample(reinterpret_cast<const char*>(p), std::min(static_cast<size_t>(len), size_t(1024)));
+				if (sample.find('!') != std::string::npos)
+				{
+					LogDebug("[PacketInjector] Manual command packet detected (send)");
+					LogDebug("[PacketInjector] Socket: 0x" + std::to_string(static_cast<uintptr_t>(s)) + ", Length: " + std::to_string(len));
+
+					uint16_t ctDump = 0;
+					if (ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x1C, ctDump))
+					{
+						LogDebug("[PacketInjector] Connection Type: " + std::to_string(ctDump));
+					}
+
+					std::string preview;
+					preview.reserve(120);
+					for (char c : sample)
+					{
+						if (c == '\0') break;
+						preview.push_back(isprint(static_cast<unsigned char>(c)) ? c : '.');
+						if (preview.size() >= 100) break;
+					}
+					LogDebug("[PacketInjector] Content preview: " + preview);
+
+					std::ostringstream hexDump;
+					hexDump << "[PacketInjector] First 128 bytes:";
+					for (size_t j = 0; j < std::min(static_cast<size_t>(len), size_t(128)); ++j)
+					{
+						if (j % 16 == 0) hexDump << "\n" << std::setfill('0') << std::setw(4) << std::hex << j << ": ";
+						hexDump << std::setfill('0') << std::setw(2) << std::hex << static_cast<unsigned>(p[j]) << " ";
+					}
+					LogDebug(hexDump.str());
+				}
+			}
+		}
+
+		int rc = g_realSend ? g_realSend(s, buf, len, flags) : SOCKET_ERROR;
+		if (rc == SOCKET_ERROR)
+		{
+			CountWsa(WSAGetLastError());
+			g_sendFail.fetch_add(1, std::memory_order_relaxed);
+		}
+		else if (rc > 0)
+		{
+			g_sendOk.fetch_add(1, std::memory_order_relaxed);
+			g_bytesSent.fetch_add(static_cast<uint64_t>(rc), std::memory_order_relaxed);
+		}
+		return rc;
+	}
+
+	static int __stdcall recv_Detour(SOCKET s, char* buf, int len, int flags)
+	{
+		LogDebug("[PacketInjector] recv() called on socket " + std::to_string(static_cast<long long>(s)) + ", len=" + std::to_string(len));
+		int rc = g_realRecv ? g_realRecv(s, buf, len, flags) : SOCKET_ERROR;
+		if (rc > 0)
+		{
+			if (buf && ::IsReadable(buf, 1))
+			{
+				SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(rc), false, (uint64_t)s);
+			}
+
+			g_recvOk.fetch_add(1, std::memory_order_relaxed);
+			g_bytesRecv.fetch_add(static_cast<uint64_t>(rc), std::memory_order_relaxed);
+		}
+		return rc;
+	}
+
+	static int __stdcall sendto_Detour(SOCKET s, const char* buf, int len, int flags, const sockaddr* to, int tolen)
+	{
+		LogDebug("[PacketInjector] sendto() called on socket " + std::to_string(static_cast<long long>(s)) + ", len=" + std::to_string(len));
+		if (buf && len > 0 && ::IsReadable(buf, 1))
+		{
+			SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(len), true, (uint64_t)s);
+		}
+		if (PacketInjector::s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
+		{
+			PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(s);
+			LogInfo("[PacketInjector] LEARNED ZONE SOCKET from sendto(): " + std::to_string(static_cast<long long>(s)));
+		}
+		return g_realSendTo ? g_realSendTo(s, buf, len, flags, to, tolen) : SOCKET_ERROR;
+	}
+
+	static int __stdcall recvfrom_Detour(SOCKET s, char* buf, int len, int flags, sockaddr* from, int* fromlen)
+	{
+		LogDebug("[PacketInjector] recvfrom() called on socket " + std::to_string(static_cast<long long>(s)) + ", len=" + std::to_string(len));
+		int rc = g_realRecvFrom ? g_realRecvFrom(s, buf, len, flags, from, fromlen) : SOCKET_ERROR;
+		if (rc > 0 && buf && ::IsReadable(buf, 1))
+		{
+			SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(rc), false, (uint64_t)s);
+		}
+		return rc;
+	}
+
+	static bool SendOnSocket(std::uintptr_t sockVal, const uint8_t* data, size_t len)
+	{
+		SOCKET sock = static_cast<SOCKET>(sockVal);
+
+		if (sock != INVALID_SOCKET)
+		{
+			int optval = 0, optlen = sizeof(optval);
+			if (getsockopt(sock, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&optval), &optlen) == 0)
+			{
+				if (g_realSend)
+				{
+					int rc = g_realSend(sock, reinterpret_cast<const char*>(data), static_cast<int>(len), 0);
+					if (rc == static_cast<int>(len))
+					{
+						LogInfo("[PacketInjector] Injected " + std::to_string(rc) + " bytes via send() on socket " + Logger::HexFormat(static_cast<unsigned long long>(sock)));
+						return true;
+					}
+					int wsa = WSAGetLastError();
+					CountWsa(wsa);
+					LogError("[PacketInjector] send() failed: " + std::to_string(rc) + " (WSAGetLastError=" + std::to_string(wsa) + ")");
+				}
+				if (g_realWSASend)
+				{
+					WSABUF wsaBuf{};
+					wsaBuf.len = static_cast<ULONG>(len);
+					wsaBuf.buf = reinterpret_cast<char*>(const_cast<uint8_t*>(data));
+
+					DWORD sent = 0;
+					int rc = g_realWSASend(sock, &wsaBuf, 1, &sent, 0, nullptr, nullptr);
+					if (rc == 0 && sent == len)
+					{
+						LogInfo("[PacketInjector] Injected " + std::to_string(sent) + " bytes via WSASend on socket " + Logger::HexFormat(static_cast<unsigned long long>(sock)));
+						g_sendOk.fetch_add(1, std::memory_order_relaxed);
+						g_bytesSent.fetch_add(static_cast<uint64_t>(sent), std::memory_order_relaxed);
+						return true;
+					}
+					int wsa = WSAGetLastError();
+					CountWsa(wsa);
+					LogError("[PacketInjector] WSASend failed: " + std::to_string(rc) + " (WSAGetLastError=" + std::to_string(wsa) + ")");
+					g_sendFail.fetch_add(1, std::memory_order_relaxed);
+				}
+			}
+			else
+			{
+				LogWarning("[PacketInjector] Socket " + Logger::HexFormat(static_cast<unsigned long long>(sock)) + " is no longer valid (WSAGetLastError=" + std::to_string(WSAGetLastError()) + ")");
+			}
+		}
+
+		LogInfo("[PacketInjector] Searching for active sockets...");
+		auto activeSockets = FindActiveSockets();
+
+		for (SOCKET activeSocket : activeSockets)
+		{
+			if (g_realSend)
+			{
+				int rc = g_realSend(activeSocket, reinterpret_cast<const char*>(data), static_cast<int>(len), 0);
+				if (rc == static_cast<int>(len))
+				{
+					LogInfo("[PacketInjector] SUCCESS: Injected " + std::to_string(rc) + " bytes on discovered socket " + Logger::HexFormat(static_cast<unsigned long long>(activeSocket)));
+					return true;
+				}
+				int wsa = WSAGetLastError();
+				CountWsa(wsa);
+				LogDebug("[PacketInjector] Socket " + Logger::HexFormat(static_cast<unsigned long long>(activeSocket)) + " failed with error " + std::to_string(wsa) + ", trying next...");
+			}
+		}
+
+		LogError("[PacketInjector] FAILED: No active sockets found for injection");
+		return false;
+	}
+
+	bool PacketInjector::Initialize()
+	{
+		if (s_installed) return true;
+
+		LogInfo("[PacketInjector] HOOKING ALL SOCKET APIs (send/recv/WSASend)");
+
+		HMODULE hWs2 = GetModuleHandleA("ws2_32.dll");
+		if (!hWs2)
+		{
+			hWs2 = LoadLibraryA("ws2_32.dll");
+		}
+		if (!hWs2)
+		{
+			LogError("[PacketInjector] Failed to load ws2_32.dll");
+			return false;
+		}
+
+		if (MH_Initialize() != MH_OK && MH_Initialize() != MH_ERROR_ALREADY_INITIALIZED)
+		{
+			LogError("[PacketInjector] MH_Initialize failed");
+			return false;
+		}
+
+		bool anySuccess = false;
+
+		auto pSend = GetProcAddress(hWs2, "send");
+		if (pSend)
+		{
+			if (MH_CreateHook(pSend, &send_Detour, reinterpret_cast<LPVOID*>(&g_realSend)) == MH_OK)
+			{
+				if (MH_EnableHook(pSend) == MH_OK)
+				{
+					LogInfo("[PacketInjector] HOOKED send() - GAME USES THIS!");
+					anySuccess = true;
+				}
+			}
+		}
+
+		auto pRecv = GetProcAddress(hWs2, "recv");
+		if (pRecv)
+		{
+			if (MH_CreateHook(pRecv, &recv_Detour, reinterpret_cast<LPVOID*>(&g_realRecv)) == MH_OK)
+			{
+				if (MH_EnableHook(pRecv) == MH_OK)
+				{
+					LogInfo("[PacketInjector] HOOKED recv() - GAME USES THIS!");
+					anySuccess = true;
+				}
+			}
+		}
+
+		auto pSendTo = GetProcAddress(hWs2, "sendto");
+		if (pSendTo)
+		{
+			if (MH_CreateHook(pSendTo, &sendto_Detour, reinterpret_cast<LPVOID*>(&g_realSendTo)) == MH_OK)
+			{
+				if (MH_EnableHook(pSendTo) == MH_OK)
+				{
+					LogInfo("[PacketInjector] HOOKED sendto()");
+					anySuccess = true;
+				}
+			}
+		}
+
+		auto pRecvFrom = GetProcAddress(hWs2, "recvfrom");
+		if (pRecvFrom)
+		{
+			if (MH_CreateHook(pRecvFrom, &recvfrom_Detour, reinterpret_cast<LPVOID*>(&g_realRecvFrom)) == MH_OK)
+			{
+				if (MH_EnableHook(pRecvFrom) == MH_OK)
+				{
+					LogInfo("[PacketInjector] HOOKED recvfrom()");
+					anySuccess = true;
+				}
+			}
+		}
+
+		auto pClose = GetProcAddress(hWs2, "closesocket");
+		if (pClose)
+		{
+			if (MH_CreateHook(pClose, &Hook_closesocket, reinterpret_cast<LPVOID*>(&Real_closesocket)) == MH_OK)
+			{
+				if (MH_EnableHook(pClose) == MH_OK)
+				{
+					LogInfo("[PacketInjector] HOOKED closesocket()");
+					anySuccess = true;
+				}
+			}
+		}
+
+		if (InstallWSASendHook())
+		{
+			LogInfo("[PacketInjector] HOOKED WSASend() (fallback)");
+			anySuccess = true;
+		}
+
+		s_installed = anySuccess;
+		if (s_installed)
+		{
+			LogInfo("[PacketInjector] ALL SOCKET API HOOKS INSTALLED");
+		}
+		else
+		{
+			LogError("[PacketInjector] FAILED TO HOOK ANY SOCKET APIs");
+		}
+
+		return s_installed;
+	}
+
+	bool PacketInjector::Send(const uint8_t* data, size_t len)
+	{
+		if (!data || len == 0)
+		{
+			LogError("[PacketInjector] Send failed - data=" + Logger::HexFormat(reinterpret_cast<uintptr_t>(data)) + ", len=" + std::to_string(len));
+			return false;
+		}
+
+		if (!g_realSend && !g_realWSASend)
+		{
+			LogError("[PacketInjector] Send failed - no send functions hooked (send=" + Logger::HexFormat(reinterpret_cast<uintptr_t>(g_realSend)) + ", WSASend=" + Logger::HexFormat(reinterpret_cast<uintptr_t>(g_realWSASend)) + ")");
+			return false;
+		}
+
+		if (s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
+		{
+			auto last = g_lastZoneSock.load(std::memory_order_relaxed);
+			if (last != static_cast<std::uintptr_t>(INVALID_SOCKET)) s_zoneSocket = last;
+		}
+		if (s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET))
+		{
+			auto last = g_lastChatSock.load(std::memory_order_relaxed);
+			if (last != static_cast<std::uintptr_t>(INVALID_SOCKET)) s_chatSocket = last;
+		}
+
+		bool isChat{};
+		(void)ClassifyPacket(data, len, isChat);
+
+		const std::uintptr_t targetSock = isChat ? s_chatSocket : s_zoneSocket;
+
+		if (SendOnSocket(targetSock, data, len)) return true;
+
+		LogInfo("[PacketInjector] No luck with learned socket; attempting discovery fallback");
+		return SendOnSocket(static_cast<std::uintptr_t>(INVALID_SOCKET), data, len);
+	}
+
+	bool PacketInjector::SendZone(const uint8_t* data, size_t len)
+	{
+		return SendOnSocket(s_zoneSocket, data, len);
+	}
+
+	bool PacketInjector::SendChat(const uint8_t* data, size_t len)
+	{
+		return SendOnSocket(s_chatSocket, data, len);
+	}
+
+	uint32_t GetLearnedLocalActorId()
+	{
+		return g_localActorId.load(std::memory_order_relaxed);
+	}
+
+	PacketInjector::MetricsSnapshot PacketInjector::GetMetricsSnapshot()
+	{
+		MetricsSnapshot s{};
+		s.t_ms = GetTickCount64();
+		s.sendOk = g_sendOk.load(std::memory_order_relaxed);
+		s.sendFail = g_sendFail.load(std::memory_order_relaxed);
+		s.bytesSent = g_bytesSent.load(std::memory_order_relaxed);
+		s.recvOk = g_recvOk.load(std::memory_order_relaxed);
+		s.bytesRecv = g_bytesRecv.load(std::memory_order_relaxed);
+		s.wsa10038 = g_wsa10038.load(std::memory_order_relaxed);
+		s.wsa10054 = g_wsa10054.load(std::memory_order_relaxed);
+		s.wsa10035 = g_wsa10035.load(std::memory_order_relaxed);
+		s.wsa10057 = g_wsa10057.load(std::memory_order_relaxed);
+		return s;
+	}
+}   
