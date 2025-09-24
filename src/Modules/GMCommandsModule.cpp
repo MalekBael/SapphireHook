@@ -44,7 +44,7 @@ static void DrawHintBox()
     ImGui::BeginChild("##gm_hint", ImVec2(0, 72), true);
     ImGui::TextColored(ImVec4(0.9f, 0.85f, 0.3f, 1.0f), "Syntax");
     ImGui::Separator();
-    ImGui::TextWrapped("This command expects the arguments shown below. The '/gm ' prefix and the command name are added automatically when you click Send.");
+    ImGui::TextWrapped("This command expects the arguments shown below. The '//gm ' prefix and the command name are added automatically when you click Send.");
     ImGui::EndChild();
     ImGui::PopStyleVar();
     ImGui::PopStyleColor();
@@ -70,7 +70,7 @@ void GMCommandsModule::RenderWindow()
     ImGui::SetNextWindowSize(ImVec2(600, 650), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("GM Commands", &m_windowOpen))
     {
-        ImGui::TextDisabled("GM commands are sent via opcodes only (no chat text).");
+        ImGui::TextDisabled("GM commands are sent via Packet Injection.");
         ImGui::Separator();
 
         // Tab bar for different modes
@@ -188,7 +188,7 @@ void GMCommandsModule::RenderWindow()
                 if (!canSend) ImGui::EndDisabled();
 
                 ImGui::Separator();
-                ImGui::TextDisabled("Source: compiled command list in GMCommandList.h (enum + table). Add argsHint/description for better help.");
+                ImGui::TextDisabled("Source: compiled command list in GMCommandList.h (enum + table).");
 
                 ImGui::EndTabItem();
             }
