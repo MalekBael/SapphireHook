@@ -19,6 +19,9 @@ public:
     void SetWindowOpen(bool open) override { m_windowOpen = open; }
 
 private:
+    // Helper method for sending GM commands with specific opcode
+    void SendGMCommandWithOpcode(uint32_t commandId, uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3, uint64_t targetId, uint16_t opcode, const char* opcodeDesc);
+
     // UI state
     bool m_windowOpen = false;
 
@@ -32,4 +35,12 @@ private:
     int m_arg2 = 0;
     int m_arg3 = 0;
     unsigned long long m_targetId = 0ULL;
+
+    // Discovery mode: raw command ID input
+    int m_discoveryCommandId = 0;
+    int m_discoveryArg0 = 0;
+    int m_discoveryArg1 = 0;
+    int m_discoveryArg2 = 0;
+    int m_discoveryArg3 = 0;
+    unsigned long long m_discoveryTargetId = 0ULL;
 };

@@ -46,7 +46,8 @@ namespace SapphireHook {
         LogLevel m_minimumLevel = LogLevel::Information;
         bool m_logToConsole = true;
         bool m_logToFile = true;
-        std::string m_logPrefix = "[SapphireHook]";
+		//TODO remove m_logPrefix
+        std::string m_logPrefix = "[]";
 
         // Fallback logging like Dalamud does
         bool m_fallbackMode = false;

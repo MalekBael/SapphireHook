@@ -178,7 +178,9 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
 
     while (true)
     {
-        if (GetAsyncKeyState(VK_END) & 1)
+        // Check for unload request (END key OR menu request)
+        if ((GetAsyncKeyState(VK_END) & 1) || 
+            (UIManager::HasInstance() && UIManager::IsUnloadRequested()))
         {
             LogInfo("Unloading requested...");
             break;
@@ -186,25 +188,64 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
         Sleep(100);
     }
 
+    // Enhanced cleanup sequence
     try
     {
-        LogInfo("Starting cleanup...");
+        LogInfo("=== Starting Safe DLL Unload ===");
+        
+        // 1. Stop all background operations
+        if (UIManager::HasInstance())
+        {
+            UIManager& ui = UIManager::GetInstance();
+            
+            // Stop function monitor operations
+            auto* functionMonitor = dynamic_cast<FunctionCallMonitor*>(
+                ui.GetModule("function_monitor"));
+            if (functionMonitor)
+            {
+                functionMonitor->StopScan();
+                functionMonitor->UnhookAllFunctions();
+                LogInfo("Function monitor safely stopped");
+            }
+            
+            // Close all module windows
+            auto& modules = ui.GetModules();
+            for (auto& module : modules)
+            {
+                if (module) {
+                    module->SetWindowOpen(false);
+                }
+            }
+            LogInfo("All module windows closed");
+        }
+        
+        // 2. Cleanup graphics and UI
         CleanupOverlay();
-        LogInfo("Cleanup completed successfully");
+        LogInfo("Overlay cleanup completed");
+        
+        // 3. Shutdown UIManager
+        UIManager::Shutdown();
+        LogInfo("UIManager shutdown completed");
+        
+        // 4. Final logging
+        LogInfo("=== Safe DLL Unload Complete ===");
+        
+        // Small delay for operations to complete
+        Sleep(250);
     }
     catch (...)
     {
-        LogError("Cleanup error occurred");
+        LogError("Exception during cleanup - proceeding with unload");
     }
 
     LogInfo("SapphireHook unloading...");
 
     if (consoleAllocated)
     {
-        LogInfo("Freeing console...");
         FreeConsole();
     }
 
+    // Clean DLL unload
     FreeLibraryAndExitThread((HMODULE)lpReserved, 0);
     return 0;
 }
@@ -215,7 +256,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
     {
     case DLL_PROCESS_ATTACH:
         DisableThreadLibraryCalls(hModule);
-
         CreateThread(nullptr, 0x10000, MainThread, hModule, 0, nullptr);
         break;
 

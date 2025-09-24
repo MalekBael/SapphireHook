@@ -34,8 +34,13 @@ namespace SapphireHook
         UIManager& operator=(const UIManager&) = delete;
 
         static UIManager* s_instance;
+        static bool s_unloadRequested;
         std::vector<std::unique_ptr<UIModule>> m_modules;
         bool m_showMenu = false;
         bool m_showDemoWindow = false;
+    public:
+        static void RequestUnload();
+        static bool IsUnloadRequested();
+        const std::vector<std::unique_ptr<UIModule>>& GetModules() const { return m_modules; }
     };
 }
