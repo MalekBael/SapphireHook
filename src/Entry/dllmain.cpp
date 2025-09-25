@@ -5,10 +5,10 @@
 #include "../Hooking/hook_manager.h"
 #include "../UI/imgui_overlay.h"
 #include "../Hooking/lua_hook.h"
-#include "../Core/patternscanner.h"
+#include "../Analysis/PatternScanner.h"
 #include "../Logger/Logger.h"
 #include "../UI/UIManager.h"    
-#include "../Core/FunctionCallMonitor.h"    
+#include "../Modules/FunctionCallMonitor.h"    
 
 bool g_SafeToInitialize = false;
 

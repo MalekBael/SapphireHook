@@ -555,12 +555,13 @@ std::string FunctionDatabase::GetFunctionCategory(uintptr_t address) const
 std::string FunctionDatabase::GetSimpleFunctionName(uintptr_t address) const
 {
     std::string name = GetFunctionName(address);
-    if (name.empty())
-        return FormatHexAddress(address);
+    if (name.empty()) return FormatHexAddress(address);
 
-    size_t lastColon = name.find_last_of("::");
-    if (lastColon != std::string::npos && lastColon > 0)
-        return name.substr(lastColon - 1);
+    size_t pos = name.rfind("::");
+    if (pos != std::string::npos) return name.substr(pos + 2);
+
+    pos = name.find_last_of(':');
+    if (pos != std::string::npos) return name.substr(pos + 1);
 
     return name;
 }

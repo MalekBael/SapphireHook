@@ -13,7 +13,7 @@
 // Include the full definitions for classes used as member variables
 #include "FunctionDatabase.h"
 #include "SignatureDatabase.h"
-#include "FunctionScanner.h"  // This will bring in StringScanResult
+#include "../Analysis/FunctionScanner.h"  // This will bring in StringScanResult
 #include "../UI/UIModule.h"
 
 // Forward declarations for new classes

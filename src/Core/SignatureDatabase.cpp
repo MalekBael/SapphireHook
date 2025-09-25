@@ -1,5 +1,5 @@
 #include "SignatureDatabase.h"
-#include "patternscanner.h"
+#include "../Analysis/PatternScanner.h"
 #include "../Logger/Logger.h"
 #include <fstream>
 #include <algorithm>

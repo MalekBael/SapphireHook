@@ -17,8 +17,8 @@ namespace SapphireHook
         virtual void Shutdown() {}
 
         // UI rendering
-        virtual void RenderMenu() = 0;  // For menu bar items
-        virtual void RenderWindow() = 0; // For standalone windows
+        virtual void RenderMenu() = 0;  
+        virtual void RenderWindow() = 0; 
 
         // Module state
         virtual bool IsWindowOpen() const = 0;

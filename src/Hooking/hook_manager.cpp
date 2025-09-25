@@ -1,6 +1,6 @@
 #include "../Hooking/hook_manager.h"
 #include "../../vendor/minhook/include/MinHook.h"
-#include "../Core/patternscanner.h"
+#include "../Analysis/PatternScanner.h"
 #include "../Logger/Logger.h"
 #include "../Core/SafeMemory.h"
 #include <fstream>

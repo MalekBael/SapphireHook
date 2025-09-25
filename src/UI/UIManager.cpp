@@ -1,7 +1,7 @@
 #include "../UI/UIManager.h"
 #include "../UI/UIModule.h"
 #include "../Modules/DebugCommandsModule.h"
-#include "../Core/FunctionCallMonitor.h"
+#include "../Modules/FunctionCallMonitor.h"
 #include "../Logger/Logger.h"
 #include "../vendor/imgui/imgui.h"
 #include <algorithm>

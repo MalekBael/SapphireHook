@@ -1,7 +1,7 @@
 #include "FunctionAnalyzer.h"
 #include "FunctionDatabase.h"
 #include "SignatureDatabase.h"
-#include "PatternScanner.h"  // Add this include for the consolidated string xref functionality
+#include "../Analysis/PatternScanner.h"  // Add this include for the consolidated string xref functionality
 #include "../Logger/Logger.h"
 #include <sstream>
 #include <iomanip>

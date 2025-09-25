@@ -5,38 +5,7 @@
 #include <cstdio>
 #include "../Core/PacketInjector.h"
 
-void GMCommandsModule::Initialize()
-{
-    printf("[GMCommandsModule] Initializing...\n");
-
-    // Default: no selection; show blank preview
-    m_selectedIndex = -1;
-    m_commandId = 0;
-    
-    // Initialize discovery mode with default values
-    m_discoveryCommandId = 605;  // Start with an unknown command for testing
-    m_discoveryArg0 = 0;
-    m_discoveryArg1 = 0;
-    m_discoveryArg2 = 0;
-    m_discoveryArg3 = 0;
-    m_discoveryTargetId = 0ULL;
-}
-
-void GMCommandsModule::RenderMenu()
-{
-    static int callCount = 0;
-    callCount++;
-    if (callCount <= 3)
-    {
-        printf("[GMCommandsModule] RenderMenu() called #%d\n", callCount);
-    }
-
-    if (ImGui::MenuItem(GetDisplayName(), nullptr, &m_windowOpen))
-    {
-        printf("[GMCommandsModule] Menu clicked! Window: %s\n", m_windowOpen ? "OPEN" : "CLOSED");
-    }
-}
-
+// Small UI helpers (file-local)
 static void DrawHintBox()
 {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.16f, 0.35f));
@@ -61,6 +30,93 @@ static void DrawDiscoveryHintBox()
     ImGui::EndChild();
     ImGui::PopStyleVar();
     ImGui::PopStyleColor();
+}
+
+// Reusable args + target block (deduplicates Known/Discovery)
+// labelSuffix must be unique per caller (e.g. "##known", "##discovery") to avoid ID collisions.
+static void DrawArgsSection(const char* labelSuffix,
+                            bool readOnlyCommandId,
+                            int& commandId,
+                            int& a0, int& a1, int& a2, int& a3,
+                            unsigned long long& targetId)
+{
+    if (readOnlyCommandId)
+    {
+        ImGui::BeginDisabled(true);
+        ImGui::InputInt("Command ID", &commandId);
+        ImGui::EndDisabled();
+    }
+    else
+    {
+        ImGui::InputInt("Command ID", &commandId);
+    }
+
+    ImGui::InputInt("Arg 0", &a0);
+    ImGui::InputInt("Arg 1", &a1);
+    ImGui::InputInt("Arg 2", &a2);
+    ImGui::InputInt("Arg 3", &a3);
+    ImGui::InputScalar("Target ID (uint64)", ImGuiDataType_U64, &targetId);
+
+    // Learned local actor id + "Use Self" (shared UI)
+    const uint32_t learned = SapphireHook::GetLearnedLocalActorId();
+    ImGui::Spacing();
+
+    char buf[96];
+    if (learned != 0 && learned != 0xFFFFFFFF)
+        std::snprintf(buf, sizeof(buf), "Local actor ID: 0x%X (%u)", learned, learned);
+    else
+        std::snprintf(buf, sizeof(buf), "Local actor ID: (learning...) Type any chat message once.");
+
+    // Ensure distinct IDs between tabs
+    char statusId[64];
+    std::snprintf(statusId, sizeof(statusId), "##local_actor_status%s", labelSuffix ? labelSuffix : "");
+    ImGui::InputText(statusId, buf, sizeof(buf), ImGuiInputTextFlags_ReadOnly);
+
+    ImGui::SameLine();
+    const bool canUseSelf = (learned != 0 && learned != 0xFFFFFFFF);
+    if (!canUseSelf) ImGui::BeginDisabled(true);
+
+    char btnId[64];
+    std::snprintf(btnId, sizeof(btnId), "Use Self%s", labelSuffix ? labelSuffix : "");
+    if (ImGui::Button(btnId))
+    {
+        targetId = static_cast<unsigned long long>(learned);
+    }
+    if (!canUseSelf) ImGui::EndDisabled();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Set Target ID to your player actor ID");
+}
+
+void GMCommandsModule::Initialize()
+{
+    printf("[GMCommandsModule] Initializing...\n");
+
+    // Default: no selection; show blank preview
+    m_selectedIndex = -1;
+    m_commandId = 0;
+
+    // Initialize discovery mode with default values
+    m_discoveryCommandId = 605;  // Start with an unknown command for testing
+    m_discoveryArg0 = 0;
+    m_discoveryArg1 = 0;
+    m_discoveryArg2 = 0;
+    m_discoveryArg3 = 0;
+    m_discoveryTargetId = 0ULL;
+}
+
+void GMCommandsModule::RenderMenu()
+{
+    static int callCount = 0;
+    callCount++;
+    if (callCount <= 3)
+    {
+        printf("[GMCommandsModule] RenderMenu() called #%d\n", callCount);
+    }
+
+    if (ImGui::MenuItem(GetDisplayName(), nullptr, &m_windowOpen))
+    {
+        printf("[GMCommandsModule] Menu clicked! Window: %s\n", m_windowOpen ? "OPEN" : "CLOSED");
+    }
 }
 
 void GMCommandsModule::RenderWindow()
@@ -127,41 +183,8 @@ void GMCommandsModule::RenderWindow()
 
                 ImGui::Separator();
 
-                ImGui::BeginDisabled(true);
-                ImGui::InputInt("Command ID", &m_commandId);
-                ImGui::EndDisabled();
-
-                // Arguments
-                ImGui::InputInt("Arg 0", &m_arg0);
-                ImGui::InputInt("Arg 1", &m_arg1);
-                ImGui::InputInt("Arg 2", &m_arg2);
-                ImGui::InputInt("Arg 3", &m_arg3);
-                ImGui::InputScalar("Target ID (uint64)", ImGuiDataType_U64, &m_targetId);
-
-                // Show learned local actor id (only set on button press)
-                {
-                    const uint32_t learned = SapphireHook::GetLearnedLocalActorId();
-                    ImGui::Spacing();
-
-                    char buf[96];
-                    if (learned != 0 && learned != 0xFFFFFFFF)
-                        std::snprintf(buf, sizeof(buf), "Local actor ID: 0x%X (%u)", learned, learned);
-                    else
-                        std::snprintf(buf, sizeof(buf), "Local actor ID: (learning...) Type any chat message once.");
-
-                    ImGui::InputText("##local_actor_status", buf, sizeof(buf), ImGuiInputTextFlags_ReadOnly);
-
-                    ImGui::SameLine();
-                    const bool canUseSelf = (learned != 0 && learned != 0xFFFFFFFF);
-                    if (!canUseSelf) ImGui::BeginDisabled(true);
-                    if (ImGui::Button("Use Self"))
-                    {
-                        m_targetId = static_cast<unsigned long long>(learned); // set once on button press
-                    }
-                    if (!canUseSelf) ImGui::EndDisabled();
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Set Target ID to your player actor ID");
-                }
+                // Shared args/target block (Command ID is read-only here)
+                DrawArgsSection("##known", true, m_commandId, m_arg0, m_arg1, m_arg2, m_arg3, m_targetId);
 
                 ImGui::Spacing();
 
@@ -203,58 +226,13 @@ void GMCommandsModule::RenderWindow()
                 ImGui::TextDisabled("Enter any command ID to test unknown GM commands");
                 ImGui::Separator();
 
-                // Raw command ID input - always editable
-                ImGui::InputInt("Command ID", &m_discoveryCommandId);
-                
-                // Helpful buttons for common ranges
-                ImGui::SameLine();
-                if (ImGui::Button("605"))
-                    m_discoveryCommandId = 605;
-                ImGui::SameLine();
-                if (ImGui::Button("606"))
-                    m_discoveryCommandId = 606;
-                ImGui::SameLine();
-                if (ImGui::Button("607"))
-                    m_discoveryCommandId = 607;
-
-                ImGui::Spacing();
-                
-                // Discovery arguments
-                ImGui::InputInt("Arg 0", &m_discoveryArg0);
-                ImGui::InputInt("Arg 1", &m_discoveryArg1);
-                ImGui::InputInt("Arg 2", &m_discoveryArg2);
-                ImGui::InputInt("Arg 3", &m_discoveryArg3);
-                ImGui::InputScalar("Target ID (uint64)", ImGuiDataType_U64, &m_discoveryTargetId);
-
-                // Show learned local actor id for discovery mode too
-                {
-                    const uint32_t learned = SapphireHook::GetLearnedLocalActorId();
-                    ImGui::Spacing();
-
-                    char buf[96];
-                    if (learned != 0 && learned != 0xFFFFFFFF)
-                        std::snprintf(buf, sizeof(buf), "Local actor ID: 0x%X (%u)", learned, learned);
-                    else
-                        std::snprintf(buf, sizeof(buf), "Local actor ID: (learning...) Type any chat message once.");
-
-                    ImGui::InputText("##discovery_local_actor_status", buf, sizeof(buf), ImGuiInputTextFlags_ReadOnly);
-
-                    ImGui::SameLine();
-                    const bool canUseSelf = (learned != 0 && learned != 0xFFFFFFFF);
-                    if (!canUseSelf) ImGui::BeginDisabled(true);
-                    if (ImGui::Button("Use Self##discovery"))
-                    {
-                        m_discoveryTargetId = static_cast<unsigned long long>(learned);
-                    }
-                    if (!canUseSelf) ImGui::EndDisabled();
-                    if (ImGui::IsItemHovered())
-                        ImGui::SetTooltip("Set Target ID to your player actor ID");
-                }
+                // Shared args/target block (Command ID is editable here)
+                DrawArgsSection("##discovery", false, m_discoveryCommandId, m_discoveryArg0, m_discoveryArg1, m_discoveryArg2, m_discoveryArg3, m_discoveryTargetId);
 
                 ImGui::Spacing();
 
-                // Individual send buttons
-                if (ImGui::Button("Send as GM1 (0x0197)", ImVec2(160, 28)))
+                // Send buttons (factorized capture)
+                auto sendWith = [&](uint16_t opcode, const char* desc)
                 {
                     const uint32_t cmd = static_cast<uint32_t>(m_discoveryCommandId);
                     const uint32_t a0  = static_cast<uint32_t>(m_discoveryArg0);
@@ -262,21 +240,18 @@ void GMCommandsModule::RenderWindow()
                     const uint32_t a2  = static_cast<uint32_t>(m_discoveryArg2);
                     const uint32_t a3  = static_cast<uint32_t>(m_discoveryArg3);
                     const uint64_t tgt = static_cast<uint64_t>(m_discoveryTargetId);
+                    SendGMCommandWithOpcode(cmd, a0, a1, a2, a3, tgt, opcode, desc);
+                };
 
-                    SendGMCommandWithOpcode(cmd, a0, a1, a2, a3, tgt, 0x0197, "GM1");
+                if (ImGui::Button("Send as GM1 (0x0197)", ImVec2(160, 28)))
+                {
+                    sendWith(0x0197, "GM1");
                 }
 
                 ImGui::SameLine();
                 if (ImGui::Button("Send as GM2 (0x0198)", ImVec2(160, 28)))
                 {
-                    const uint32_t cmd = static_cast<uint32_t>(m_discoveryCommandId);
-                    const uint32_t a0  = static_cast<uint32_t>(m_discoveryArg0);
-                    const uint32_t a1  = static_cast<uint32_t>(m_discoveryArg1);
-                    const uint32_t a2  = static_cast<uint32_t>(m_discoveryArg2);
-                    const uint32_t a3  = static_cast<uint32_t>(m_discoveryArg3);
-                    const uint64_t tgt = static_cast<uint64_t>(m_discoveryTargetId);
-
-                    SendGMCommandWithOpcode(cmd, a0, a1, a2, a3, tgt, 0x0198, "GM2");
+                    sendWith(0x0198, "GM2");
                 }
 
                 // Add the "Send Both" button
@@ -284,27 +259,16 @@ void GMCommandsModule::RenderWindow()
                 if (ImGui::Button("Send Both GM1 & GM2", ImVec2(200, 28)))
                 {
                     const uint32_t cmd = static_cast<uint32_t>(m_discoveryCommandId);
-                    const uint32_t a0  = static_cast<uint32_t>(m_discoveryArg0);
-                    const uint32_t a1  = static_cast<uint32_t>(m_discoveryArg1);
-                    const uint32_t a2  = static_cast<uint32_t>(m_discoveryArg2);
-                    const uint32_t a3  = static_cast<uint32_t>(m_discoveryArg3);
-                    const uint64_t tgt = static_cast<uint64_t>(m_discoveryTargetId);
+                    printf("[GMCommandsModule] DISCOVERY: Sending command %u as both GM1 and GM2\n", cmd);
 
-                    printf("[GMCommandsModule] DISCOVERY: Sending command %d as both GM1 and GM2\n", cmd);
-                    
-                    // Send as GM1 first
-                    SendGMCommandWithOpcode(cmd, a0, a1, a2, a3, tgt, 0x0197, "GM1");
-                    
-                    // Small delay between sends
-                    Sleep(100);
-                    
-                    // Send as GM2
-                    SendGMCommandWithOpcode(cmd, a0, a1, a2, a3, tgt, 0x0198, "GM2");
+                    sendWith(0x0197, "GM1");
+                    Sleep(100); // small spacing
+                    sendWith(0x0198, "GM2");
                 }
 
                 ImGui::Spacing();
                 ImGui::Separator();
-                
+
                 // Quick reset button and info
                 if (ImGui::Button("Reset Args to 0"))
                 {

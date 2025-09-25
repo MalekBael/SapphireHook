@@ -10,7 +10,8 @@
 #include <ws2tcpip.h>
 
 #include "../Core/PacketInjector.h"
-#include "../Core/patternscanner.h"
+#include "../Analysis/PatternScanner.h"
+
 #include "../Modules/CommandInterface.h"
 #include <algorithm>
 #include <cctype>

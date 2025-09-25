@@ -5,13 +5,13 @@
 
 namespace SapphireHook
 {
-    class UIModule;  // Forward declaration inside namespace
+    class UIModule; 
 
     class UIManager
     {
     public:
         static UIManager& GetInstance();
-        static bool HasInstance();  // ADD THIS LINE
+        static bool HasInstance(); 
         static void Shutdown();
 
         void Initialize();

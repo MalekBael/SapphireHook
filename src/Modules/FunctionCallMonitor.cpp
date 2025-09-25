@@ -1,9 +1,9 @@
-#include "../Core/FunctionCallMonitor.h"
-#include "../Core/patternscanner.h"
+#include "../Modules/FunctionCallMonitor.h"
+#include "../Analysis/PatternScanner.h"
 #include "../Logger/Logger.h"
 #include "../vendor/imgui/imgui.h"
 #include "../Core/ResourceLoader.h"
-#include "FunctionScanner.h"
+#include "../Analysis/FunctionScanner.h"
 #include "FunctionAnalyzer.h"
 
 #include <iomanip>
@@ -35,7 +35,6 @@
 #include <windows.h>
 #include <Psapi.h>
 
-// IMPORTANT: Include WindowsAPIWrapper.h AFTER windows.h to avoid conflicts
 #include "../Core/WindowsAPIWrapper.h"
 
 #ifdef _MSC_VER
@@ -44,10 +43,8 @@
 
 using namespace SapphireHook;
 
-// Forward declaration - function is implemented in hook_manager.cpp
 extern bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize);
 
-// AdvancedHookManager stub class until proper implementation
 namespace SapphireHook {
     class AdvancedHookManager {
     public:
@@ -55,7 +52,6 @@ namespace SapphireHook {
             std::string context;
         };
 
-        // Validate that address is inside committed, executable memory of the main module
         bool IsSafeAddress(uintptr_t address)
         {
             if (address == 0) return false;
@@ -67,7 +63,6 @@ namespace SapphireHook {
             const bool committed = (mbi.State == MEM_COMMIT);
             const bool executable = (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
 
-            // Ensure it's inside the main module bounds
             uintptr_t base = 0;
             size_t size = 0;
             if (GetMainModuleInfo(base, size) && base != 0 && size != 0)
@@ -87,7 +82,7 @@ namespace SapphireHook {
         void HookRandomFunctions(int count) { LogInfo("AdvancedHookManager: HookRandomFunctions called count=" + std::to_string(count)); }
         void UnhookAllFunctions() { LogInfo("AdvancedHookManager: UnhookAllFunctions called"); }
         
-        static void FunctionHookCallback(uintptr_t /*returnAddress*/, uintptr_t /*functionAddress*/) {
+        static void FunctionHookCallback(uintptr_t , uintptr_t ) {
             LogDebug("AdvancedHookManager: FunctionHookCallback called");
         }
     };
@@ -161,11 +156,10 @@ static uintptr_t g_moduleBase = 0;
 static size_t g_moduleSize = 0;
 static std::map<uintptr_t, void*> g_originalFunctions;
 
-// IDA absolute base used by many dumps (0x140000000)
 static inline uintptr_t RelocateIfIDA(uintptr_t addr)
 {
     constexpr uintptr_t IDA_BASE = 0x0000000140000000ULL;
-    if (addr >= IDA_BASE && addr < (IDA_BASE + 0x10000000ULL)) // sane window
+    if (addr >= IDA_BASE && addr < (IDA_BASE + 0x10000000ULL))   
     {
         if (g_moduleBase != 0) {
             return (addr - IDA_BASE) + g_moduleBase;
@@ -288,13 +282,11 @@ FunctionCallMonitor::FunctionCallMonitor()
     m_showAddresses(true), m_showTimestamps(true), m_windowOpen(false),
     m_enableRealHooking(false)
 {
-    // Initialize specialized helper classes
     m_functionScanner = std::make_shared<SapphireHook::FunctionScanner>();
     m_functionAnalyzer = std::make_shared<SapphireHook::FunctionAnalyzer>();
     m_hookManager = std::make_shared<SapphireHook::AdvancedHookManager>();
 }
 
-// Delegate most scanning methods to FunctionScanner
 std::vector<uintptr_t> FunctionCallMonitor::ScanForFunctionsByStrings(const std::vector<std::string>& searchStrings)
 {
     return m_functionScanner->ScanForFunctionsByStrings(searchStrings);
@@ -345,7 +337,6 @@ uintptr_t FunctionCallMonitor::ConvertRVAToRuntimeAddress(uintptr_t rva)
     return m_functionAnalyzer->ConvertRVAToRuntimeAddress(rva);
 }
 
-// Render methods - simplified implementations
 void FunctionCallMonitor::RenderMenu()
 {
     if (ImGui::MenuItem(GetDisplayName(), nullptr, m_windowOpen))
@@ -366,14 +357,12 @@ void FunctionCallMonitor::RenderWindow()
     {
         if (ImGui::BeginTabBar("MainTabs"))
         {
-            // Main function monitor tab
             if (ImGui::BeginTabItem("Function Monitor"))
             {
                 RenderFunctionListWithPagination();
                 ImGui::EndTabItem();
             }
             
-            // Data browser tab
             if (ImGui::BeginTabItem("Data Browser"))
             {
                 RenderDataBrowser();
@@ -404,7 +393,6 @@ void FunctionCallMonitor::RenderDataBrowser()
             ImGui::EndTabItem();
         }
 
-        // NEW: expose the enhanced search/scanning UI
         if (ImGui::BeginTabItem("Search & Scan"))
         {
             RenderEnhancedFunctionSearch();
@@ -430,7 +418,6 @@ void FunctionCallMonitor::RenderFunctionDatabaseBrowser()
     ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.8f, 1.0f), "Function Database Browser");
     ImGui::Separator();
 
-    // Database status
     if (m_functionDatabaseLoaded)
     {
         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Database Status: LOADED (%zu functions)",
@@ -446,14 +433,12 @@ void FunctionCallMonitor::RenderFunctionDatabaseBrowser()
         return;
     }
 
-    // Controls
     ImGui::PushItemWidth(200);
     ImGui::InputTextWithHint("##search", "Search functions...", searchBuffer, sizeof(searchBuffer));
     ImGui::SameLine();
     ImGui::Checkbox("Show only valid", &showOnlyValid);
     ImGui::PopItemWidth();
 
-    // Category filter (optional; your JSON currently has none)
     if (ImGui::BeginCombo("Category", selectedCategory.c_str()))
     {
         if (ImGui::Selectable("All", selectedCategory == "All"))
@@ -481,7 +466,6 @@ void FunctionCallMonitor::RenderFunctionDatabaseBrowser()
 
     ImGui::Separator();
 
-    // Function list table
     if (ImGui::BeginTable("FunctionDatabaseTable", 4,
         ImGuiTableFlags_Resizable | ImGuiTableFlags_Sortable |
         ImGuiTableFlags_ScrollY | ImGuiTableFlags_Borders))
@@ -500,13 +484,11 @@ void FunctionCallMonitor::RenderFunctionDatabaseBrowser()
         for (const auto& [address, funcInfo] : allFunctions)
         {
             const uintptr_t relocated = RelocateIfIDA(address);
-            // Category filter
             if (selectedCategory != "All" && funcInfo.category != selectedCategory)
             {
                 continue;
             }
 
-            // "Show only valid": keep those inside main module when we know its bounds
             if (showOnlyValid)
             {
                 if (g_moduleBase != 0 && g_moduleSize != 0)
@@ -522,7 +504,6 @@ void FunctionCallMonitor::RenderFunctionDatabaseBrowser()
                 }
             }
 
-            // Search filter
             if (!searchStr.empty())
             {
                 std::string lowerName = funcInfo.name;
@@ -532,19 +513,15 @@ void FunctionCallMonitor::RenderFunctionDatabaseBrowser()
 
             ImGui::TableNextRow();
 
-            // Address column
             ImGui::TableNextColumn();
             ImGui::Text("0x%016llX", static_cast<unsigned long long>(relocated));
 
-            // Name column
             ImGui::TableNextColumn();
             ImGui::Text("%s", funcInfo.name.c_str());
 
-            // Category column
             ImGui::TableNextColumn();
             ImGui::Text("%s", funcInfo.category.empty() ? "Unknown" : funcInfo.category.c_str());
 
-            // Actions column
             ImGui::TableNextColumn();
             ImGui::PushID(static_cast<int>(address));
             if (ImGui::SmallButton("Hook"))
@@ -578,7 +555,6 @@ void FunctionCallMonitor::RenderSignatureDatabaseBrowser()
         return;
     }
 
-    // Status
     const size_t totalSigs = m_signatureDB.GetTotalSignatures();
     const size_t resolvedSigs = m_signatureDB.GetResolvedSignatures();
     ImGui::Text("Resolved: %zu / %zu (%.1f%%)", resolvedSigs, totalSigs, totalSigs ? (100.0f * resolvedSigs / totalSigs) : 0.0f);
@@ -586,7 +562,6 @@ void FunctionCallMonitor::RenderSignatureDatabaseBrowser()
     ImGui::SameLine();
     if (ImGui::Button("Resolve All"))
     {
-        // synchronous resolve to keep UI simple
         m_signatureDB.ResolveAllSignatures();
     }
     ImGui::SameLine();
@@ -607,7 +582,6 @@ void FunctionCallMonitor::RenderSignatureDatabaseBrowser()
 
     ImGui::Separator();
 
-    // Resolved entries table
     if (ImGui::BeginTable("SignatureResolvedTable", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable))
     {
         ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 140.0f);
@@ -668,7 +642,6 @@ void FunctionCallMonitor::RenderCombinedDatabaseView()
     ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "Combined Database View");
     ImGui::Separator();
     
-    // Status overview
     if (m_functionDatabaseLoaded && m_signatureDatabaseLoaded) {
         auto resolvedSigs = m_signatureDB.GetResolvedFunctions();
         
@@ -680,7 +653,6 @@ void FunctionCallMonitor::RenderCombinedDatabaseView()
         return;
     }
     
-    // Controls
     ImGui::PushItemWidth(200);
     ImGui::InputTextWithHint("##search", "Search all functions...", searchBuffer, sizeof(searchBuffer));
     ImGui::PopItemWidth();
@@ -694,7 +666,6 @@ void FunctionCallMonitor::RenderCombinedDatabaseView()
     
     ImGui::Separator();
     
-    // Combined view table
     if (ImGui::BeginTable("CombinedDatabaseTable", 5, 
                          ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Borders)) {
         
@@ -708,12 +679,10 @@ void FunctionCallMonitor::RenderCombinedDatabaseView()
         std::string searchStr = std::string(searchBuffer);
         std::transform(searchStr.begin(), searchStr.end(), searchStr.begin(), ::tolower);
         
-        // Show signature database entries (since they have addresses)
         if (showSignatureDb) {
             auto resolvedSigs = m_signatureDB.GetResolvedFunctions();
             
             for (const auto& [address, name] : resolvedSigs) {
-                // Apply search filter
                 if (!searchStr.empty()) {
                     std::string lowerName = name;
                     std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
@@ -722,23 +691,18 @@ void FunctionCallMonitor::RenderCombinedDatabaseView()
                 
                 ImGui::TableNextRow();
                 
-                // Source column
                 ImGui::TableNextColumn();
                 ImGui::TextColored(ImVec4(0.8f, 0.0f, 1.0f, 1.0f), "SIG");
                 
-                // Address column
                 ImGui::TableNextColumn();
                 ImGui::Text("0x%016llX", address);
                 
-                // Name column
                 ImGui::TableNextColumn();
                 ImGui::Text("%s", name.c_str());
                 
-                // Category column
                 ImGui::TableNextColumn();
                 ImGui::Text("Signature");
                 
-                // Actions column
                 ImGui::TableNextColumn();
                 ImGui::PushID(static_cast<int>(address));
                 if (ImGui::SmallButton("Hook")) {
@@ -751,14 +715,12 @@ void FunctionCallMonitor::RenderCombinedDatabaseView()
             }
         }
         
-        // Show function database entries (without addresses for now)
         if (showFunctionDb && !showOnlyMatching) {
             auto categories = m_functionDB.GetCategories();
             for (const auto& [catName, catDesc] : categories) {
                 auto funcsInCat = m_functionDB.GetFunctionsByCategory(catName);
                 
                 for (const auto& funcName : funcsInCat) {
-                    // Apply search filter
                     if (!searchStr.empty()) {
                         std::string lowerName = funcName;
                         std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
@@ -767,23 +729,18 @@ void FunctionCallMonitor::RenderCombinedDatabaseView()
                     
                     ImGui::TableNextRow();
                     
-                    // Source column
                     ImGui::TableNextColumn();
                     ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.8f, 1.0f), "FUNC");
                     
-                    // Address column
                     ImGui::TableNextColumn();
                     ImGui::Text("Unknown");
                     
-                    // Name column
                     ImGui::TableNextColumn();
                     ImGui::Text("%s", funcName.c_str());
                     
-                    // Category column
                     ImGui::TableNextColumn();
                     ImGui::Text("%s", catName.c_str());
                     
-                    // Actions column
                     ImGui::TableNextColumn();
                     ImGui::TextDisabled("No Address");
                 }
@@ -809,7 +766,6 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
     ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Enhanced Function Search");
     ImGui::Separator();
     
-    // Search options
     ImGui::Text("Search Options:");
     ImGui::Checkbox("Search in memory", &searchInMemory);
     ImGui::SameLine();
@@ -823,7 +779,6 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
     ImGui::InputInt("Max results", &maxResults);
     ImGui::PopItemWidth();
     
-    // Search input
     ImGui::PushItemWidth(-80);
     ImGui::InputTextWithHint("##searchterms", "Enter search terms (comma-separated)...", 
                             searchTerms, sizeof(searchTerms));
@@ -834,7 +789,6 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
         isSearching = true;
         searchResults.clear();
         
-        // Parse search terms
         std::vector<std::string> terms;
         std::string termsStr = searchTerms;
         std::stringstream ss(termsStr);
@@ -850,13 +804,11 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
         if (!terms.empty()) {
             LogInfo("Starting enhanced search with " + std::to_string(terms.size()) + " terms");
             
-            // Search in memory
             if (searchInMemory) {
                 auto memoryResults = ScanForFunctionsByStrings(terms);
                 searchResults.insert(searchResults.end(), memoryResults.begin(), memoryResults.end());
             }
             
-            // Search in database
             if (searchInDatabase && m_functionDatabaseLoaded) {
                 auto allFunctions = m_functionDB.GetAllFunctions();
                 for (const auto& [addr, funcInfo] : allFunctions) {
@@ -878,7 +830,6 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
                 }
             }
             
-            // Search in signatures
             if (searchInSignatures && m_signatureDatabaseLoaded) {
                 auto resolvedSigs = m_signatureDB.GetResolvedFunctions();
                 for (const auto& [addr, name] : resolvedSigs) {
@@ -900,7 +851,6 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
                 }
             }
             
-            // Remove duplicates and limit results
             std::sort(searchResults.begin(), searchResults.end());
             searchResults.erase(std::unique(searchResults.begin(), searchResults.end()), searchResults.end());
             
@@ -917,10 +867,8 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
         if (m_functionScanner) {
             auto nameHits = m_functionScanner->AutoScanFunctionsFromDatabase(nullptr);
             lastNameScanCount = static_cast<int>(nameHits.size());
-            // Merge discovered addresses into searchResults
             for (const auto& r : nameHits) {
                 if (r.functionAddress) searchResults.push_back(r.functionAddress);
-                // Track detected names locally for better display
                 if (!r.matchedName.empty()) {
                     m_detectedFunctionNames[r.functionAddress] = r.matchedName;
                 }
@@ -952,7 +900,6 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
             searchResults.clear();
         }
         
-        // Results table
         if (ImGui::BeginTable("SearchResultsTable", 4, 
                              ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Borders)) {
             
@@ -965,16 +912,13 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
             for (uintptr_t addr : searchResults) {
                 ImGui::TableNextRow();
                 
-                // Address column
                 ImGui::TableNextColumn();
                 ImGui::Text("0x%016llX", addr);
                 
-                // Name column
                 ImGui::TableNextColumn();
                 std::string resolvedName = ResolveFunctionName(addr);
                 ImGui::Text("%s", resolvedName.c_str());
                 
-                // Source column
                 ImGui::TableNextColumn();
                 std::string source = "Unknown";
                 if (m_functionDatabaseLoaded && m_functionDB.HasFunction(addr)) {
@@ -991,7 +935,6 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
                 }
                 ImGui::Text("%s", source.c_str());
                 
-                // Actions column
                 ImGui::TableNextColumn();
                 ImGui::PushID(static_cast<int>(addr));
                 if (ImGui::SmallButton("Hook")) {
@@ -1019,7 +962,6 @@ void FunctionCallMonitor::RenderManualHookSection()
     
     ImGui::Text("Create hooks manually by address:");
     
-    // Input fields
     ImGui::PushItemWidth(150);
     ImGui::InputTextWithHint("##address", "0x7FF123456789", addressInput, sizeof(addressInput));
     ImGui::SameLine();
@@ -1035,11 +977,9 @@ void FunctionCallMonitor::RenderManualHookSection()
         ImGui::SetTooltip("Real hooks can crash the game if used incorrectly!");
     }
     
-    // Hook creation buttons
     if (ImGui::Button("Create Hook")) {
         uintptr_t address = 0;
         
-        // Parse address
         if (ParseAddressInput(std::string(addressInput), address)) {
             std::string hookName = std::string(nameInput);
             if (hookName.empty()) {
@@ -1055,7 +995,6 @@ void FunctionCallMonitor::RenderManualHookSection()
             
             if (success) {
                 LogInfo("Created manual hook: " + hookName + " at 0x" + std::to_string(address));
-                // Clear inputs on success
                 addressInput[0] = '\0';
                 nameInput[0] = '\0';
             }
@@ -1083,7 +1022,6 @@ void FunctionCallMonitor::RenderManualHookSection()
         }
     }
     
-    // Quick actions
     ImGui::Separator();
     ImGui::Text("Quick Actions:");
     
@@ -1095,7 +1033,7 @@ void FunctionCallMonitor::RenderManualHookSection()
                 if (CreateSafeLoggingHook(addr, funcInfo.name, "BulkHook")) {
                     hookedCount++;
                 }
-                if (hookedCount >= 50) break; // Limit to prevent spam
+                if (hookedCount >= 50) break;     
             }
             LogInfo("Bulk hooked " + std::to_string(hookedCount) + " functions from database");
         }
@@ -1110,7 +1048,7 @@ void FunctionCallMonitor::RenderManualHookSection()
                 if (CreateSafeLoggingHook(addr, name, "BulkSignatureHook")) {
                     hookedCount++;
                 }
-                if (hookedCount >= 50) break; // Limit to prevent spam
+                if (hookedCount >= 50) break;     
             }
             LogInfo("Bulk hooked " + std::to_string(hookedCount) + " functions from signatures");
         }
@@ -1128,7 +1066,6 @@ void FunctionCallMonitor::RenderManualHookSection()
     }
 }
 
-// Placeholder implementations for the remaining methods
 void FunctionCallMonitor::RenderSignatureSection() {
     ImGui::Text("Signature Analysis Section");
     ImGui::Separator();
@@ -1203,7 +1140,6 @@ void FunctionCallMonitor::Initialize()
     LogInfo("FunctionCallMonitor initialized");
     s_instance = this;
     
-    // Initialize module information using the function from hook_manager.cpp
     if (!GetMainModuleInfo(g_moduleBase, g_moduleSize))
     {
         LogError("Failed to get main module information");
@@ -1213,34 +1149,26 @@ void FunctionCallMonitor::Initialize()
         LogInfo("Module base: 0x" + std::to_string(g_moduleBase) + ", size: 0x" + std::to_string(g_moduleSize));
     }
     
-    // Load databases
     LoadDatabasesWithErrorHandling();
     
-    // Set up integration between classes
     if (m_functionScanner && m_functionAnalyzer && m_hookManager) {
-        // Create new shared pointers that point to copies of the databases
         auto funcDb = std::make_shared<SapphireHook::FunctionDatabase>();
         auto sigDb = std::make_shared<SapphireHook::SignatureDatabase>();
         
-        // Note: We can't copy SignatureDatabase because it contains atomic members
-        // Instead, share the same database instance via a new shared_ptr
         m_functionScanner->SetFunctionDatabase(funcDb);
         m_functionAnalyzer->SetFunctionDatabase(funcDb);
         
         m_functionScanner->SetSignatureDatabase(sigDb);
         m_functionAnalyzer->SetSignatureDatabase(sigDb);
         
-        // Initialize MinHook through HookManager
         m_hookManager->SetupFunctionHooks();
     }
 }
 
 void FunctionCallMonitor::LoadDatabasesWithErrorHandling()
 {
-    // Try to load function database
     try
     {
-        // Prefer local data folder if present
         if (!m_functionDB.Load("data.json")) {
             m_functionDatabaseLoaded = m_functionDB.Load("data\\data.json");
         } else {
@@ -1261,7 +1189,6 @@ void FunctionCallMonitor::LoadDatabasesWithErrorHandling()
          m_functionDatabaseLoaded = false;
      }
     
-    // Try to load signature database (probe common locations)
     try
     {
         static const char* sigCandidates[] = {
@@ -1541,7 +1468,6 @@ bool FunctionCallMonitor::CreateRealLoggingHook(uintptr_t address, const std::st
 
     g_attemptedHooks.insert(target);
 
-    // Simplified hook creation without MinHook for now
     LogInfo("Successfully 'hooked' " + name + " (placeholder implementation)");
     
     if (std::find(m_discoveredFunctions.begin(), m_discoveredFunctions.end(), target) == m_discoveredFunctions.end())
@@ -1554,7 +1480,6 @@ bool FunctionCallMonitor::CreateRealLoggingHook(uintptr_t address, const std::st
 
 void FunctionCallMonitor::RenderFunctionListWithPagination()
 {
-    // Display function calls with pagination
     std::lock_guard<std::mutex> lock(m_callsMutex);
     
     ImGui::Text("Function Calls: %zu", m_functionCalls.size());
@@ -1564,7 +1489,6 @@ void FunctionCallMonitor::RenderFunctionListWithPagination()
         ClearCalls();
     }
     
-    // Simple table display of function calls
     if (ImGui::BeginTable("FunctionCallsTable", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
     {
         ImGui::TableSetupColumn("Time");
@@ -1592,7 +1516,6 @@ void FunctionCallMonitor::RenderFunctionListWithPagination()
 
 void FunctionCallMonitor::RenderPaginationControls()
 {
-    // Basic pagination controls
     if (ImGui::Button("Previous"))
     {
         if (m_displayStartIndex > 0)
@@ -1607,7 +1530,6 @@ void FunctionCallMonitor::RenderPaginationControls()
     }
 }
 
-// Delegate all these methods to the analyzers/scanners
 bool FunctionCallMonitor::ValidateAndDebugAddress(uintptr_t address, const std::string& name) { 
     if (!m_functionAnalyzer) {
         LogError("FunctionAnalyzer not initialized - cannot validate address");
@@ -1644,9 +1566,8 @@ std::string FunctionCallMonitor::ScanForNearbyStrings(uintptr_t address, size_t 
         return "NULL_ADDRESS";
     }
     
-    // Validate search radius
     if (searchRadius == 0) {
-        searchRadius = 1024; // Default value
+        searchRadius = 1024;   
         LogDebug("Using default search radius: " + std::to_string(searchRadius));
     } else if (searchRadius > 65536) {
         LogWarning("Large search radius (" + std::to_string(searchRadius) + 
@@ -1667,7 +1588,6 @@ void FunctionCallMonitor::InitializeWithSignatures() {
     
     LogInfo("FunctionCallMonitor: Initializing with signatures...");
     
-    // Ensure our signature database is loaded
     if (!m_signatureDatabaseLoaded) {
         LogWarning("Local signature database not loaded - attempting to reload...");
         ReloadSignatureDatabase();
@@ -1706,7 +1626,6 @@ void FunctionCallMonitor::IntegrateSignaturesWithDatabase() {
     
     m_functionAnalyzer->IntegrateSignaturesWithDatabase();
     
-    // Update our local state after integration
     if (m_signatureDatabaseLoaded) {
         auto resolvedFunctions = m_signatureDB.GetResolvedFunctions();
         for (const auto& [addr, name] : resolvedFunctions) {
@@ -1732,7 +1651,6 @@ void FunctionCallMonitor::DiscoverFunctionsFromSignatures() {
     
     m_functionAnalyzer->DiscoverFunctionsFromSignatures();
     
-    // Integrate newly discovered functions
     if (m_signatureDatabaseLoaded) {
         auto resolvedFunctions = m_signatureDB.GetResolvedFunctions();
         for (const auto& [addr, name] : resolvedFunctions) {
@@ -1805,7 +1723,6 @@ void FunctionCallMonitor::DiagnoseSignatureIssues() {
     LogInfo("FunctionCallMonitor: Diagnosing signature issues...");
     m_functionAnalyzer->DiagnoseSignatureIssues();
     
-    // Add our own diagnostics
     if (m_signatureDatabaseLoaded) {
         auto resolvedFunctions = m_signatureDB.GetResolvedFunctions();
         size_t totalSigs = m_signatureDB.GetTotalSignatures();
@@ -1831,7 +1748,6 @@ void FunctionCallMonitor::EnhancedSignatureResolution() {
     
     LogInfo("FunctionCallMonitor: Starting enhanced signature resolution...");
     
-    // Record state before enhancement
     size_t resolvedBefore = 0;
     if (m_signatureDatabaseLoaded) {
         resolvedBefore = m_signatureDB.GetResolvedFunctions().size();
@@ -1839,7 +1755,6 @@ void FunctionCallMonitor::EnhancedSignatureResolution() {
     
     m_functionAnalyzer->EnhancedSignatureResolution();
     
-    // Report results
     if (m_signatureDatabaseLoaded) {
         size_t resolvedAfter = m_signatureDB.GetResolvedFunctions().size();
         if (resolvedAfter > resolvedBefore) {
@@ -1860,7 +1775,6 @@ void FunctionCallMonitor::DebugSignatureScanning() {
     LogInfo("FunctionCallMonitor: Starting signature scanning debug...");
     m_functionAnalyzer->DebugSignatureScanning();
     
-    // Add our own debug information
     LogInfo("=== FunctionCallMonitor Debug State ===");
     LogInfo("Function database loaded: " + std::string(m_functionDatabaseLoaded ? "YES" : "NO"));
     LogInfo("Signature database loaded: " + std::string(m_signatureDatabaseLoaded ? "YES" : "NO"));
@@ -1883,7 +1797,6 @@ void FunctionCallMonitor::DebugSignatureScanning() {
 }
 
 void FunctionCallMonitor::HookRandomFunctions(int count) {
-    // Perform a quick scan and randomly pick a few function starts to hook safely
     if (!m_functionScanner) {
         LogWarning("Scanner unavailable; cannot hook random functions");
         return;
@@ -1898,7 +1811,6 @@ void FunctionCallMonitor::HookRandomFunctions(int count) {
         return;
     }
 
-    // Shuffle deterministically
     std::mt19937_64 rng{ 0xC0FFEEULL };
     std::shuffle(all.begin(), all.end(), rng);
 
@@ -1923,7 +1835,6 @@ void FunctionCallMonitor::UnhookAllFunctions() {
     }
 }
 
-// Specialized scanning methods delegated to FunctionScanner
 void FunctionCallMonitor::ScanAllFunctions() {
     auto results = ScanForAllFunctions();
     SetDiscoveredFunctions(results);
@@ -1961,7 +1872,6 @@ void FunctionCallMonitor::UpdateTemporaryFunctionDatabase(const std::map<uintptr
     m_functionScanner->UpdateTemporaryFunctionDatabase(detectedFunctions);
 }
 
-// Add missing delegating implementations for IsLikelyFunctionStart overloads
 bool FunctionCallMonitor::IsLikelyFunctionStart(uintptr_t address) const
 {
     if (!m_functionScanner) return false;
@@ -1974,7 +1884,6 @@ bool FunctionCallMonitor::IsLikelyFunctionStart(const uint8_t* code, size_t maxS
     return m_functionScanner->IsLikelyFunctionStart(code, maxSize);
 }
 
-// Missing method implementation for ExtractFunctionNameFromMemory
 std::string FunctionCallMonitor::ExtractFunctionNameFromMemory(uintptr_t address) { 
     if (!m_functionScanner) {
         LogError("FunctionScanner not initialized - cannot extract function name");
@@ -1986,14 +1895,12 @@ std::string FunctionCallMonitor::ExtractFunctionNameFromMemory(uintptr_t address
         return "NULL_ADDRESS";
     }
     
-    // First check our own databases
     if (m_functionDatabaseLoaded && m_functionDB.HasFunction(address)) {
         std::string dbName = m_functionDB.GetFunctionName(address);
         LogDebug("Function name found in database: " + dbName);
         return dbName;
     }
     
-    // Check signature database
     if (m_signatureDatabaseLoaded) {
         auto resolvedFunctions = m_signatureDB.GetResolvedFunctions();
         auto it = std::find_if(resolvedFunctions.begin(), resolvedFunctions.end(),
@@ -2005,7 +1912,6 @@ std::string FunctionCallMonitor::ExtractFunctionNameFromMemory(uintptr_t address
         }
     }
     
-    // Fall back to memory extraction via FunctionScanner
     std::string extractedName = m_functionScanner->ExtractFunctionNameFromMemory(address);
     
     if (!extractedName.empty() && extractedName != "UNKNOWN") {
@@ -2016,7 +1922,6 @@ std::string FunctionCallMonitor::ExtractFunctionNameFromMemory(uintptr_t address
     return extractedName;
 }
 
-// Memory analysis helpers
 bool FunctionCallMonitor::IsValidString(const char* str, size_t maxLen) const { 
     if (!m_functionScanner) {
         LogError("FunctionScanner not initialized - cannot validate string");
@@ -2069,7 +1974,6 @@ bool FunctionCallMonitor::IsExecutableMemory(uintptr_t address) const {
     return m_functionScanner->IsExecutableMemory(address);
 }
 
-// Add implementations for the async operations
 std::future<std::vector<uintptr_t>> FunctionCallMonitor::StartAsyncScan() { 
     if (!m_functionScanner) {
         LogError("FunctionScanner not initialized - cannot start async scan");
@@ -2080,7 +1984,6 @@ std::future<std::vector<uintptr_t>> FunctionCallMonitor::StartAsyncScan() {
     
     LogInfo("FunctionCallMonitor: Starting async function scan...");
     
-    // Set up progress callback
     auto progressCallback = [this](size_t processed, size_t total, const std::string& phase) {
         if (processed % 100 == 0 || processed == total) {
             LogInfo("Scan progress: " + std::to_string(processed) + "/" + std::to_string(total) + 
@@ -2105,7 +2008,6 @@ std::future<std::vector<uintptr_t>> FunctionCallMonitor::StartAsyncScanWithStrin
         LogInfo("FunctionCallMonitor: Starting async string-based scan with " + 
                std::to_string(targetStrings.size()) + " target strings");
         
-        // Log first few strings for debugging
         for (size_t i = 0; i < std::min(targetStrings.size(), size_t(3)); ++i) {
             LogInfo("  Target string " + std::to_string(i + 1) + ": \"" + targetStrings[i] + "\"");
         }
@@ -2130,7 +2032,6 @@ void FunctionCallMonitor::StopScan() {
     LogInfo("FunctionCallMonitor: Stopping active scans...");
     m_functionScanner->StopScan();
     
-    // Wait a moment for scan to stop
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
     
     if (!m_functionScanner->IsScanInProgress()) {

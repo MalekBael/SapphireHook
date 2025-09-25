@@ -51,7 +51,6 @@ namespace GMCommands
         kick = 604,
         Teri_Info = 605,
         jump = 606,
-        // Quest_Accept = 300,  // REMOVED: Duplicate of quest_accept
     };
 
     struct Entry

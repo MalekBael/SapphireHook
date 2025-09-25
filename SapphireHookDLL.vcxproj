@@ -38,15 +38,25 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include</AdditionalIncludeDirectories>
-      <AdditionalOptions>/FS %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/FS /bigobj /Gy /Gw /sdl- %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <EnableModules>false</EnableModules>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <Optimization>MinSpace</Optimization>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <BasicRuntimeChecks>Default</BasicRuntimeChecks>
     </ClCompile>
     <Link>
       <AdditionalDependencies>$(ProjectDir)vendor\minhook\include\lib\libMinHook.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMTD</IgnoreSpecificDefaultLibraries>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <OptimizeReferences>true</OptimizeReferences>
+      <AdditionalOptions>/OPT:REF /OPT:ICF /LTCG</AdditionalOptions>
+      <MergeSections> .rdata=.text</MergeSections>
     </Link>
     <PostBuildEvent>
       <Command>echo SapphireHookDLL C++20 build completed successfully (MinHook statically linked)</Command>
@@ -69,13 +79,12 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\CommandInvoker.cpp" />
-    <ClCompile Include="src\Core\dynamic_hook_engine.cpp" />
+    <ClCompile Include="src\Hooking\dynamic_hook_engine.cpp" />
     <ClCompile Include="src\Core\FunctionAnalyzer.cpp" />
-    <ClCompile Include="src\Core\FunctionCallMonitor.cpp" />
+    <ClCompile Include="src\Modules\FunctionCallMonitor.cpp" />
     <ClCompile Include="src\Core\FunctionDatabase.cpp" />
-    <ClCompile Include="src\Core\FunctionScanner.cpp" />
+    <ClCompile Include="src\Analysis\FunctionScanner.cpp" />
     <ClCompile Include="src\Hooking\hook_manager.cpp" />
-    <ClCompile Include="src\Monitor\NetworkMonitor.cpp" />
     <ClCompile Include="src\Monitor\NetworkMonitor.h" />
     <ClCompile Include="src\Core\PacketInjector.cpp" />
     <ClCompile Include="src\Core\ResourceLoader.cpp" />
@@ -83,13 +92,20 @@
     <ClCompile Include="src\Core\SignatureDatabase.cpp" />
     <ClCompile Include="src\Core\SimpleJSON.cpp" />
     <ClCompile Include="src\Core\WindowsAPIWrapper.cpp" />
-    <ClCompile Include="src\Core\PatternScanner.cpp" />
+    <ClCompile Include="src\Analysis\PatternScanner.cpp" />
     <ClCompile Include="src\Modules\DebugCommandsModule.cpp" />
     <ClCompile Include="src\Modules\GMCommandsModule.cpp" />
     <ClCompile Include="src\Modules\CommandInterface.cpp" />
     <ClCompile Include="src\Modules\MemoryViewerModule.cpp" />
     <ClCompile Include="src\Modules\NetDiagnosticsModule.cpp" />
-    <ClCompile Include="src\Monitor\OpcodeNames.cpp" />
+    <ClCompile Include="src\Monitor\NetworkMonitor.cpp" />
+    <ClCompile Include="src\Network\OpcodeNames.cpp" />
+    <ClCompile Include="src\Network\PacketRegistration.Chat.cpp" />
+    <ClCompile Include="src\Network\PacketRegistration.cpp" />
+    <ClCompile Include="src\Network\PacketRegistration.Generic.cpp" />
+    <ClCompile Include="src\Network\PacketRegistration.Init.cpp" />
+    <ClCompile Include="src\Network\PacketRegistration.Lobby.cpp" />
+    <ClCompile Include="src\Network\PacketRegistration.Zone.cpp" />
     <ClCompile Include="src\UI\imgui_overlay.cpp" />
     <ClCompile Include="src\UI\UIManager.cpp" />
     <ClCompile Include="src\Hooking\lua_hook.cpp" />
@@ -114,18 +130,18 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Core\CommandInvoker.h" />
-    <ClInclude Include="src\Core\dynamic_hook_engine.h" />
+    <ClInclude Include="src\Hooking\dynamic_hook_engine.h" />
     <ClInclude Include="src\Core\FunctionAnalyzer.h" />
-    <ClInclude Include="src\Core\FunctionCallMonitor.h" />
+    <ClInclude Include="src\Modules\FunctionCallMonitor.h" />
     <ClInclude Include="src\Core\FunctionDatabase.h" />
-    <ClInclude Include="src\Core\FunctionScanner.h" />
+    <ClInclude Include="src\Analysis\FunctionScanner.h" />
     <ClInclude Include="src\Core\PacketInjector.h" />
     <ClInclude Include="src\Core\ResourceLoader.h" />
     <ClInclude Include="src\Core\SafeMemory.h" />
     <ClInclude Include="src\Core\ServiceManager.h" />
     <ClInclude Include="src\Core\SignatureDatabase.h" />
-    <ClInclude Include="src\Core\PatternScanner.h" />
-    <ClInclude Include="src\Core\SignatureScanner.h" />
+    <ClInclude Include="src\Analysis\PatternScanner.h" />
+    <ClInclude Include="src\Analysis\SignatureScanner.h" />
     <ClInclude Include="src\Core\SimpleJSON.h" />
     <ClInclude Include="src\Core\WindowsApiWrapper.h" />
     <ClInclude Include="src\Hooking\hook_factory_impl.h" />
@@ -136,7 +152,16 @@
     <ClInclude Include="src\Modules\CommandInterface.h" />
     <ClInclude Include="src\Modules\MemoryViewerModule.h" />
     <ClInclude Include="src\Modules\NetDiagnosticsModule.h" />
-    <ClInclude Include="src\Monitor\OpcodeNames.h" />
+    <ClInclude Include="src\Network\OpcodeNames.h" />
+    <ClInclude Include="src\Network\PacketDecoder.h" />
+    <ClInclude Include="src\Network\PacketRegistration.h" />
+    <ClInclude Include="src\Network\PacketRegistration.Macros.h" />
+    <ClInclude Include="src\ProtocolHandlers\Lobby\ClientLobbyDef.h" />
+    <ClInclude Include="src\ProtocolHandlers\Zone\ClientZoneDef.h" />
+    <ClInclude Include="src\ProtocolHandlers\CommonTypes.h" />
+    <ClInclude Include="src\ProtocolHandlers\Chat\ServerChatDef.h" />
+    <ClInclude Include="src\ProtocolHandlers\Lobby\ServerLobbyDef.h" />
+    <ClInclude Include="src\ProtocolHandlers\Zone\ServerZoneDef.h" />
     <ClInclude Include="src\UI\imgui_overlay.h" />
     <ClInclude Include="src\UI\UIManager.h" />
     <ClInclude Include="src\UI\UIModule.h" />
