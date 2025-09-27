@@ -728,6 +728,8 @@ namespace {
     // Heuristic preview (kept from original implementation)
     static void RenderPayload_Heuristics(const uint8_t* base, size_t len) {
         if (!base || len == 0) return;
+        // Push a unique ID scope so repeated heuristic blocks don't conflict
+        ImGui::PushID(base);
         if (ImGui::CollapsingHeader("Payload preview (heuristic)", ImGuiTreeNodeFlags_DefaultOpen)) {
             if (ImGui::BeginTable("pv_u32", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
                 ImGui::TableSetupColumn("off");
@@ -768,6 +770,7 @@ namespace {
                 }
             }
         }
+        ImGui::PopID();
     }
 
     // Unified structured payload renderer
@@ -791,51 +794,152 @@ namespace {
         }
     }
 
-    static void DrawIPCHeaderTable(const ParsedPacket&, bool outgoing, const HookPacket& hp, uint16_t resolvedConn) {
+    namespace {
+        static void RenderOverlayLayersPanel(const std::vector<PacketDecoding::OverlayLayer>& layers) {
+            if (layers.empty()) {
+                ImGui::TextDisabled("No structured layers captured.");
+                return;
+            }
+            for (size_t li = 0; li < layers.size(); ++li) {
+                const auto& L = layers[li];
+                if (ImGui::TreeNodeEx((void*)(intptr_t)li,
+                    ImGuiTreeNodeFlags_DefaultOpen,
+                    "%s  (globalOff=%zu len=%zu fields=%zu)",
+                    L.name.c_str(), L.globalOffset, L.length, L.fields.size()))
+                {
+                    if (ImGui::BeginTable(("layer_tbl_" + L.name + std::to_string(li)).c_str(), 6,
+                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                        ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_Resizable))
+                    {
+                        ImGui::TableSetupColumn("Field");
+                        ImGui::TableSetupColumn("RelOff");
+                        ImGui::TableSetupColumn("AbsOff");
+                        ImGui::TableSetupColumn("Size");
+                        ImGui::TableSetupColumn("Value");
+                        ImGui::TableSetupColumn("Raw (preview)");
+                        ImGui::TableHeadersRow();
+                        for (const auto& F : L.fields) {
+                            ImGui::TableNextRow();
+                            ImGui::TableNextColumn(); ImGui::TextUnformatted(F.name);
+                            ImGui::TableNextColumn(); ImGui::Text("%zu", F.offset);
+                            ImGui::TableNextColumn(); ImGui::Text("%zu", L.globalOffset + F.offset);
+                            ImGui::TableNextColumn(); ImGui::Text("%zu", F.size);
+                            ImGui::TableNextColumn(); ImGui::TextUnformatted(F.value.c_str());
+                            ImGui::TableNextColumn(); ImGui::TextUnformatted(F.rawPreview.c_str());
+                        }
+                        ImGui::EndTable();
+                    }
+                    ImGui::TreePop();
+                }
+            }
+        }
+    }
+
+
+
+    static void DrawIPCHeaderTable(const ParsedPacket& P, bool outgoing, const HookPacket& hp, uint16_t resolvedConn) {
         SegmentView v = GetSegmentView(hp);
         std::vector<SegmentInfo> segs; ParseAllSegmentsBuffer(v.data, v.len, segs);
 
         int ipcIndex = 0;
-        for (const auto& s : segs)
-            if (s.hasIpc) {
-                const char* name = LookupOpcodeName(s.opcode, outgoing, resolvedConn);
-                char hdrLabel[160];
-                std::snprintf(hdrLabel, sizeof(hdrLabel), "IPC segment #%d  0x%04X (%s)", ipcIndex, s.opcode, name ? name : "?");
-                ImGui::SetNextItemOpen(ipcIndex == 0, ImGuiCond_Appearing);
-                if (ImGui::CollapsingHeader(hdrLabel, ImGuiTreeNodeFlags_SpanAvailWidth)) {
-                    // Header table
-                    if (ImGui::BeginTable((std::string("pkt_hdr_ipc_") + std::to_string(ipcIndex)).c_str(), 2,
-                        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit)) {
-                        ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, 180.f);
-                        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
-                        ImGui::TableHeadersRow();
-                        auto row = [](const char* k, const std::string& v) {
-                            ImGui::TableNextRow();
-                            ImGui::TableNextColumn(); ImGui::TextUnformatted(k);
-                            ImGui::TableNextColumn(); ImGui::TextUnformatted(v.c_str());
-                            };
-                        {
-                            char b[128];
-                            std::snprintf(b, sizeof(b), "0x%04X (%s)", s.opcode, name ? name : "?");
-                            row("type (opcode)", b);
-                            row("serverId", std::to_string(s.serverId));
-                            row("timestamp", std::to_string(s.ipcTimestamp));
-                        }
-                        ImGui::EndTable();
-                    }
-                    // Payload
-                    const uint8_t* payload = v.data + s.offset + 0x20;
-                    size_t payloadLen = (s.size > 0x20) ? (s.size - 0x20) : 0;
-                    ImGui::Indent(8.0f);
-                    RenderPayload_KnownAt(s.opcode, outgoing, hp, payload, payloadLen);
-                    ImGui::Unindent(8.0f);
-                }
-                ++ipcIndex;
-            }
+        for (const auto& s : segs) {
+            if (!s.hasIpc) continue;
 
+            const char* name = LookupOpcodeName(s.opcode, outgoing, resolvedConn);
+            char hdrLabel[160];
+            std::snprintf(hdrLabel, sizeof(hdrLabel), "IPC segment #%d  0x%04X (%s)",
+                ipcIndex, s.opcode, name ? name : "?");
+
+            // Expand/collapsing header for this IPC segment
+            ImGui::SetNextItemOpen(ipcIndex == 0, ImGuiCond_Appearing);
+            if (ImGui::CollapsingHeader(hdrLabel, ImGuiTreeNodeFlags_SpanAvailWidth)) {
+                // Push a unique ID scope for all subsequent inner headers/widgets of this segment
+                ImGui::PushID(ipcIndex);
+
+                // ---------------- Layer capture setup ----------------
+                // Compute raw pointers into the HookPacket buffer
+                const uint8_t* fullPacket = hp.buf.data();
+                const size_t   fullLen = hp.len;
+
+                // Offsets: main packet header is 0x28, segment buffer starts at fullPacket+0x28
+                const size_t   packetHeaderLen = 0x28;
+                const uint8_t* packetHeader = fullPacket; // first 0x28 bytes
+                const uint8_t* segmentHeader = v.data + s.offset;             // relative inside segment buffer
+                const size_t   segmentHeaderLen = 0x10;
+                const size_t   segmentGlobalOff = packetHeaderLen + s.offset;
+
+                const uint8_t* ipcHeader = segmentHeader + 0x10;
+                const size_t   ipcHeaderLen = 0x10;
+                const uint8_t* payloadPtr = segmentHeader + 0x20;
+                size_t payloadLen = (s.size > 0x20) ? (s.size - 0x20) : 0;
+
+                // Begin overlay capture (thread-local context)
+                PacketDecoding::BeginOverlayCapture(
+                    fullPacket, fullLen,
+                    packetHeader, packetHeaderLen,
+                    segmentHeader, segmentHeaderLen,
+                    ipcHeader, ipcHeaderLen,
+                    payloadPtr, payloadLen,
+                    P.connType ? P.connType : resolvedConn,
+                    s.type, true /*isIPC*/, s.opcode
+                );
+
+                // ---------------- Header mini-table ----------------
+                if (ImGui::BeginTable((std::string("ipc_hdr_tbl_") + std::to_string(ipcIndex)).c_str(), 2,
+                    ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingFixedFit))
+                {
+                    ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, 160.f);
+                    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+                    ImGui::TableHeadersRow();
+
+                    auto row = [](const char* k, const std::string& v) {
+                        ImGui::TableNextRow();
+                        ImGui::TableNextColumn(); ImGui::TextUnformatted(k);
+                        ImGui::TableNextColumn(); ImGui::TextUnformatted(v.c_str());
+                        };
+                    {
+                        char b[128];
+                        std::snprintf(b, sizeof(b), "0x%04X (%s)", s.opcode, name ? name : "?");
+                        row("type (opcode)", b);
+                        row("serverId", std::to_string(s.serverId));
+                        row("timestamp", std::to_string(s.ipcTimestamp));
+                        std::snprintf(b, sizeof(b), "0x%04X", s.type);
+                        row("segmentType", b);
+                        row("segmentSize", std::to_string(s.size));
+                        row("segmentGlobalOffset", std::to_string(segmentGlobalOff));
+                    }
+                    ImGui::EndTable();
+                }
+
+                // ---------------- Decode (builds payload layer via hidden FIELD) -------------
+                ImGui::Indent(8.0f);
+                RenderPayload_KnownAt(s.opcode, outgoing, hp, payloadPtr, payloadLen);
+                ImGui::Unindent(8.0f);
+
+                // ---------------- Snapshot layers AFTER decode side-effects ------------------
+                auto layers = PacketDecoding::GetOverlayLayersSnapshot();
+
+                // ---------------- Structured Layers UI ---------------------------------------
+                if (ImGui::CollapsingHeader("Structured Layers", ImGuiTreeNodeFlags_DefaultOpen)) {
+                    RenderOverlayLayersPanel(layers);
+                }
+
+                // (Optional) show raw segment payload heuristic at bottom
+                if (ImGui::CollapsingHeader("Segment Payload Heuristic View")) {
+                    RenderPayload_Heuristics(payloadPtr, payloadLen);
+                }
+
+                ImGui::PopID(); // end segment scope
+            }
+            ++ipcIndex;
+        }
+
+        // Fallback heuristic for entire segment buffer (unchanged)
         if (v.data && v.len) {
             ImGui::Separator();
-            RenderPayload_Heuristics(v.data, v.len);
+            if (ImGui::CollapsingHeader("Full Segment Buffer Heuristic")) {
+                RenderPayload_Heuristics(v.data, v.len);
+            }
         }
     }
 }
