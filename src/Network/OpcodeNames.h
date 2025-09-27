@@ -1,12 +1,24 @@
 #pragma once
 #include <cstdint>
+#include "PacketRegistration.h" // for Net::ConnectionType
 
-// Simple opcode name lookup used by the Network Monitor UI.
-// Direction hint: outgoing = client->server, incoming = server->client.
-// connectionType is taken from packet header and used to disambiguate
-// chat vs zone connections (0/2 => chat, otherwise zone). If omitted,
-// a best-effort lookup is done.
-const char* LookupOpcodeName(uint16_t opcode, bool outgoing, uint16_t connectionType) noexcept;
+// Central opcode name lookup.
+// outgoing: true = client->server, false = server->client.
+// connectionType: Net::ConnectionType::{Zone,Chat,Lobby,Unknown}
+const char* LookupOpcodeName(uint16_t opcode,
+                             bool outgoing,
+                             Net::ConnectionType connectionType = Net::ConnectionType::Unknown) noexcept;
 
-// ActorControl (Order/ActorControl) category name lookup (centralized)
+// Raw uint16_t compatibility overload
+inline const char* LookupOpcodeName(uint16_t opcode,
+                                    bool outgoing,
+                                    uint16_t rawConnType) noexcept
+{
+    Net::ConnectionType ct =
+        (rawConnType == 0xFFFF)
+        ? Net::ConnectionType::Unknown
+        : static_cast<Net::ConnectionType>(rawConnType);
+    return LookupOpcodeName(opcode, outgoing, ct);
+}
+
 const char* LookupActorControlCategoryName(uint16_t category) noexcept;

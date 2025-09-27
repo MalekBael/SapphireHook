@@ -17,82 +17,9 @@
 #include <vector>
 #include <mutex>
 #include "../Core/PacketInjector.h"
+#include "../Network/OpcodeNames.h" // centralized opcode lookup
 #include <cstdlib> // std::getenv
-
-namespace FFXIVOpcodes {
-    constexpr uint16_t Sync = 0x0065;
-    constexpr uint16_t Login = 0x0066;
-    constexpr uint16_t ChatHandler = 0x0067;
-    constexpr uint16_t SetLanguage = 0x0069;
-    constexpr uint16_t Invite = 0x00C9;
-    constexpr uint16_t InviteReply = 0x00CA;
-    constexpr uint16_t PcPartyLeave = 0x00DC;
-    constexpr uint16_t PcPartyDisband = 0x00DD;
-    constexpr uint16_t PcPartyKick = 0x00DE;
-    constexpr uint16_t PcPartyChangeLeader = 0x00DF;
-    constexpr uint16_t SendReadyCheck = 0x00E5;
-    constexpr uint16_t ReplyReadyCheck = 0x00E7;
-    constexpr uint16_t InviteCancel = 0x00ED;
-    constexpr uint16_t FreeCompanyLeave = 0x010E;
-    constexpr uint16_t FreeCompanyKick = 0x010F;
-    constexpr uint16_t FcChangeMaster = 0x011F;
-    constexpr uint16_t FcForceDisband = 0x0118;
-    constexpr uint16_t LinkshellJoin = 0x00F0;
-    constexpr uint16_t LinkshellLeave = 0x00F2;
-    constexpr uint16_t LinkshellKick = 0x00F5;
-    constexpr uint16_t LinkshellChangeMaster = 0x00F4;
-    constexpr uint16_t ActionRequest = 0x0196;
-    constexpr uint16_t Move = 0x019A;
-    constexpr uint16_t TargetPosCommand = 0x0195;
-    constexpr uint16_t SelectGroundActionRequest = 0x0199;
-    constexpr uint16_t Command = 0x0191;
-    constexpr uint16_t GMCommand = 0x0197;
-    constexpr uint16_t GMCommandName = 0x0198;
-    constexpr uint16_t InfoGMCommand = 0x012A;
-    constexpr uint16_t DebugCommand = 0x01F5;
-    constexpr uint16_t TradeCommand = 0x01B3;
-    constexpr uint16_t ClientItemOperation = 0x01AE;
-    constexpr uint16_t GearSetEquip = 0x01AF;
-    constexpr uint16_t RequestStorageItems = 0x01A4;
-    constexpr uint16_t SelectLootAction = 0x01B5;
-    constexpr uint16_t TreasureCheckCommand = 0x01B4;
-    constexpr uint16_t OpenTreasureWithKey = 0x01B6;
-    constexpr uint16_t MarketBoardRequestItemListingInfo = 0x1102;
-    constexpr uint16_t MarketBoardRequestItemListings = 0x1103;
-    constexpr uint16_t BuyMarketRetainer = 0x0107;
-    constexpr uint16_t HousingExteriorChange = 0x01B0;
-    constexpr uint16_t HousingInteriorChange = 0x01B2;
-    constexpr uint16_t HousingPlaceYardItem = 0x01B1;
-    constexpr uint16_t HousingHouseName = 0x026A;
-    constexpr uint16_t HousingGreeting = 0x026B;
-    constexpr uint16_t HousingChangeLayout = 0x026C;
-    constexpr uint16_t StartTalkEvent = 0x01C2;
-    constexpr uint16_t StartEmoteEvent = 0x01C3;
-    constexpr uint16_t StartUIEvent = 0x01C8;
-    constexpr uint16_t ReturnEventSceneHeader = 0x01D6;
-    constexpr uint16_t YieldEventSceneHeader = 0x01DF;
-    constexpr uint16_t CFCommenceHandler = 0x0078;
-    constexpr uint16_t AcceptContent = 0x01FB;
-    constexpr uint16_t CancelFindContent = 0x01FC;
-    constexpr uint16_t FindContent = 0x01F9;
-    constexpr uint16_t Find5Contents = 0x01FD;
-    constexpr uint16_t FindContentAsRandom = 0x01FE;
-    constexpr uint16_t Config = 0x0262;
-    constexpr uint16_t Logout = 0x0269;
-    constexpr uint16_t StartLogoutCountdown = 0x0263;
-    constexpr uint16_t CancelLogoutCountdown = 0x0264;
-    constexpr uint16_t MovePvP = 0x0278;
-    constexpr uint16_t VoteKickStart = 0x026D;
-    constexpr uint16_t MVPRequest = 0x026E;
-    constexpr uint16_t ZoneJump = 0x0190;
-    constexpr uint16_t ChocoboTaxiPathEnd = 0x0258;
-    constexpr uint16_t ChocoboTaxiSetStep = 0x0259;
-    constexpr uint16_t ChocoboTaxiUnmount = 0x025A;
-    constexpr uint16_t BlacklistAdd = 0x00E1;
-    constexpr uint16_t BlacklistRemove = 0x00E2;
-    constexpr uint16_t FriendlistRemove = 0x00E6;
-    constexpr uint16_t PcSearch = 0x00EB;
-}
+#include <atomic>
 
 // ===== GLOBAL FUNCTIONS (outside namespace) =====
 bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize)
@@ -177,6 +104,9 @@ namespace SapphireHook {
     uintptr_t dispatcherAddr = 0;
     typedef char(__fastcall* DispatcherFn)(void* rcx);
     DispatcherFn originalDispatcher = nullptr;
+
+    static std::atomic<uint64_t> g_totalCallCount{ 0 };
+    static std::atomic<uint64_t> g_totalExecMicros{ 0 };
 
     // Forward declarations
     bool ValidateIPCHandler(uintptr_t address);
@@ -640,27 +570,28 @@ namespace SapphireHook {
             log << std::chrono::duration_cast<std::chrono::milliseconds>(
                       std::chrono::system_clock::now().time_since_epoch()).count()
                 << " | " << context.str() << std::endl;
-        } catch (...) {
-            // ignore file I/O errors
-        }
+        } catch (...) {}
 
-        if (opcode == FFXIVOpcodes::PcPartyKick ||
-            opcode == FFXIVOpcodes::VoteKickStart ||
-            opcode == FFXIVOpcodes::FreeCompanyKick)
+        if (opcode == 0x00DE /*PcPartyKick*/ ||
+            opcode == 0x026D /*VoteKickStart*/ ||
+            opcode == 0x010F /*FreeCompanyKick*/)
         {
             SapphireHook::LogWarning(std::string("SECURITY: Kick/Ban opcode detected: ") + opcodeName);
         }
 
         const auto start_time = std::chrono::high_resolution_clock::now();
-        CallOriginalIPC_NoExcept(thisPtr, opcode, data); // SEH wrapped call
+        CallOriginalIPC_NoExcept(thisPtr, opcode, data);
         const auto end_time = std::chrono::high_resolution_clock::now();
 
         const auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time);
-        if (duration.count() > 1000)
-        {
+        if (duration.count() > 1000) {
             SapphireHook::LogWarning(std::string("Slow IPC operation: ") + opcodeName +
                                      " took " + std::to_string(duration.count()) + "μs");
         }
+
+        // Metrics update
+        g_totalCallCount.fetch_add(1, std::memory_order_relaxed);
+        g_totalExecMicros.fetch_add(static_cast<uint64_t>(duration.count()), std::memory_order_relaxed);
     }
 
     // Single definition: HookedDispatcher
@@ -803,6 +734,7 @@ namespace SapphireHook {
         const char* ipcPatterns[] = {
             // Original patterns
             "40 53 48 83 EC ? 0F B7 DA 48 8B F9 66 85 D2",
+            /*
             "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 0F B7 FA 48 8B F1",
             "40 53 48 83 EC ? 48 8B D9 0F B7 D2 66 85 D2",
             "48 89 5C 24 ? 57 48 83 EC ? 48 8B F9 0F B7 DA 66 85 DB",
@@ -818,6 +750,7 @@ namespace SapphireHook {
             "48 83 EC ? 0F B7 DA 66 83 FA ? 77 ?",
             "40 53 48 83 EC ? 0F B7 DA 48 8B F9 83 FB ?",
             "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC ? 0F B7 DA 48 8B F9",
+            */
         };
         const int ipcPatternCount = static_cast<int>(sizeof(ipcPatterns) / sizeof(ipcPatterns[0]));
 
@@ -1003,39 +936,47 @@ namespace SapphireHook {
     // ===== Static API used by other modules (definitions) =====
     bool HookManager::RegisterHook(const std::string& name, uintptr_t address, void* original, const std::string& assemblyName)
     {
+        bool success = false;
         try
         {
-            std::lock_guard<std::mutex> lock(HookManager::GetHooksMutex());
-
-            auto& trackedHooks = HookManager::GetTrackedHooks();
-            auto& addressToName = HookManager::GetAddressToName();
-
-            if (trackedHooks.find(name) != trackedHooks.end())
+            // Work inside a limited scope so the lock_guard is always released
             {
-                SapphireHook::LogWarning("Hook already registered: " + name);
-                return false;
+                std::lock_guard<std::mutex> guard(HookManager::GetHooksMutex());
+
+                auto& trackedHooks = HookManager::GetTrackedHooks();
+                auto& addressToName = HookManager::GetAddressToName();
+
+                if (trackedHooks.find(name) != trackedHooks.end())
+                {
+                    SapphireHook::LogWarning("Hook already registered: " + name);
+                    return false; // lock released when leaving scope
+                }
+
+                auto info = std::make_unique<HookInfo>();
+                info->name = name;
+                info->assembly_name = assemblyName;
+                info->created_time = std::chrono::steady_clock::now();
+                info->module_name.clear();
+                info->validation_error.clear();
+                info->original_bytes = BackupOriginalBytesHelper(address, 16);
+                info->rva = HookManager::AddressToRVA(address);
+                info->original_function = original;
+                info->address = address;
+                info->is_enabled = true;
+                info->is_validated = true;
+
+                trackedHooks[name] = std::move(info);
+                addressToName[address] = name;
+                success = true;
             }
 
-            auto info = std::make_unique<HookInfo>();
-            info->name = name;
-            info->assembly_name = assemblyName;
-            info->created_time = std::chrono::steady_clock::now();
-            info->module_name.clear();
-            info->validation_error.clear();
-            info->original_bytes = BackupOriginalBytesHelper(address, 16);
-            info->rva = HookManager::AddressToRVA(address);
-            info->original_function = original;
-            info->address = address;
-            info->is_enabled = true;
-            info->is_validated = true;
-
-            trackedHooks[name] = std::move(info);
-            addressToName[address] = name;
-
-            std::ostringstream oss;
-            oss << "Registered hook '" << name << "' at 0x" << std::hex << address;
-            SapphireHook::LogInfo(oss.str());
-            return true;
+            if (success)
+            {
+                std::ostringstream oss;
+                oss << "Registered hook '" << name << "' at 0x" << std::hex << address;
+                SapphireHook::LogInfo(oss.str());
+            }
+            return success;
         }
         catch (const std::exception& e)
         {
@@ -1053,9 +994,13 @@ namespace SapphireHook {
     {
         try
         {
-            std::lock_guard<std::mutex> lock(HookManager::GetHooksMutex());
-            auto& addressToName = HookManager::GetAddressToName();
-            return addressToName.find(address) != addressToName.end();
+            bool found = false;
+            {
+                std::lock_guard<std::mutex> guard(HookManager::GetHooksMutex());
+                auto& addressToName = HookManager::GetAddressToName();
+                found = (addressToName.find(address) != addressToName.end());
+            }
+            return found;
         }
         catch (...)
         {
@@ -1216,82 +1161,8 @@ namespace SapphireHook {
     // ===== Utility =====
     const char* GetOpcodeName(uint16_t opcode)
     {
-        switch (opcode)
-        {
-        case FFXIVOpcodes::Sync: return "Sync";
-        case FFXIVOpcodes::Login: return "Login";
-        case FFXIVOpcodes::ChatHandler: return "ChatHandler";
-        case FFXIVOpcodes::SetLanguage: return "SetLanguage";
-        case FFXIVOpcodes::Invite: return "Invite";
-        case FFXIVOpcodes::InviteReply: return "InviteReply";
-        case FFXIVOpcodes::PcPartyLeave: return "PcPartyLeave";
-        case FFXIVOpcodes::PcPartyDisband: return "PcPartyDisband";
-        case FFXIVOpcodes::PcPartyKick: return "PcPartyKick";
-        case FFXIVOpcodes::PcPartyChangeLeader: return "PcPartyChangeLeader";
-        case FFXIVOpcodes::SendReadyCheck: return "SendReadyCheck";
-        case FFXIVOpcodes::ReplyReadyCheck: return "ReplyReadyCheck";
-        case FFXIVOpcodes::InviteCancel: return "InviteCancel";
-        case FFXIVOpcodes::FreeCompanyLeave: return "FreeCompanyLeave";
-        case FFXIVOpcodes::FreeCompanyKick: return "FreeCompanyKick";
-        case FFXIVOpcodes::FcChangeMaster: return "FcChangeMaster";
-        case FFXIVOpcodes::FcForceDisband: return "FcForceDisband";
-        case FFXIVOpcodes::LinkshellJoin: return "LinkshellJoin";
-        case FFXIVOpcodes::LinkshellLeave: return "LinkshellLeave";
-        case FFXIVOpcodes::LinkshellKick: return "LinkshellKick";
-        case FFXIVOpcodes::LinkshellChangeMaster: return "LinkshellChangeMaster";
-        case FFXIVOpcodes::ActionRequest: return "ActionRequest";
-        case FFXIVOpcodes::Move: return "Move";
-        case FFXIVOpcodes::TargetPosCommand: return "TargetPosCommand";
-        case FFXIVOpcodes::SelectGroundActionRequest: return "SelectGroundActionRequest";
-        case FFXIVOpcodes::Command: return "Command";
-        case FFXIVOpcodes::GMCommand: return "GMCommand";
-        case FFXIVOpcodes::GMCommandName: return "GMCommandName";
-        case FFXIVOpcodes::InfoGMCommand: return "InfoGMCommand";
-        case FFXIVOpcodes::DebugCommand: return "DebugCommand";
-        case FFXIVOpcodes::TradeCommand: return "TradeCommand";
-        case FFXIVOpcodes::ClientItemOperation: return "ClientItemOperation";
-        case FFXIVOpcodes::GearSetEquip: return "GearSetEquip";
-        case FFXIVOpcodes::RequestStorageItems: return "RequestStorageItems";
-        case FFXIVOpcodes::SelectLootAction: return "SelectLootAction";
-        case FFXIVOpcodes::TreasureCheckCommand: return "TreasureCheckCommand";
-        case FFXIVOpcodes::OpenTreasureWithKey: return "OpenTreasureWithKey";
-        case FFXIVOpcodes::MarketBoardRequestItemListingInfo: return "MarketBoardRequestItemListingInfo";
-        case FFXIVOpcodes::MarketBoardRequestItemListings: return "MarketBoardRequestItemListings";
-        case FFXIVOpcodes::BuyMarketRetainer: return "BuyMarketRetainer";
-        case FFXIVOpcodes::HousingExteriorChange: return "HousingExteriorChange";
-        case FFXIVOpcodes::HousingInteriorChange: return "HousingInteriorChange";
-        case FFXIVOpcodes::HousingPlaceYardItem: return "HousingPlaceYardItem";
-        case FFXIVOpcodes::HousingHouseName: return "HousingHouseName";
-        case FFXIVOpcodes::HousingGreeting: return "HousingGreeting";
-        case FFXIVOpcodes::HousingChangeLayout: return "HousingChangeLayout";
-        case FFXIVOpcodes::StartTalkEvent: return "StartTalkEvent";
-        case FFXIVOpcodes::StartEmoteEvent: return "StartEmoteEvent";
-        case FFXIVOpcodes::StartUIEvent: return "StartUIEvent";
-        case FFXIVOpcodes::ReturnEventSceneHeader: return "ReturnEventSceneHeader";
-        case FFXIVOpcodes::YieldEventSceneHeader: return "YieldEventSceneHeader";
-        case FFXIVOpcodes::CFCommenceHandler: return "CFCommenceHandler";
-        case FFXIVOpcodes::AcceptContent: return "AcceptContent";
-        case FFXIVOpcodes::CancelFindContent: return "CancelFindContent";
-        case FFXIVOpcodes::FindContent: return "FindContent";
-        case FFXIVOpcodes::Find5Contents: return "Find5Contents";
-        case FFXIVOpcodes::FindContentAsRandom: return "FindContentAsRandom";
-        case FFXIVOpcodes::Config: return "Config";
-        case FFXIVOpcodes::Logout: return "Logout";
-        case FFXIVOpcodes::StartLogoutCountdown: return "StartLogoutCountdown";
-        case FFXIVOpcodes::CancelLogoutCountdown: return "CancelLogoutCountdown";
-        case FFXIVOpcodes::MovePvP: return "MovePvP";
-        case FFXIVOpcodes::VoteKickStart: return "VoteKickStart";
-        case FFXIVOpcodes::MVPRequest: return "MVPRequest";
-        case FFXIVOpcodes::ZoneJump: return "ZoneJump";
-        case FFXIVOpcodes::ChocoboTaxiPathEnd: return "ChocoboTaxiPathEnd";
-        case FFXIVOpcodes::ChocoboTaxiSetStep: return "ChocoboTaxiSetStep";
-        case FFXIVOpcodes::ChocoboTaxiUnmount: return "ChocoboTaxiUnmount";
-        case FFXIVOpcodes::BlacklistAdd: return "BlacklistAdd";
-        case FFXIVOpcodes::BlacklistRemove: return "BlacklistRemove";
-        case FFXIVOpcodes::FriendlistRemove: return "FriendlistRemove";
-        case FFXIVOpcodes::PcSearch: return "PcSearch";
-        default: return "Unknown";
-        }
+        // Wrapper retained for existing code; delegates to centralized lookup.
+        return ::LookupOpcodeName(opcode, true, 0xFFFF); // unchanged, calls compatibility overload
     }
 
     // Implement the private static helpers declared in HookManager (signature matches header)
@@ -1311,17 +1182,15 @@ namespace SapphireHook {
         return committed && !noAccess;
     }
 
-    bool HookManager::IsMemoryExecutable(uintptr_t address, uintptr_t size)
+    bool HookManager::IsMemoryExecutable(uintptr_t address, size_t size)
     {
         if (address < 0x1000 || address > 0x00007FFFFFFFFFFFULL)
             return false;
 
-        // Treat size==0 as a minimal check (e.g., current page)
-        if (size == 0)
-            size = 16;
+        if (size == 0) size = 16;
 
         uintptr_t cursor = address;
-        size_t remaining = static_cast<size_t>(size);
+        size_t remaining = size;
 
         while (remaining > 0)
         {
@@ -1342,11 +1211,9 @@ namespace SapphireHook {
             if (!exec)
                 return false;
 
-            // Advance across this region
             const auto regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + static_cast<uintptr_t>(mbi.RegionSize);
             const size_t advance = static_cast<size_t>(regionEnd - cursor);
-            if (advance == 0)
-                break;
+            if (advance == 0) break;
 
             if (advance >= remaining)
                 return true;
@@ -1354,30 +1221,285 @@ namespace SapphireHook {
             remaining -= advance;
             cursor += advance;
         }
-
         return true;
     }
 
+    // === Add implementations for previously missing HookManager methods (append near file end, before namespace close) ===
+
+std::vector<uint8_t> HookManager::BackupOriginalBytes(uintptr_t address, size_t size)
+{
+    std::vector<uint8_t> buf(size);
+    try {
+        std::memcpy(buf.data(), reinterpret_cast<void*>(address), size);
+    } catch (...) {
+        buf.clear();
+    }
+    return buf;
+}
+
+void HookManager::SetSpeedMultiplier(float multiplier)
+{
+    if (multiplier <= 0.f) {
+        SapphireHook::LogWarning("SetSpeedMultiplier rejected non-positive value");
+        return;
+    }
+    g_SpeedMultiplier = multiplier;
+    SapphireHook::LogInfo("Speed multiplier set to " + std::to_string(multiplier));
+}
+
+void HookManager::Shutdown()
+{
+    SapphireHook::LogInfo("HookManager shutdown initiated");
+    GetShutdownFlag().store(true, std::memory_order_relaxed);
+    CleanupAllHooks();
+    MH_Uninitialize();
+    SapphireHook::LogInfo("HookManager shutdown complete");
+}
+
+bool HookManager::RemoveHook(const std::string& name)
+{
+    std::lock_guard<std::mutex> guard(GetHooksMutex());
+    auto& tracked = GetTrackedHooks();
+    auto it = tracked.find(name);
+    if (it == tracked.end()) {
+        SapphireHook::LogWarning("RemoveHook: hook not found: " + name);
+        return false;
+    }
+
+    uintptr_t addr = it->second->address;
+    // Disable & remove via MinHook
+    MH_DisableHook(reinterpret_cast<void*>(addr));
+    MH_RemoveHook(reinterpret_cast<void*>(addr));
+
+    // Restore original bytes if we have them
+    if (!it->second->original_bytes.empty()) {
+        DWORD oldProt{};
+        if (VirtualProtect(reinterpret_cast<void*>(addr), it->second->original_bytes.size(),
+            PAGE_EXECUTE_READWRITE, &oldProt))
+        {
+            std::memcpy(reinterpret_cast<void*>(addr),
+                        it->second->original_bytes.data(),
+                        it->second->original_bytes.size());
+            DWORD _; VirtualProtect(reinterpret_cast<void*>(addr),
+                it->second->original_bytes.size(), oldProt, &_);
+        }
+    }
+
+    GetAddressToName().erase(addr);
+    tracked.erase(it);
+    SapphireHook::LogInfo("Removed hook: " + name);
+    return true;
+}
+
+std::vector<std::string> HookManager::GetHookNames()
+{
+    std::vector<std::string> names;
+    std::lock_guard<std::mutex> guard(GetHooksMutex());
+    names.reserve(GetTrackedHooks().size());
+    for (auto& p : GetTrackedHooks())
+        names.push_back(p.first);
+    return names;
+}
+
+std::optional<std::string> HookManager::GetHookNameByAddress(uintptr_t address)
+{
+    std::lock_guard<std::mutex> guard(GetHooksMutex());
+    auto& map = GetAddressToName();
+    auto it = map.find(address);
+    if (it == map.end()) return std::nullopt;
+    return it->second;
+}
+
+void HookManager::CleanupAllHooks()
+{
+    std::lock_guard<std::mutex> guard(GetHooksMutex());
+    for (auto& p : GetTrackedHooks())
+    {
+        uintptr_t addr = p.second->address;
+        MH_DisableHook(reinterpret_cast<void*>(addr));
+        MH_RemoveHook(reinterpret_cast<void*>(addr));
+
+        if (!p.second->original_bytes.empty()) {
+            DWORD oldProt{};
+            if (VirtualProtect(reinterpret_cast<void*>(addr), p.second->original_bytes.size(),
+                PAGE_EXECUTE_READWRITE, &oldProt))
+            {
+                std::memcpy(reinterpret_cast<void*>(addr),
+                            p.second->original_bytes.data(),
+                            p.second->original_bytes.size());
+                DWORD _; VirtualProtect(reinterpret_cast<void*>(addr),
+                    p.second->original_bytes.size(), oldProt, &_);
+            }
+        }
+    }
+    GetAddressToName().clear();
+    GetTrackedHooks().clear();
+    SapphireHook::LogInfo("All hooks cleaned up");
+}
+
+void HookManager::UpdateStatistics()
+{
+    std::vector<HookInfo> snapshot;
+    snapshot.reserve(GetTrackedHooks().size());
+    for (auto& p : GetTrackedHooks())
+        snapshot.push_back(*p.second);
+    s_statistics.Update(snapshot);
+}
+
+HookStatistics HookManager::GetHookStatistics()
+{
+    std::lock_guard<std::mutex> guard(GetHooksMutex());
+    UpdateStatistics();
+    return s_statistics;
+}
+
+std::vector<HookInfo> HookManager::GetDetailedHookInfo()
+{
+    std::vector<HookInfo> result;
+    std::lock_guard<std::mutex> guard(GetHooksMutex());
+    result.reserve(GetTrackedHooks().size());
+    for (auto& p : GetTrackedHooks())
+        result.push_back(*p.second);
+    return result;
+}
+
+size_t HookManager::GetTotalCallCount()
+{
+    return static_cast<size_t>(g_totalCallCount.load(std::memory_order_relaxed));
+}
+
+std::chrono::milliseconds HookManager::GetTotalExecutionTime()
+{
+    uint64_t micros = g_totalExecMicros.load(std::memory_order_relaxed);
+    return std::chrono::milliseconds(micros / 1000);
+}
+
+void HookManager::PrintHookInformation()
+{
+    auto info = GetDetailedHookInfo();
+    SapphireHook::LogInfo("==== Hook Information ====");
+    for (auto& h : info)
+    {
+        std::ostringstream oss;
+        oss << h.name << " @0x" << std::hex << h.address
+            << " enabled=" << std::boolalpha << h.is_enabled
+            << " validated=" << h.is_validated;
+        SapphireHook::LogInfo(oss.str());
+    }
+}
+
+std::map<std::string, std::string> HookManager::GetDebugInformation()
+{
+    std::map<std::string, std::string> dbg;
+    auto stats = GetHookStatistics();
+    dbg["TotalHooks"]   = std::to_string(stats.totalHooks);
+    dbg["EnabledHooks"] = std::to_string(stats.enabledHooks);
+    dbg["FailedHooks"]  = std::to_string(stats.failedHooks);
+    dbg["TotalCalls"]   = std::to_string(GetTotalCallCount());
+    dbg["ExecTimeMs"]   = std::to_string(GetTotalExecutionTime().count());
+    return dbg;
+}
+
+std::map<std::string, uintptr_t> HookManager::GetHookAddresses()
+{
+    std::map<std::string, uintptr_t> out;
+    std::lock_guard<std::mutex> guard(GetHooksMutex());
+    for (auto& p : GetTrackedHooks())
+        out[p.first] = p.second->address;
+    return out;
+}
+
+bool HookManager::SaveHookCache()
+{
+    auto& dir = GetCacheDirectory();
+    if (dir.empty())
+        return false;
+
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+
+    const auto filePath = dir / "hook_cache.txt";
+
+    std::ofstream f(filePath);
+    if (!f.is_open()) {
+        SapphireHook::LogError("SaveHookCache: cannot open file");
+        return false;
+    }
+
+    std::lock_guard<std::mutex> guard(GetHooksMutex());
+    for (auto& p : GetTrackedHooks())
+        f << p.first << "=" << std::hex << p.second->address << "\n";
+
+    SapphireHook::LogInfo("Hook cache saved: " + filePath.string());
+    return true;
+}
+
+void HookManager::InvalidateCache()
+{
+    auto& dir = GetCacheDirectory();
+    if (dir.empty()) return;
+    const auto filePath = dir / "hook_cache.txt";
+    if (std::filesystem::exists(filePath)) {
+        std::error_code ec;
+        std::filesystem::remove(filePath, ec);
+        if (!ec)
+            SapphireHook::LogInfo("Hook cache invalidated");
+    }
+}
+
+uintptr_t HookManager::RVAToAddress(uintptr_t rva)
+{
+    HMODULE mainModule = GetModuleHandle(nullptr);
+    if (!mainModule) return 0;
+    return reinterpret_cast<uintptr_t>(mainModule) + rva;
+}
+
+std::string HookManager::GenerateHookCacheKey(const std::string& name, uintptr_t address)
+{
+    std::ostringstream oss;
+    oss << name << "@" << std::hex << address;
+    return oss.str();
+}
+
+std::string HookManager::SerializeHookCache()
+{
+    std::ostringstream oss;
+    std::lock_guard<std::mutex> guard(GetHooksMutex());
+    for (auto& p : GetTrackedHooks())
+        oss << p.first << "=" << std::hex << p.second->address << "\n";
+    return oss.str();
+}
+
+bool HookManager::DeserializeHookCache(const std::string& cacheData)
+{
+    std::istringstream iss(cacheData);
+    std::string line;
+    size_t loaded = 0;
+
+    std::lock_guard<std::mutex> guard(GetHooksMutex());
+    while (std::getline(iss, line))
+    {
+        if (line.empty() || line[0] == '#') continue;
+        auto eq = line.find('=');
+        if (eq == std::string::npos) continue;
+        std::string name = line.substr(0, eq);
+        std::string addrStr = line.substr(eq + 1);
+        try {
+            uintptr_t addr = std::stoull(addrStr, nullptr, 16);
+            s_cached_addresses[name] = addr;
+            ++loaded;
+        } catch (...) {
+            SapphireHook::LogWarning("DeserializeHookCache: bad line: " + line);
+        }
+    }
+    SapphireHook::LogInfo("DeserializeHookCache loaded " + std::to_string(loaded) + " entries");
+    return loaded > 0;
+}
+
 } // namespace SapphireHook
 
-// Global function for backward compatibility
+// Global function - must be outside namespace to match declaration
 void InitHooks()
 {
-    SapphireHook::LogInfo("Global InitHooks() called - delegating to HookManager::Initialize()");
-
-    try
-    {
-        SapphireHook::HookManager::Initialize();
-        SapphireHook::LogInfo("Hook initialization completed successfully");
-    }
-    catch (const std::exception& ex)
-    {
-        SapphireHook::LogError("Exception during hook initialization: " + std::string(ex.what()));
-        throw;
-    }
-    catch (...)
-    {
-        SapphireHook::LogError("Unknown exception during hook initialization");
-        throw;
-    }
+    SapphireHook::HookManager::Initialize();
 }

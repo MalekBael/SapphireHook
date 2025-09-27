@@ -25,9 +25,10 @@
 
 using namespace SapphireHook;
 
-SafeHookLogger& SafeHookLogger::Instance() {
-	static SafeHookLogger inst{};
-	return inst;
+// Singleton
+PacketCapture& PacketCapture::Instance() {
+    static PacketCapture inst{};
+    return inst;
 }
 
 
@@ -134,6 +135,8 @@ namespace {
 		}
 	}
 
+	// REPLACE the existing static pendingRequests map + tail logging inside UpdatePacketCorrelation with the following:
+
 	static void UpdatePacketCorrelation(uint16_t opcode, bool outgoing, const HookPacket& hp) {
 		if (!g_currentFlow.opcodes.empty()) {
 			g_currentFlow.opcodes.push_back(opcode);
@@ -207,18 +210,31 @@ namespace {
 			}
 		}
 
-		static std::unordered_map<uint64_t, std::pair<uint16_t, std::chrono::system_clock::time_point>> pendingRequests;
+		// Updated pending request tracking with timeout-based logging (no per-update spam).
+		struct PendingRequest {
+			uint16_t opcode = 0;                                       // Initialize to silence C26495 (uninitialized member)
+			std::chrono::system_clock::time_point ts{};                // Value-initialize
+			bool timeoutLogged = false;
+		};
+		static std::unordered_map<uint64_t, PendingRequest> pendingRequests;
+		static std::chrono::system_clock::time_point lastSweep = hp.ts;
+
 		if (outgoing) {
-			pendingRequests[hp.connection_id] = { opcode, hp.ts };
+			// Start / refresh pending request for this connection id.
+			// Use insert_or_assign to avoid default construction then assignment (cleaner for static analysis).
+			pendingRequests.insert_or_assign(
+				hp.connection_id,
+				PendingRequest{ opcode, hp.ts, false }
+			);
 		}
 		else if (!pendingRequests.empty()) {
 			auto it = pendingRequests.find(hp.connection_id);
 			if (it != pendingRequests.end()) {
-				auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(hp.ts - it->second.second);
-				uint64_t relKey = (uint64_t(it->second.first) << 32) | opcode;
+				auto latency = std::chrono::duration_cast<std::chrono::milliseconds>(hp.ts - it->second.ts);
+				uint64_t relKey = (uint64_t(it->second.opcode) << 32) | opcode;
 				auto& rel = g_packetRelations[relKey];
 				if (rel.count == 0) {
-					rel.requestOpcode = it->second.first;
+					rel.requestOpcode = it->second.opcode;
 					rel.responseOpcode = opcode;
 					rel.avgLatency = latency;
 					rel.count = 1;
@@ -227,24 +243,47 @@ namespace {
 					rel.avgLatency = (rel.avgLatency * rel.count + latency) / (rel.count + 1);
 					rel.count++;
 				}
-				if (latency.count() < 5000) pendingRequests.erase(it);
+				pendingRequests.erase(it);
 			}
 		}
-		LogDebug("SafeHookLogger: Packet correlation updated for opcode: " + std::to_string(opcode));
+
+		// Periodic sweep (every 5 seconds) to detect >1 minute timeouts.
+		auto now = hp.ts;
+		if (now - lastSweep >= std::chrono::seconds(5)) {
+			for (auto it = pendingRequests.begin(); it != pendingRequests.end(); ) {
+				auto age = now - it->second.ts;
+				if (!it->second.timeoutLogged && age > std::chrono::minutes(1)) {
+					Logger::Instance().DebugPacketCorrelationTimeout(
+						it->second.opcode,
+						it->first,
+						std::chrono::duration_cast<std::chrono::milliseconds>(age).count());
+					it->second.timeoutLogged = true;
+				}
+				// Prune very old ( >5 min ) entries to avoid unbounded growth.
+				if (age > std::chrono::minutes(5)) {
+					it = pendingRequests.erase(it);
+				}
+				else {
+					++it;
+				}
+			}
+			lastSweep = now;
+		}
+		// Removed per-update LogDebug spam.
 	}
 }
 
-// --------------------------------- SafeHookLogger impl -----------------------------------
-SafeHookLogger::SafeHookLogger() {
+// --------------------------------- PacketCapture impl -----------------------------------
+PacketCapture::PacketCapture() {
 	for (size_t i = 0; i < SLOT_COUNT; ++i)
 		slots_[i].state.store(uint8_t(SlotState::EMPTY));
 }
-SafeHookLogger::~SafeHookLogger() = default;
+PacketCapture::~PacketCapture() = default;
 
-bool SafeHookLogger::TryEnqueueFromHook(const void* data, size_t len,
+bool PacketCapture::TryEnqueueFromHook(const void* data, size_t len,
 	bool outgoing, uint64_t conn_id) noexcept {
 	if (!data || len == 0) {
-		LogDebug("SafeHookLogger: Invalid data provided to TryEnqueueFromHook");
+		LogDebug("PacketCapture: Invalid data provided to TryEnqueueFromHook");
 		return false;
 	}
 	size_t tocopy = (len > SLOT_PAYLOAD_CAP) ? SLOT_PAYLOAD_CAP : len;
@@ -262,7 +301,7 @@ bool SafeHookLogger::TryEnqueueFromHook(const void* data, size_t len,
 			slot.packet.len = (uint32_t)tocopy;
 			std::memcpy(slot.packet.buf.data(), data, tocopy);
 			slot.state.store(uint8_t(SlotState::READY), std::memory_order_release);
-			LogDebug("SafeHookLogger: Packet enqueued (" + std::to_string(tocopy) + " bytes, " +
+			LogDebug("PacketCapture: Packet enqueued (" + std::to_string(tocopy) + " bytes, " +
 				(outgoing ? "outgoing" : "incoming") + ")");
 			return true;
 		}
@@ -270,7 +309,7 @@ bool SafeHookLogger::TryEnqueueFromHook(const void* data, size_t len,
 	return false;
 }
 
-void SafeHookLogger::DrainToVector(std::vector<HookPacket>& out) {
+void PacketCapture::DrainToVector(std::vector<HookPacket>& out) {
 	out.clear();
 	out.reserve(256);
 	for (size_t i = 0; i < SLOT_COUNT && out.size() < UI_BATCH_CAP; ++i) {
@@ -284,7 +323,7 @@ void SafeHookLogger::DrainToVector(std::vector<HookPacket>& out) {
 	}
 }
 
-void SafeHookLogger::DumpHexAscii(const HookPacket& hp) {
+void PacketCapture::DumpHexAscii(const HookPacket& hp) {
 	const uint8_t* d = hp.buf.data();
 	for (size_t off = 0; off < hp.len; off += 16) {
 		size_t len = (hp.len - off < 16) ? hp.len - off : 16;
@@ -305,7 +344,7 @@ void SafeHookLogger::DumpHexAscii(const HookPacket& hp) {
 	}
 }
 
-void SafeHookLogger::DumpHexAsciiColored(const HookPacket& hp, const std::vector<unsigned int>& colors) {
+void PacketCapture::DumpHexAsciiColored(const HookPacket& hp, const std::vector<unsigned int>& colors) {
 	if (colors.size() < hp.len) { DumpHexAscii(hp); return; }
 
 	ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -408,7 +447,7 @@ void SafeHookLogger::DumpHexAsciiColored(const HookPacket& hp, const std::vector
 	ImGui::TextDisabled("Hex selection: Left-drag to select bytes. Right-click to clear selection.");
 }
 
-bool SafeHookLogger::TryGetSelectedPacket(HookPacket& out) {
+bool PacketCapture::TryGetSelectedPacket(HookPacket& out) {
 	if (!g_hasSelection) return false;
 	out = g_lastSelected;
 	return true;
@@ -585,7 +624,12 @@ namespace {
 		// NEW: fallback – try embedded IPC strip if we still have nothing recognized.
 		if (!d.valid) {
 			uint16_t connGuess = (d.connType != 0xFFFF) ? d.connType : 1; // assume Zone if unknown
-			auto seg = PacketDecoding::TryExtractIpcSegmentKnown(hp.buf.data(), hp.len, connGuess);
+			auto seg = PacketDecoding::TryExtractIpcSegmentKnown(
+				hp.buf.data(),
+				hp.len,
+				(connGuess == 0xFFFF
+					? Net::ConnectionType::Unknown
+					: static_cast<Net::ConnectionType>(connGuess)));
 			if (seg.valid) {
 				d.valid = true;
 				d.opcode = seg.opcode;
@@ -1403,25 +1447,30 @@ static void DrawPacketListAndDetails(const std::vector<HookPacket>& display) {
 		ParseAllSegmentsBuffer(v.data, v.len, segs);
 		DecodedHeader dec = DecodeForList(hp);
         if (segs.empty()) {
-            uint16_t connGuess = (resolvedConn != 0xFFFF) ? resolvedConn : 1;
-            bool opened = false;
+             uint16_t connGuess = (resolvedConn != 0xFFFF) ? resolvedConn : 1;
+             bool opened = false;
             bool stripHit = PacketDecoding::StripAndDecodeIpcKnown(
-                hp.buf.data(), hp.len, connGuess, hp.outgoing,
-                [&](const char* k, const std::string& v) {
-                    if (!opened) {
-                        ImGui::SeparatorText("Stripped IPC (auto)");
-                        ImGui::BeginTable("stripped_ipc_table", 2,
-                            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
-                            ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_Resizable);
-                        ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, 180.f);
-                        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
-                        ImGui::TableHeadersRow();
-                        opened = true;
-                    }
-                    ImGui::TableNextRow();
-                    ImGui::TableNextColumn(); ImGui::TextUnformatted(k);
-                    ImGui::TableNextColumn(); ImGui::TextUnformatted(v.c_str());
-                }
+                hp.buf.data(),
+                hp.len,
+                (connGuess == 0xFFFF
+                    ? Net::ConnectionType::Unknown
+                    : static_cast<Net::ConnectionType>(connGuess)),
+                hp.outgoing,
+                 [&](const char* k, const std::string& v) {
+                     if (!opened) {
+                         ImGui::SeparatorText("Stripped IPC (auto)");
+                         ImGui::BeginTable("stripped_ipc_table", 2,
+                             ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                             ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_Resizable);
+                         ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, 180.f);
+                         ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+                         ImGui::TableHeadersRow();
+                         opened = true;
+                     }
+                     ImGui::TableNextRow();
+                     ImGui::TableNextColumn(); ImGui::TextUnformatted(k);
+                     ImGui::TableNextColumn(); ImGui::TextUnformatted(v.c_str());
+                 }
             );
             if (opened) ImGui::EndTable();
 
@@ -1463,7 +1512,7 @@ static void DrawPacketListAndDetails(const std::vector<HookPacket>& display) {
 					tbl.Row("Length (bytes)", std::to_string(hp.len));
 
 					// Parsed segment count (omit header segmentCount duplicate)
-									tbl.Row("Segments", std::to_string(segs.size()));
+					tbl.Row("Segments", std::to_string(segs.size()));
 
 					// IPC segment count
 					size_t ipcCount = 0;
@@ -1565,14 +1614,14 @@ static void DrawPacketListAndDetails(const std::vector<HookPacket>& display) {
 			s_pendingJson = hp;
 			s_openJsonDialog = true;
 			ImGuiFD::OpenDialog("Export JSON", ImGuiFDMode_SaveFile,
-				"exports", "{JSON Files:*.json}, {*.*}");
+				"", "{JSON Files:*.json}, {*.*}");
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Export PCAP")) {
 			s_pendingPcap = hp;
 			s_openPcapDialog = true;
 			ImGuiFD::OpenDialog("Export PCAP", ImGuiFDMode_SaveFile,
-				"exports", "{PCAP Files:*.pcap}, {*.*}");
+				"", "{PCAP Files:*.pcap}, {*.*}");
 		}
 		ImGui::Separator();
 	}
@@ -1618,7 +1667,7 @@ static void DrawPacketListAndDetails(const std::vector<HookPacket>& display) {
 }
 
 // --------------------------------- Embedded main draw ------------------------------------
-void SafeHookLogger::DrawImGuiEmbedded() {
+void PacketCapture::DrawImGuiEmbedded() {
 	static std::vector<HookPacket> ui_batch;
 	DrainToVector(ui_batch);
 
@@ -1667,20 +1716,22 @@ void SafeHookLogger::DrawImGuiEmbedded() {
 	}
 }
 
-void SafeHookLogger::DrawImGuiSimple() {
+void PacketCapture::DrawImGuiSimple() {
 	ImGui::Begin("Network Monitor");
 	DrawImGuiEmbedded();
 	ImGui::End();
 }
 
-void SafeHookLogger::DrawImGuiSimple(bool* p_open) {
+void PacketCapture::DrawImGuiSimple(bool* p_open) {
 	if (ImGui::Begin("Network Monitor", p_open)) {
 		DrawImGuiEmbedded();
 	}
 	ImGui::End();
 }
 
-// ADD (restore export helpers) – place this block above DrawPacketListAndDetails (e.g. after DrawPacketFlowAnalysis)
+// NOTE: Ensure all calls elsewhere (hooks/UI) now use PacketCapture::Instance()
+// If old name still referenced, the using alias in header keeps build green until cleaned.
+
 namespace {
 	// Small hex helper for JSON export
 	static std::string Hex(const uint8_t* d, size_t n) {
@@ -1698,13 +1749,12 @@ namespace {
 		std::filesystem::create_directories("exports", ec);
 	}
 
-	// Reintroduced ExportToJsonAs (was removed while pruning UI sections)
 	static bool ExportToJsonAs(const HookPacket& hp, const std::string& filepath) {
 		try {
 			std::filesystem::path p(filepath);
 			if (p.has_parent_path()) {
 				std::error_code ec;
-				std::filesystem::create_directories(p.parent_path(), ec);
+				std::filesystem::create_directories(p.parent_path(), ec); // Only create what user explicitly requested
 			}
 			std::ofstream f(p, std::ios::binary);
 			if (!f) return false;
@@ -1741,7 +1791,6 @@ namespace {
 		}
 	}
 
-	// Reintroduced ExportToPcapAs (same lightweight single-frame PCAP writer as original)
 	static bool ExportToPcapAs(const HookPacket& hp, const std::string& filepath) {
 		try {
 			std::filesystem::path p(filepath);
@@ -1764,13 +1813,12 @@ namespace {
 				int32_t  thiszone = 0;
 				uint32_t sigfigs = 0;
 				uint32_t snaplen = 0x00040000;
-				uint32_t network = 1; // LINKTYPE_ETHERNET
+				uint32_t network = 1;
 			} gh;
 			f.write(reinterpret_cast<const char*>(&gh), sizeof(gh));
 
 			const std::vector<uint8_t> payload(hp.buf.begin(), hp.buf.begin() + hp.len);
 
-			// Minimal fake Ethernet/IP/UDP envelope
 			const uint16_t udp_payload_len = (uint16_t)payload.size();
 			const uint16_t udp_len = 8 + udp_payload_len;
 			const uint16_t ip_len = 20 + udp_len;

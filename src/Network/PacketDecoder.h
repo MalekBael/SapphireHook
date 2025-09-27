@@ -6,19 +6,21 @@
 #include <iomanip>
 #include <cstring>
 #include <vector>
-#include <algorithm> // std::min
+#include <algorithm>
 #include <span>
 #include <array>
 #include <tuple>
 #include <type_traits>
 
-// Defuse Windows min/max macros if <windows.h> was included earlier without NOMINMAX
 #ifdef min
 #undef min
 #endif
 #ifdef max
 #undef max
 #endif
+
+#include "PacketRegistration.h" // for Net::ConnectionType
+#include "OpcodeNames.h"        // updated signatures
 
 namespace PacketDecoding {
     using RowEmitter = std::function<void(const char*, const std::string&)>;
@@ -442,8 +444,9 @@ namespace PacketDecoding {
 // capture tool (find embedded IPC segment of form: [len][...header(0x10-0x14)])
 // ============================================================================
 
-    // Forward declaration so we can validate opcode candidates.
-    const char* LookupOpcodeName(uint16_t opcode, bool outgoing, uint16_t connectionType) noexcept;
+    // (Removed obsolete forward declaration of LookupOpcodeName.
+    //  We now rely on the typed declaration in OpcodeNames.h that
+    //  accepts Net::ConnectionType plus a compatibility overload.)
 
     struct ExtractedIpcSegment {
         bool   valid = false;
@@ -467,10 +470,10 @@ namespace PacketDecoding {
 
     inline bool IsLikelyOpcode(uint16_t opc) {
         // Try both directions (incoming/outgoing) for zone (1) & chat(2)
-        if (LookupOpcodeName(opc, false, 1) != "?") return true;
-        if (LookupOpcodeName(opc, true, 1)  != "?") return true;
-        if (LookupOpcodeName(opc, false, 2) != "?") return true;
-        if (LookupOpcodeName(opc, true, 2)  != "?") return true;
+        if (LookupOpcodeName(opc, false, Net::ConnectionType::Zone) != "?") return true;
+        if (LookupOpcodeName(opc, true,  Net::ConnectionType::Zone) != "?") return true;
+        if (LookupOpcodeName(opc, false, Net::ConnectionType::Chat) != "?") return true;
+        if (LookupOpcodeName(opc, true,  Net::ConnectionType::Chat) != "?") return true;
         return false;
     }
 
@@ -552,11 +555,12 @@ namespace PacketDecoding {
 
     // If you have a known connection type (Zone=1, Chat=2, Lobby=3) you can
     // reduce false positives by validating opcodes only against that table.
-    inline bool IsLikelyOpcodeForConn(uint16_t opc, uint16_t connType) {
+    inline bool IsLikelyOpcodeForConn(uint16_t opc, Net::ConnectionType connType) {
         // Lobby currently shares most with zone table; treat Lobby like Zone.
-        uint16_t eff = (connType == 3) ? 1 : connType;
-        if (LookupOpcodeName(opc, false, eff) != "?") return true;
-        if (LookupOpcodeName(opc, true,  eff) != "?") return true;
+        Net::ConnectionType effective = (connType == Net::ConnectionType::Lobby)
+            ? Net::ConnectionType::Zone : connType;
+        if (LookupOpcodeName(opc, false, effective) != "?") return true;
+        if (LookupOpcodeName(opc, true,  effective) != "?") return true;
         return false;
     }
 
@@ -572,7 +576,7 @@ namespace PacketDecoding {
         uint16_t opcode = 0;
     };
 
-    inline ExtractedIpcSegmentKnown TryExtractIpcSegmentKnown(const uint8_t* full, size_t fullLen, uint16_t connType) {
+    inline ExtractedIpcSegmentKnown TryExtractIpcSegmentKnown(const uint8_t* full, size_t fullLen, Net::ConnectionType connType) {
         ExtractedIpcSegmentKnown r;
         if (!full || fullLen < 0x20) return r;
 
@@ -608,7 +612,7 @@ namespace PacketDecoding {
     // Returns true if an IPC segment was found & dispatched.
     inline bool StripAndDecodeIpcKnown(const uint8_t* full,
                                        size_t fullLen,
-                                       uint16_t connectionType, // 1=Zone,2=Chat,3=Lobby
+                                       Net::ConnectionType connectionType, // 1=Zone,2=Chat,3=Lobby
                                        bool outgoing,
                                        RowEmitter emit)
     {
@@ -620,14 +624,17 @@ namespace PacketDecoding {
                             nullptr, 0,
                             seg.ipcHeader, seg.ipcHeaderLen,
                             seg.payload, seg.payloadLen,
-                            connectionType, 0, true, seg.opcode);
+                            Net::ToUInt(connectionType),
+                            0, true, seg.opcode);
 
         emit("_strip.outerSkip", std::to_string(seg.outerSkip));
         emit("_strip.segmentLen", std::to_string(seg.segmentLen));
         emit("_strip.opcode", FormatHex(seg.opcode));
 
-        if (!PacketDecoderRegistry::Instance().TryDecode(connectionType, outgoing, seg.opcode,
-                                                         seg.payload, seg.payloadLen, emit)) {
+        if (!PacketDecoderRegistry::Instance().TryDecode(
+                Net::ToUInt(connectionType), outgoing, seg.opcode,
+                seg.payload, seg.payloadLen, emit))
+        {
             emit("decoder", "no registered decoder");
         }
         return true;

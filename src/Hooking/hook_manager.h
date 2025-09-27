@@ -191,7 +191,7 @@ namespace SapphireHook {
     // Forward declarations for hook functions
     bool FindAndHookIPC();
     bool FindAndHookDispatcher();
-    const char* GetOpcodeName(uint16_t opcode);
+    const char* GetOpcodeName(uint16_t opcode); // now resolved through centralized OpcodeNames
 
     // IPC Hook type definitions
     typedef void(__fastcall* HandleIPC_t)(void* thisPtr, uint16_t opcode, void* data);

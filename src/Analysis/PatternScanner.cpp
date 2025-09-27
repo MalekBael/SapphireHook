@@ -10,16 +10,12 @@
 #include <locale>
 #include <codecvt>
 
-// JSON serialization libraries (simple implementation)
 #include <iostream>
 
 namespace SapphireHook {
 
-    // Static member definitions
     std::shared_ptr<EnhancedPatternScanner> PatternScanner::s_globalScanner;
     std::mutex PatternScanner::s_globalScannerMutex;
-
-    // ===== ScanCacheEntry Implementation =====
 
     std::string ScanCacheEntry::ToJson() const
     {
@@ -46,12 +42,10 @@ namespace SapphireHook {
 
     std::optional<ScanCacheEntry> ScanCacheEntry::FromJson(const std::string& json)
     {
-        // Simple JSON parsing implementation
         ScanCacheEntry entry;
 
         try
         {
-            // Extract gameVersion
             std::regex versionRegex("\"gameVersion\":\\s*\"([^\"]*)\"");
             std::smatch match;
             if (std::regex_search(json, match, versionRegex))
@@ -59,28 +53,24 @@ namespace SapphireHook {
                 entry.gameVersion = match[1].str();
             }
 
-            // Extract moduleBase
             std::regex baseRegex("\"moduleBase\":\\s*\"0x([0-9a-fA-F]+)\"");
             if (std::regex_search(json, match, baseRegex))
             {
                 entry.moduleBase = std::stoull(match[1].str(), nullptr, 16);
             }
 
-            // Extract moduleSize
             std::regex sizeRegex("\"moduleSize\":\\s*(\\d+)");
             if (std::regex_search(json, match, sizeRegex))
             {
                 entry.moduleSize = std::stoull(match[1].str());
             }
 
-            // Extract moduleHash
             std::regex hashRegex("\"moduleHash\":\\s*\"([^\"]*)\"");
             if (std::regex_search(json, match, hashRegex))
             {
                 entry.moduleHash = match[1].str();
             }
 
-            // Extract cacheTime
             std::regex timeRegex("\"cacheTime\":\\s*(\\d+)");
             if (std::regex_search(json, match, timeRegex))
             {
@@ -88,7 +78,6 @@ namespace SapphireHook {
                 entry.cacheTime = std::chrono::system_clock::from_time_t(timeValue);
             }
 
-            // Extract resolved patterns
             std::regex patternRegex("\"([^\"]+)\":\\s*\"0x([0-9a-fA-F]+)\"");
             std::sregex_iterator iter(json.begin(), json.end(), patternRegex);
             std::sregex_iterator end;
@@ -112,8 +101,6 @@ namespace SapphireHook {
             return std::nullopt;
         }
     }
-
-    // ===== ScanMetrics Implementation =====
 
     void ScanMetrics::RecordScan(std::chrono::milliseconds duration, bool fromCache)
     {
@@ -154,8 +141,6 @@ namespace SapphireHook {
         if (totalScans == 0) return 0.0;
         return static_cast<double>(cacheHits) / totalScans * 100.0;
     }
-
-    // ===== EnhancedPatternScanner Implementation =====
 
     EnhancedPatternScanner::EnhancedPatternScanner(bool enableCaching, const std::filesystem::path& cacheFile)
         : m_moduleBase(0), m_moduleSize(0), m_textSection(0), m_textSize(0),
@@ -245,8 +230,7 @@ namespace SapphireHook {
                 return false;
             }
 
-            std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-            file.close();
+            const std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
             auto cache = ScanCacheEntry::FromJson(content);
             if (!cache)
@@ -261,12 +245,13 @@ namespace SapphireHook {
                 return false;
             }
 
-            std::lock_guard<std::mutex> lock(m_cacheMutex);
-            m_loadedCache = cache;
+            {
+                std::lock_guard<std::mutex> guard(m_cacheMutex);
+                m_loadedCache = cache;
+            }
 
             LogInfo("Loaded pattern cache with " + std::to_string(cache->resolvedPatterns.size()) + " patterns");
             return true;
-
         }
         catch (const std::exception& e)
         {
@@ -277,11 +262,17 @@ namespace SapphireHook {
 
     bool EnhancedPatternScanner::SaveCache() const
     {
-        if (!m_enableCaching || m_cacheFile.empty() || !m_loadedCache) return false;
+        if (!m_enableCaching || m_cacheFile.empty()) return false;
+
+        std::string json;
+        {
+            std::lock_guard<std::mutex> guard(m_cacheMutex);
+            if (!m_loadedCache) return false;
+            json = m_loadedCache->ToJson();
+        }
 
         try
         {
-            // Ensure directory exists
             std::filesystem::create_directories(m_cacheFile.parent_path());
 
             std::ofstream file(m_cacheFile);
@@ -291,13 +282,11 @@ namespace SapphireHook {
                 return false;
             }
 
-            std::lock_guard<std::mutex> lock(m_cacheMutex);
-            file << m_loadedCache->ToJson();
+            file << json;
             file.close();
 
             LogInfo("Saved pattern cache with " + std::to_string(m_loadedCache->resolvedPatterns.size()) + " patterns");
             return true;
-
         }
         catch (const std::exception& e)
         {
@@ -324,14 +313,12 @@ namespace SapphireHook {
         std::lock_guard<std::mutex> lock(m_cacheMutex);
         if (!m_loadedCache) return false;
 
-        // Check module base and size
         if (m_loadedCache->moduleBase != m_moduleBase || m_loadedCache->moduleSize != m_moduleSize)
         {
             LogInfo("Cache invalid: module base/size changed");
             return false;
         }
 
-        // Check game version
         std::string currentVersion = GetGameVersion();
         if (m_loadedCache->gameVersion != currentVersion)
         {
@@ -339,7 +326,6 @@ namespace SapphireHook {
             return false;
         }
 
-        // Check module hash
         std::string currentHash = CalculateModuleHash();
         if (m_loadedCache->moduleHash != currentHash)
         {
@@ -385,16 +371,13 @@ namespace SapphireHook {
 
     std::string EnhancedPatternScanner::GetGameVersion() const
     {
-        // Try to get version from module version info
-        return "1.0.0.0"; // Placeholder - would implement proper version detection
+        return "1.0.0.0";        
     }
 
     bool EnhancedPatternScanner::IsVersionCompatible(const std::string& version) const
     {
         return GetGameVersion() == version;
     }
-
-    // Private method implementations
 
     bool EnhancedPatternScanner::InitializeModule()
     {
@@ -415,12 +398,10 @@ namespace SapphireHook {
 
     bool EnhancedPatternScanner::ParsePESection()
     {
-        // Simplified PE parsing - would implement full PE header parsing
-        // For now, assume standard layout
-        m_textSection = m_moduleBase + 0x1000; // Standard .text offset
-        m_textSize = m_moduleSize / 2;         // Rough estimate
+        m_textSection = m_moduleBase + 0x1000;    
+        m_textSize = m_moduleSize / 2;           
         m_dataSection = m_textSection + m_textSize;
-        m_dataSize = m_moduleSize / 4;         // Rough estimate
+        m_dataSize = m_moduleSize / 4;           
 
         LogInfo("PE sections: .text=0x" + std::to_string(m_textSection) +
             " (size=" + std::to_string(m_textSize) +
@@ -436,7 +417,6 @@ namespace SapphireHook {
 
         auto start = std::chrono::high_resolution_clock::now();
 
-        // Check cache first
         if (useCache && m_enableCaching)
         {
             uintptr_t cachedResult = 0;
@@ -458,7 +438,6 @@ namespace SapphireHook {
             }
         }
 
-        // Perform actual scan
         auto legacyResult = PatternScanner::ScanPattern(base, size, pattern);
 
         auto end = std::chrono::high_resolution_clock::now();
@@ -476,7 +455,6 @@ namespace SapphireHook {
             result.fromCache = false;
             result.scanTime = duration;
 
-            // Cache the result
             if (useCache && m_enableCaching)
             {
                 CachePattern(GenerateCacheKey(pattern), result.address);
@@ -495,7 +473,6 @@ namespace SapphireHook {
 
     std::string EnhancedPatternScanner::CalculateModuleHash() const
     {
-        // Simplified hash calculation - would implement proper SHA1
         std::hash<std::string> hasher;
         std::string data = std::to_string(m_moduleBase) + std::to_string(m_moduleSize);
         return std::to_string(hasher(data));
@@ -533,14 +510,11 @@ namespace SapphireHook {
         m_loadedCache->resolvedPatterns[cacheKey] = result;
     }
 
-    // ===== PatternScanner Implementation =====
-
     std::optional<std::vector<int>> PatternScanner::PatternToBytes(std::string_view pattern)
     {
         std::vector<int> bytes;
         std::string patternStr(pattern);
 
-        // Split the pattern by spaces manually
         size_t start = 0;
         size_t end = 0;
 
@@ -549,7 +523,6 @@ namespace SapphireHook {
             end = patternStr.find(' ', start);
             std::string token = patternStr.substr(start, (end == std::string::npos) ? std::string::npos : end - start);
 
-            // Trim whitespace
             token.erase(0, token.find_first_not_of(" \t\r\n"));
             token.erase(token.find_last_not_of(" \t\r\n") + 1);
 
@@ -720,7 +693,6 @@ namespace SapphireHook {
 #elif SAPPHIRE_HAS_PRINT
         std::println("[PatternScanner] Error: {} in context: {}", ToString(error), context);
 #else
-        // Fallback to printf
         printf("[PatternScanner] Error: %s in context: %.*s\n",
             ToString(error), static_cast<int>(context.size()), context.data());
 #endif
@@ -750,8 +722,6 @@ namespace SapphireHook {
         return true;
     }
 
-    // ===== ASYNC PATTERN SCANNING IMPLEMENTATION =====
-
     std::future<AsyncScanResult> AsyncPatternScanner::ScanPatternAsync(
         uintptr_t start,
         size_t length,
@@ -775,7 +745,6 @@ namespace SapphireHook {
     {
         return std::async(std::launch::async, [=]()
             {
-                // Convert wide string to narrow string for GetModuleHandleWrapper
                 std::string moduleNameStr;
                 for (const wchar_t* p = moduleName; *p; ++p)
                 {
@@ -783,7 +752,6 @@ namespace SapphireHook {
                     else moduleNameStr += '?';
                 }
 
-                // Get module information
                 void* hModule = GetModuleHandleWrapper(moduleNameStr.c_str());
                 if (!hModule)
                 {
@@ -796,10 +764,8 @@ namespace SapphireHook {
                     return result;
                 }
 
-                // For simplicity, we'll use a reasonable default module size
-                // In a real implementation, you'd use GetModuleInformation to get the actual size
                 uintptr_t moduleBase = reinterpret_cast<uintptr_t>(hModule);
-                size_t moduleSize = 0x10000000; // 256MB default - should be determined properly
+                size_t moduleSize = 0x10000000;        
 
                 if (config.enable_logging)
                 {
@@ -832,7 +798,6 @@ namespace SapphireHook {
                 {
                     if (cancellation.IsCancelled())
                     {
-                        // Add cancelled results for remaining patterns
                         for (size_t j = i; j < patterns.size(); ++j)
                         {
                             AsyncScanResult cancelledResult;
@@ -844,13 +809,11 @@ namespace SapphireHook {
                         break;
                     }
 
-                    // Update progress if callback provided
                     if (progress)
                     {
                         progress(i, patterns.size(), patterns[i]);
                     }
 
-                    // Perform individual scan
                     AsyncScanResult result = PerformScan(start, length, patterns[i], cancellation, config, nullptr);
                     results.push_back(result);
 
@@ -878,7 +841,6 @@ namespace SapphireHook {
 
         auto startTime = std::chrono::steady_clock::now();
 
-        // Validate memory region
         if (!ValidateMemoryRegion(start, length))
         {
             result.error = ScanError::MemoryAccessViolation;
@@ -888,7 +850,6 @@ namespace SapphireHook {
             return result;
         }
 
-        // Log scan start
         if (config.enable_logging)
         {
             LogScanStart(pattern, start, length);
@@ -896,13 +857,10 @@ namespace SapphireHook {
 
         try
         {
-            // Create timeout cancellation if specified
             CancellationToken timeoutToken = CancellationToken::CreateWithTimeout(config.timeout);
 
-            // Use PatternScanner to perform the actual scan
             auto scanResult = PatternScanner::ScanPattern(start, length, std::string(pattern));
 
-            // Check for cancellation
             if (cancellation.IsCancelled() || timeoutToken.IsCancelled())
             {
                 result.was_cancelled = true;
@@ -911,7 +869,6 @@ namespace SapphireHook {
             else if (scanResult)
             {
                 result.result = *scanResult;
-                // Success is indicated by result.result.has_value()
             }
             else
             {
@@ -945,11 +902,9 @@ namespace SapphireHook {
             return false;
         }
 
-        // Use the wrapper function to avoid Windows header dependencies
         try
         {
-            // Simple validation using the wrapper - just check if we can query the memory
-            char dummyBuffer[64]; // Small buffer for VirtualQuery result
+            char dummyBuffer[64];      
             return VirtualQueryWrapper(reinterpret_cast<const void*>(start), dummyBuffer, sizeof(dummyBuffer));
         }
         catch (...)
@@ -1019,8 +974,6 @@ namespace SapphireHook {
             LogWarning(oss.str());
         }
     }
-
-    // ===== STRING XREF FUNCTIONALITY IMPLEMENTATION =====
 
     PESection PatternScanner::GetPESection(HMODULE module, const char* sectionName)
     {
@@ -1095,7 +1048,6 @@ namespace SapphireHook {
 
     bool PatternScanner::ParseRipRelativeInstruction(const std::byte* instruction, uintptr_t& target, size_t& instructionLength)
     {
-        // Parse LEA/MOV RIP-relative instructions: [REX] 8D/8B ModRM(00 101 r) disp32
         const bool hasRex = (instruction[0] >= std::byte{ 0x40 } && instruction[0] <= std::byte{ 0x4F });
         const size_t opOffset = hasRex ? 1 : 0;
         const size_t modrmOffset = opOffset + 1;
@@ -1108,7 +1060,7 @@ namespace SapphireHook {
         const unsigned modrm = static_cast<unsigned>(instruction[modrmOffset]);
         const unsigned mod = (modrm >> 6) & 0x3;
         const unsigned rm = modrm & 0x7;
-        if (!(mod == 0 && rm == 5)) return false; // Must be RIP-relative
+        if (!(mod == 0 && rm == 5)) return false;    
 
         const int32_t displacement = *reinterpret_cast<const int32_t*>(instruction + dispOffset);
         const auto* nextInstruction = instruction + minLength;
@@ -1127,7 +1079,7 @@ namespace SapphireHook {
         if (!textSection || textSection.size < 6) return references;
 
         const auto* begin = textSection.baseAddress;
-        const auto* end = textSection.baseAddress + textSection.size - 6; // minimum instruction size
+        const auto* end = textSection.baseAddress + textSection.size - 6;    
 
         for (const auto* p = begin; p <= end; ++p)
         {
@@ -1158,7 +1110,6 @@ namespace SapphireHook {
         auto* runtimeFunctions = reinterpret_cast<RUNTIME_FUNCTION*>(base + exceptionDir.VirtualAddress);
         auto count = exceptionDir.Size / sizeof(RUNTIME_FUNCTION);
 
-        // Binary search over sorted RUNTIME_FUNCTION entries
         size_t low = 0, high = count;
         while (low < high)
         {
@@ -1197,11 +1148,10 @@ namespace SapphireHook {
             size_t start = i;
             size_t length = 0;
 
-            // Collect printable ASCII characters
             while (i < rdataSection.size)
             {
                 unsigned char c = bytes[i];
-                if (c >= 0x20 && c <= 0x7E) // printable ASCII
+                if (c >= 0x20 && c <= 0x7E)   
                 {
                     ++i;
                     ++length;
@@ -1212,17 +1162,15 @@ namespace SapphireHook {
                 }
             }
 
-            // Require null terminator and minimum length
             if (length >= minLength && i < rdataSection.size && bytes[i] == 0x00)
             {
                 auto address = reinterpret_cast<uintptr_t>(rdataSection.baseAddress + start);
                 std::string text(reinterpret_cast<const char*>(bytes + start), length);
                 result.emplace_back(address, std::move(text));
-                ++i; // skip null terminator
+                ++i;    
             }
             else
             {
-                // Skip to next potential string
                 if (i < rdataSection.size && bytes[i] == 0x00) ++i;
                 else i = start + 1;
             }
@@ -1246,13 +1194,12 @@ namespace SapphireHook {
             size_t start = i;
             size_t charCount = 0;
 
-            // Collect ASCII-range UTF-16LE characters (xx 00)
             while (i + 1 < rdataSection.size)
             {
                 unsigned char low = bytes[i];
                 unsigned char high = bytes[i + 1];
 
-                if (high == 0x00 && low >= 0x20 && low <= 0x7E) // ASCII in UTF-16LE
+                if (high == 0x00 && low >= 0x20 && low <= 0x7E)    
                 {
                     i += 2;
                     ++charCount;
@@ -1263,13 +1210,11 @@ namespace SapphireHook {
                 }
             }
 
-            // Require wide null terminator (00 00) and minimum length
             if (charCount >= minLength && i + 1 < rdataSection.size &&
                 bytes[i] == 0x00 && bytes[i + 1] == 0x00)
             {
                 auto address = reinterpret_cast<uintptr_t>(rdataSection.baseAddress + start);
 
-                // Convert UTF-16LE to narrow string
                 std::string text;
                 text.reserve(charCount);
                 for (size_t j = 0; j < charCount; ++j)
@@ -1278,11 +1223,10 @@ namespace SapphireHook {
                 }
 
                 result.emplace_back(address, std::move(text));
-                i += 2; // skip wide null terminator
+                i += 2;     
             }
             else
             {
-                // Skip to next potential string
                 if (i + 1 < rdataSection.size && bytes[i] == 0x00 && bytes[i + 1] == 0x00) i += 2;
                 else ++i;
             }
@@ -1298,14 +1242,11 @@ namespace SapphireHook {
         auto rdataSection = GetPESection(module, ".rdata");
         if (!rdataSection) return result;
 
-        // Find ASCII occurrences
         auto asciiHits = FindAsciiInBuffer(rdataSection.baseAddress, rdataSection.size, searchString);
 
-        // Find UTF-16LE occurrences
         std::wstring wideNeedle(searchString.begin(), searchString.end());
         auto utf16Hits = FindUtf16InBuffer(rdataSection.baseAddress, rdataSection.size, wideNeedle);
 
-        // Collect all target addresses
         std::vector<uintptr_t> targets;
         targets.reserve(asciiHits.size() + utf16Hits.size());
 
@@ -1318,7 +1259,6 @@ namespace SapphireHook {
             targets.push_back(reinterpret_cast<uintptr_t>(ptr));
         }
 
-        // For each string address, find functions that reference it
         for (auto address : targets)
         {
             auto references = FindRipReferencesTo(module, address);
@@ -1333,7 +1273,6 @@ namespace SapphireHook {
             }
         }
 
-        // Remove duplicates and sort
         std::sort(result.begin(), result.end());
         result.erase(std::unique(result.begin(), result.end()), result.end());
 
@@ -1344,14 +1283,12 @@ namespace SapphireHook {
     {
         FunctionStringMap result;
 
-        // Enumerate all strings
         auto asciiStrings = EnumerateAsciiStrings(module, minStringLength);
         auto utf16Strings = EnumerateUtf16Strings(module, minStringLength);
 
         result.asciiStringCount = asciiStrings.size();
         result.utf16StringCount = utf16Strings.size();
 
-        // For deduplication per function
         std::unordered_map<uintptr_t, std::unordered_set<std::string>> functionStringsSeen;
 
         auto processString = [&](uintptr_t stringAddress, const std::string& text)
@@ -1363,14 +1300,12 @@ namespace SapphireHook {
                     auto functionStart = GetFunctionStartFromRva(module, rva);
                     if (!functionStart) continue;
 
-                    // Add to function->strings mapping (with dedup)
                     auto& seenStrings = functionStringsSeen[functionStart];
                     if (seenStrings.insert(text).second)
                     {
                         result.functionsToStrings[functionStart].push_back(text);
                     }
 
-                    // Add to string->functions mapping
                     auto& functionVector = result.stringsToFunctions[text];
                     if (functionVector.empty() || functionVector.back() != functionStart)
                     {
@@ -1379,7 +1314,6 @@ namespace SapphireHook {
                 }
             };
 
-        // Process all strings
         for (const auto& [addr, text] : asciiStrings)
         {
             processString(addr, text);
@@ -1389,7 +1323,6 @@ namespace SapphireHook {
             processString(addr, text);
         }
 
-        // Sort vectors for determinism
         for (auto& [func, strings] : result.functionsToStrings)
         {
             std::sort(strings.begin(), strings.end());
@@ -1410,7 +1343,6 @@ namespace SapphireHook {
         auto rdataSection = GetPESection(GetModuleHandleW(nullptr), ".rdata");
         if (!textSection || !rdataSection) return std::nullopt;
 
-        // Validate function address is in .text section
         if (functionAddress < reinterpret_cast<uintptr_t>(textSection.baseAddress) ||
             functionAddress >= reinterpret_cast<uintptr_t>(textSection.baseAddress) + textSection.size)
         {
@@ -1439,18 +1371,15 @@ namespace SapphireHook {
             }
             i += instructionLength;
 
-            // Check if target is in .rdata section
             if (target < reinterpret_cast<uintptr_t>(rdataSection.baseAddress) ||
                 target >= reinterpret_cast<uintptr_t>(rdataSection.baseAddress) + rdataSection.size)
             {
                 continue;
             }
 
-            // Try to read as ASCII string
             const char* str = reinterpret_cast<const char*>(target);
             std::string candidate;
 
-            // Safely read ASCII string (bounded by section end)
             size_t maxLen = std::min<size_t>(128,
                 reinterpret_cast<const char*>(rdataSection.baseAddress + rdataSection.size) - str);
 
@@ -1458,7 +1387,7 @@ namespace SapphireHook {
             {
                 char c = str[j];
                 if (c == '\0') break;
-                if (c < 0x20 || c > 0x7E) // not printable ASCII
+                if (c < 0x20 || c > 0x7E)    
                 {
                     candidate.clear();
                     break;
@@ -1466,7 +1395,6 @@ namespace SapphireHook {
                 candidate.push_back(c);
             }
 
-            // If ASCII failed, try UTF-16LE
             bool isUtf16 = false;
             if (candidate.empty())
             {
@@ -1478,8 +1406,8 @@ namespace SapphireHook {
                 for (size_t j = 0; j + 1 < maxLen; j += 2)
                 {
                     unsigned char low = ptr[j], high = ptr[j + 1];
-                    if (low == 0x00 && high == 0x00) break; // null terminator
-                    if (high != 0x00 || low < 0x20 || low > 0x7E) // not ASCII range
+                    if (low == 0x00 && high == 0x00) break;   
+                    if (high != 0x00 || low < 0x20 || low > 0x7E)    
                     {
                         utf8Candidate.clear();
                         break;
@@ -1498,14 +1426,12 @@ namespace SapphireHook {
                 }
             }
 
-            // Clean up the candidate string
             while (!candidate.empty() &&
                 (candidate.back() == '.' || candidate.back() == ':' || candidate.back() == ' '))
             {
                 candidate.pop_back();
             }
 
-            // Keep the longest/best candidate
             if (!candidate.empty() && (bestCandidate.empty() || candidate.size() > bestCandidate.size()))
             {
                 bestCandidate = candidate;
@@ -1526,15 +1452,11 @@ namespace SapphireHook {
         return result;
     }
 
-    // ===== ScanOperation Implementation =====
-
     void ScanOperation::Cancel()
     {
         LogWarning("Cancelling scan operation for pattern: " + m_pattern);
         m_cancellation.Cancel();
     }
-
-    // ===== ModuleInfo Implementation =====
 
     ModuleInfo::ModuleInfo(const wchar_t* moduleName)
         : m_baseAddress(0), m_size(0), m_scanned(std::chrono::system_clock::now())
@@ -1590,18 +1512,17 @@ namespace SapphireHook {
     {
         std::map<std::string, std::string> info;
 
-        // Convert wide string to narrow string without codecvt (deprecated in C++17)
         std::string nameStr;
         nameStr.reserve(m_name.size());
         for (wchar_t wc : m_name)
         {
             if (wc <= 127)
-            { // Only convert ASCII characters
+            {     
                 nameStr.push_back(static_cast<char>(wc));
             }
             else
             {
-                nameStr.push_back('?'); // Replace non-ASCII with '?'
+                nameStr.push_back('?');     
             }
         }
 
@@ -1619,7 +1540,6 @@ namespace SapphireHook {
 
     void ModuleInfo::CalculateModuleHash()
     {
-        // Simplified hash calculation
         std::hash<std::string> hasher;
         std::string data = std::to_string(m_baseAddress) + std::to_string(m_size);
         m_hash = std::to_string(hasher(data));
@@ -1627,11 +1547,8 @@ namespace SapphireHook {
 
     std::string ModuleInfo::GetModuleVersion() const
     {
-        // Would implement proper version info extraction
         return "1.0.0.0";
     }
-
-    // ===== ScannerFactory Implementation =====
 
     std::shared_ptr<EnhancedPatternScanner> ScannerFactory::CreateCachedScanner(
         const std::filesystem::path& cacheDir, const std::string& gameVersion)
@@ -1651,22 +1568,20 @@ namespace SapphireHook {
     std::shared_ptr<EnhancedPatternScanner> ScannerFactory::CreateModuleScanner(
         const std::wstring& moduleName, bool enableCaching)
     {
-        // Would implement module-specific scanner
         std::filesystem::path cacheFile;
         if (enableCaching)
         {
-            // Convert wide string to narrow string for file path
             std::string moduleNameStr;
             moduleNameStr.reserve(moduleName.size());
             for (wchar_t wc : moduleName)
             {
                 if (wc <= 127)
-                { // Only convert ASCII characters
+                {     
                     moduleNameStr.push_back(static_cast<char>(wc));
                 }
                 else
                 {
-                    moduleNameStr.push_back('_'); // Replace non-ASCII with '_'
+                    moduleNameStr.push_back('_');     
                 }
             }
             cacheFile = "cache/" + moduleNameStr + "_cache.json";
@@ -1675,9 +1590,8 @@ namespace SapphireHook {
         return std::make_shared<EnhancedPatternScanner>(enableCaching, cacheFile);
     }
 
-} // namespace SapphireHook
+}   
 
-// Legacy C-style function implementations
 extern "C" {
     bool PatternToBytes(const char* pattern, std::vector<int>& bytes)
     {
@@ -1698,9 +1612,7 @@ extern "C" {
 
     uintptr_t GetModuleBaseAddress(const wchar_t* moduleName, size_t& outSize)
     {
-        // Implementation would use Windows API to get module info
-        // Placeholder implementation
-        outSize = 0x10000000; // 256MB
-        return 0x140000000;   // Typical base address
+        outSize = 0x10000000;  
+        return 0x140000000;      
     }
 }

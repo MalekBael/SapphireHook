@@ -1,8 +1,14 @@
 #include "OpcodeNames.h"
 #include <unordered_map>
+#include <cstdint>
 
 namespace {
-    // Separate opcode tables by connection (zone vs chat) and direction
+
+inline bool IsChatConn(uint16_t connType) {
+    return connType == static_cast<uint16_t>(Net::ConnectionType::Chat);
+}
+
+// Separate opcode tables by connection (zone vs chat) and direction
 
     // Server (zone) opcodes
     static const std::unordered_map<uint16_t, const char*> kServerZoneOpcodes = {
@@ -537,48 +543,7 @@ namespace {
         { 0x00CC, "GmLogout" },
     };
 
-    inline bool IsChatConn(uint16_t connType) {
-        // Only 2 is a chat connection. 0xFFFF means unknown.
-        return (connType == 2);
-    }
-}
-
-const char* LookupOpcodeName(uint16_t opcode, bool outgoing, uint16_t connectionType) noexcept
-{
-    const bool chat = (connectionType != 0xFFFF) ? IsChatConn(connectionType) : false;
-
-    if (outgoing) {
-        if (chat) {
-            if (auto it = kClientChatOpcodes.find(opcode); it != kClientChatOpcodes.end()) return it->second;
-        } else {
-            if (auto it = kClientZoneOpcodes.find(opcode); it != kClientZoneOpcodes.end()) return it->second;
-            // If unknown connection type, try chat table too as last resort
-            if (connectionType == 0xFFFF) {
-                if (auto itc = kClientChatOpcodes.find(opcode); itc != kClientChatOpcodes.end()) return itc->second;
-            }
-        }
-    } else {
-        if (chat) {
-            if (auto it = kServerChatOpcodes.find(opcode); it != kServerChatOpcodes.end()) return it->second;
-        } else {
-            if (auto it = kServerZoneOpcodes.find(opcode); it != kServerZoneOpcodes.end()) return it->second;
-            if (connectionType == 0xFFFF) {
-                if (auto its = kServerChatOpcodes.find(opcode); its != kServerChatOpcodes.end()) return its->second;
-            }
-        }
-    }
-    return "?";
-}
-
-// Wrapper added to satisfy references expecting PacketDecoding::LookupOpcodeName
-namespace PacketDecoding {
-    const char* LookupOpcodeName(uint16_t opcode, bool outgoing, uint16_t connectionType) noexcept {
-        return ::LookupOpcodeName(opcode, outgoing, connectionType);
-    }
-}
-
-// Centralized ActorControl (Order/ActorControl) category names
-namespace {
+    // Centralized ActorControl (Order/ActorControl) category names
     static const std::unordered_map<uint16_t, const char*> kActorControlCategories = {
         { 0x00, "ToggleWeapon" },
         { 0x01, "AutoAttack" },
@@ -690,6 +655,35 @@ namespace {
         { 0x16D, "GlamourCastMsg" },
         { 0x16E, "GlamourRemoveMsg" },
     };
+}
+
+const char* LookupOpcodeName(uint16_t opcode,
+                             bool outgoing,
+                             Net::ConnectionType connectionType) noexcept
+{
+    const uint16_t ctRaw = static_cast<uint16_t>(connectionType);
+    const bool chat = (!Net::IsUnknown(connectionType)) ? IsChatConn(ctRaw) : false;
+
+    if (outgoing) {
+        if (chat) {
+            if (auto it = kClientChatOpcodes.find(opcode); it != kClientChatOpcodes.end()) return it->second;
+        } else {
+            if (auto it = kClientZoneOpcodes.find(opcode); it != kClientZoneOpcodes.end()) return it->second;
+            if (Net::IsUnknown(connectionType)) {
+                if (auto itc = kClientChatOpcodes.find(opcode); itc != kClientChatOpcodes.end()) return itc->second;
+            }
+        }
+    } else {
+        if (chat) {
+            if (auto it = kServerChatOpcodes.find(opcode); it != kServerChatOpcodes.end()) return it->second;
+        } else {
+            if (auto it = kServerZoneOpcodes.find(opcode); it != kServerZoneOpcodes.end()) return it->second;
+            if (Net::IsUnknown(connectionType)) {
+                if (auto its = kServerChatOpcodes.find(opcode); its != kServerChatOpcodes.end()) return its->second;
+            }
+        }
+    }
+    return "?";
 }
 
 const char* LookupActorControlCategoryName(uint16_t category) noexcept {

@@ -15,6 +15,7 @@
 #include <condition_variable>
 #include <queue>
 #include <unordered_map>
+#include <type_traits>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -47,26 +48,26 @@ namespace SapphireHook {
 
     // Log categories
     enum class LogCategory : uint32_t {
-        General     = 1 << 0,
-        Network     = 1 << 1,
-        Packets     = 1 << 2,
-        UI          = 1 << 3,
-        Hooks       = 1 << 4,
+        General = 1 << 0,
+        Network = 1 << 1,
+        Packets = 1 << 2,
+        UI = 1 << 3,
+        Hooks = 1 << 4,
         Performance = 1 << 5,
-        Debug       = 1 << 6,
-        All         = 0xFFFFFFFF
+        Debug = 1 << 6,
+        All = 0xFFFFFFFF
     };
 
     inline LogCategory operator|(LogCategory lhs, LogCategory rhs) {
         return static_cast<LogCategory>(
             static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs)
-        );
+            );
     }
 
     inline LogCategory operator&(LogCategory lhs, LogCategory rhs) {
         return static_cast<LogCategory>(
             static_cast<uint32_t>(lhs) & static_cast<uint32_t>(rhs)
-        );
+            );
     }
 
     inline LogCategory& operator|=(LogCategory& lhs, LogCategory rhs) {
@@ -74,8 +75,7 @@ namespace SapphireHook {
         return lhs;
     }
 
-    // Around line 85-90, replace the template Add method with this improved version:
-
+    // Context key-value aggregator
     class LogContext {
     private:
         std::unordered_map<std::string, std::string> m_data;
@@ -86,7 +86,6 @@ namespace SapphireHook {
             return *this;
         }
 
-        // Fixed template method with proper type handling
         template<typename T>
         LogContext& Add(const std::string& key, const T& value) {
             if constexpr (std::is_same_v<T, std::string>) {
@@ -99,7 +98,6 @@ namespace SapphireHook {
                 m_data[key] = std::to_string(value);
             }
             else {
-                // For other types, try to use operator<< if available
                 std::ostringstream oss;
                 oss << value;
                 m_data[key] = oss.str();
@@ -119,23 +117,20 @@ namespace SapphireHook {
         }
     };
 
-    // Forward declare LoggerConfig to avoid circular dependency
     struct LoggerConfig;
 
-    // Add high-performance binary logging
     class BinaryLogger {
     private:
         void* m_mappedMemory = nullptr;
         size_t m_mappedSize = 0;
-        std::atomic<size_t> m_writeOffset{0};
-        
+        std::atomic<size_t> m_writeOffset{ 0 };
+
     public:
         bool Initialize(const std::string& filename, size_t size = 100 * 1024 * 1024);
         void LogBinary(const void* data, size_t size, uint32_t type);
         void Flush();
     };
 
-    // Simplified thread-safe logger without template complexity
     class Logger {
     private:
         static std::unique_ptr<Logger> s_instance;
@@ -147,23 +142,21 @@ namespace SapphireHook {
         bool m_logToConsole = true;
         bool m_logToFile = true;
 
-        // Fallback logging like Dalamud does
         bool m_fallbackMode = false;
         std::filesystem::path m_fallbackPath;
 
-        // Async logging support
         std::thread m_asyncThread;
-        std::atomic<bool> m_asyncRunning{false};
+        std::atomic<bool> m_asyncRunning{ false };
         mutable std::mutex m_asyncMutex;
         std::condition_variable m_asyncCondition;
         std::queue<std::string> m_asyncQueue;
         static constexpr size_t MAX_ASYNC_QUEUE_SIZE = 10000;
 
         struct LoggerMetrics {
-            std::atomic<uint64_t> totalMessages{0};
-            std::atomic<uint64_t> droppedMessages{0};
-            std::atomic<uint64_t> avgWriteTimeNs{0};
-            std::atomic<uint64_t> maxWriteTimeNs{0};
+            std::atomic<uint64_t> totalMessages{ 0 };
+            std::atomic<uint64_t> droppedMessages{ 0 };
+            std::atomic<uint64_t> avgWriteTimeNs{ 0 };
+            std::atomic<uint64_t> maxWriteTimeNs{ 0 };
             std::chrono::steady_clock::time_point startTime;
 
             void Reset() {
@@ -184,13 +177,11 @@ namespace SapphireHook {
         LoggerMetrics m_metrics;
         uint32_t m_enabledCategories = static_cast<uint32_t>(LogCategory::All);
 
-        // Log rotation members
-        size_t m_maxFileSize = 50 * 1024 * 1024; // 50MB default
+        size_t m_maxFileSize = 50 * 1024 * 1024;
         size_t m_maxFiles = 10;
         size_t m_currentFileSize = 0;
 
 #ifdef _WIN32
-        // ETW support with proper types
         bool m_etwEnabled = false;
         REGHANDLE m_etwHandle = 0;
 #endif
@@ -199,55 +190,45 @@ namespace SapphireHook {
         Logger() = default;
         ~Logger();
 
-        // Initialize logging (inspired by Dalamud's InitLogging)
         static bool Initialize(const std::filesystem::path& logPath,
             bool enableConsole = true,
             LogLevel minLevel = LogLevel::Information);
 
-        // Get singleton instance
         static Logger& Instance();
 
-        // Simplified logging methods - just take strings
         void Debug(const std::string& message);
         void Information(const std::string& message);
         void Warning(const std::string& message);
         void Error(const std::string& message);
         void Fatal(const std::string& message);
 
-        // Formatted logging methods (printf-style)
         void DebugF(const char* format, ...);
         void InformationF(const char* format, ...);
         void WarningF(const char* format, ...);
         void ErrorF(const char* format, ...);
         void FatalF(const char* format, ...);
 
-        // Context-aware logging methods
         void InfoWithContext(const std::string& message, const LogContext& context);
         void ErrorWithContext(const std::string& message, const LogContext& context);
 
-        // Category-specific logging methods
         void InfoCategory(LogCategory category, const std::string& message);
         void ErrorCategory(LogCategory category, const std::string& message);
 
-        // Helper methods for common formatting needs
         static std::string HexFormat(uintptr_t value);
         static std::string FormatSocket(uint64_t socket);
         static std::string FormatBytes(size_t bytes);
 
-        // Exception logging
         void LogException(const std::exception& ex, std::string_view context = "");
 
-        // Settings
         void SetMinimumLevel(LogLevel level) { m_minimumLevel = level; }
         void SetConsoleOutput(bool enable) { m_logToConsole = enable; }
         void SetFileOutput(bool enable) { m_logToFile = enable; }
         void SetAsyncLogging(bool enable);
-        void FlushAsync(); // Force flush all pending messages
+        void FlushAsync();
 
         const LoggerMetrics& GetMetrics() const { return m_metrics; }
         void ResetMetrics() { m_metrics.Reset(); }
-        
-        // Category settings
+
         void SetEnabledCategories(uint32_t categories) { m_enabledCategories = categories; }
         void EnableCategory(LogCategory category) { m_enabledCategories |= static_cast<uint32_t>(category); }
         void DisableCategory(LogCategory category) { m_enabledCategories &= ~static_cast<uint32_t>(category); }
@@ -255,39 +236,43 @@ namespace SapphireHook {
             return (m_enabledCategories & static_cast<uint32_t>(category)) != 0;
         }
 
-        // Log rotation settings
         void SetLogRotation(size_t maxFileSize, size_t maxFiles) {
             m_maxFileSize = maxFileSize;
             m_maxFiles = maxFiles;
         }
 
-        // Binary logger access
-        BinaryLogger& GetBinaryLogger() { 
+        BinaryLogger& GetBinaryLogger() {
             static BinaryLogger instance;
-            return instance; 
+            return instance;
         }
 
-        // Config support
         void ApplyConfig(const LoggerConfig& config);
 
 #ifdef _WIN32
-        // ETW support
         bool EnableETW(const std::string& providerName);
         void LogETW(LogLevel level, const std::string& message);
 #endif
+
+        // Correlation timeout helper (instance method)
+        void DebugPacketCorrelationTimeout(uint16_t requestOpcode, uint64_t connectionId, uint64_t ageMs) {
+            if (LogLevel::Debug < m_minimumLevel) return;
+            std::ostringstream oss;
+            oss << "[CorrelationTimeout] conn=" << connectionId
+                << " opcode=0x" << std::uppercase << std::hex << std::setw(4)
+                << std::setfill('0') << requestOpcode
+                << std::dec << " age=" << ageMs << "ms without response";
+            WriteLog(LogLevel::Debug, oss.str());
+        }
 
     private:
         void WriteLog(LogLevel level, const std::string& message);
         std::string GetTimestamp() const;
         void InitializeFallbackLogging();
         std::string FormatString(const char* format, va_list args);
-
-        // Log rotation handling
         void RotateLogFile();
         void CompressOldLog(const std::filesystem::path& logPath);
     };
 
-    // Logger configuration structure
     struct LoggerConfig {
         std::filesystem::path logPath = "logs/sapphire.log";
         bool enableFileLogging = true;
@@ -297,11 +282,8 @@ namespace SapphireHook {
         size_t maxFileSize = 50 * 1024 * 1024;
         size_t maxFiles = 10;
         bool enableCompression = true;
-
-        // FIXED: Change from int to LogLevel
         LogLevel minLevel = LogLevel::Information;
         uint32_t enabledCategories = static_cast<uint32_t>(LogCategory::All);
-
         bool includeTimestamp = true;
         bool includeThreadId = true;
         bool includeFunction = false;
@@ -311,64 +293,63 @@ namespace SapphireHook {
             (void)configPath;
             return true;
         }
-
         bool SaveToFile(const std::filesystem::path& configPath) {
             (void)configPath;
             return true;
         }
     };
 
-    // Global convenience functions - inline shims
-    inline void LogDebug(const std::string& message)   { Logger::Instance().Debug(message); }
-    inline void LogInfo(const std::string& message)    { Logger::Instance().Information(message); }
+    // Shims
+    inline void LogDebug(const std::string& message) { Logger::Instance().Debug(message); }
+    inline void LogInfo(const std::string& message) { Logger::Instance().Information(message); }
     inline void LogWarning(const std::string& message) { Logger::Instance().Warning(message); }
-    inline void LogError(const std::string& message)   { Logger::Instance().Error(message); }
-    inline void LogFatal(const std::string& message)   { Logger::Instance().Fatal(message); }
+    inline void LogError(const std::string& message) { Logger::Instance().Error(message); }
+    inline void LogFatal(const std::string& message) { Logger::Instance().Fatal(message); }
 
-    // Context-aware logging convenience functions
     inline void LogInfoWithContext(const std::string& message, const LogContext& context) {
         Logger::Instance().InfoWithContext(message, context);
     }
-
     inline void LogErrorWithContext(const std::string& message, const LogContext& context) {
         Logger::Instance().ErrorWithContext(message, context);
     }
 
-    // Formatted logging convenience functions
-    inline void LogDebugF(const char* format, ...)   { 
-        va_list args; 
-        va_start(args, format); 
-        Logger::Instance().DebugF(format, args); 
-        va_end(args); 
+    inline void LogDebugF(const char* format, ...) {
+        va_list args;
+        va_start(args, format);
+        Logger::Instance().DebugF(format, args);
+        va_end(args);
     }
-    inline void LogInfoF(const char* format, ...)    { 
-        va_list args; 
-        va_start(args, format); 
-        Logger::Instance().InformationF(format, args); 
-        va_end(args); 
+    inline void LogInfoF(const char* format, ...) {
+        va_list args;
+        va_start(args, format);
+        Logger::Instance().InformationF(format, args);
+        va_end(args);
     }
-    inline void LogWarningF(const char* format, ...) { 
-        va_list args; 
-        va_start(args, format); 
-        Logger::Instance().WarningF(format, args); 
-        va_end(args); 
+    inline void LogWarningF(const char* format, ...) {
+        va_list args;
+        va_start(args, format);
+        Logger::Instance().WarningF(format, args);
+        va_end(args);
     }
-    inline void LogErrorF(const char* format, ...)   { 
-        va_list args; 
-        va_start(args, format); 
-        Logger::Instance().ErrorF(format, args); 
-        va_end(args); 
+    inline void LogErrorF(const char* format, ...) {
+        va_list args;
+        va_start(args, format);
+        Logger::Instance().ErrorF(format, args);
+        va_end(args);
     }
-    inline void LogFatalF(const char* format, ...)   { 
-        va_list args; 
-        va_start(args, format); 
-        Logger::Instance().FatalF(format, args); 
-        va_end(args); 
+    inline void LogFatalF(const char* format, ...) {
+        va_list args;
+        va_start(args, format);
+        Logger::Instance().FatalF(format, args);
+        va_end(args);
     }
 
-    // Optional: free shim if some sites call LogException at namespace scope
-    inline void LogException(const std::exception& ex, std::string_view ctx = {})
-    {
+    // Free-function style correlation timeout shim (calls instance method)
+    inline void DebugPacketCorrelationTimeout(uint16_t requestOpcode, uint64_t connectionId, uint64_t ageMs) {
+        Logger::Instance().DebugPacketCorrelationTimeout(requestOpcode, connectionId, ageMs);
+    }
+
+    inline void LogException(const std::exception& ex, std::string_view ctx = {}) {
         Logger::Instance().LogException(ex, ctx);
     }
 

@@ -85,7 +85,7 @@
     <ClCompile Include="src\Core\FunctionDatabase.cpp" />
     <ClCompile Include="src\Analysis\FunctionScanner.cpp" />
     <ClCompile Include="src\Hooking\hook_manager.cpp" />
-    <ClCompile Include="src\Monitor\NetworkMonitor.h" />
+    <ClInclude Include="src\Monitor\NetworkMonitor.h" />
     <ClCompile Include="src\Core\PacketInjector.cpp" />
     <ClCompile Include="src\Core\ResourceLoader.cpp" />
     <ClCompile Include="src\Core\SafeMemory.cpp" />

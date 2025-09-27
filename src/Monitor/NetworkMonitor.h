@@ -10,18 +10,17 @@
 #include "../vendor/imgui/imgui.h"
 
 // -------- Configuration --------
-inline constexpr size_t SLOT_COUNT = 16384;  // number of preallocated slots
+inline constexpr size_t SLOT_COUNT       = 16384;  // number of preallocated slots
 inline constexpr size_t SLOT_PAYLOAD_CAP = 8192;   // max bytes per slot
-inline constexpr size_t UI_BATCH_CAP = 16384;  // max packets drained to UI per frame
+inline constexpr size_t UI_BATCH_CAP     = 16384;  // max packets drained to UI per frame
 
 // -------- Data structures --------
 struct HookPacket {
     bool outgoing = false; // true = send, false = recv
     uint64_t connection_id = 0;
     std::chrono::system_clock::time_point ts{};
-
     uint32_t len = 0;
-    std::array<uint8_t, SLOT_PAYLOAD_CAP> buf{}; // value-initialize to silence analyzer and avoid UB reads
+    std::array<uint8_t, SLOT_PAYLOAD_CAP> buf{};
 };
 
 // Internal slot state machine
@@ -32,13 +31,14 @@ enum class SlotState : uint8_t {
     READING = 3
 };
 
-// -------- Logger singleton --------
-class SafeHookLogger {
+// Renamed: SafeHookLogger -> PacketCapture (reflects real role)
+// (Optional temporary alias for backward compatibility – remove after refactor completion)
+class PacketCapture {
 public:
-    static SafeHookLogger& Instance();
+    static PacketCapture& Instance();
 
-    SafeHookLogger(const SafeHookLogger&) = delete;
-    SafeHookLogger& operator=(const SafeHookLogger&) = delete;
+    PacketCapture(const PacketCapture&) = delete;
+    PacketCapture& operator=(const PacketCapture&) = delete;
 
     // Called from hook context (fast, non-blocking).
     // Copies up to SLOT_PAYLOAD_CAP bytes into a preallocated slot.
@@ -67,8 +67,8 @@ public:
     static bool TryGetSelectedPacket(HookPacket& out);
 
 private:
-    SafeHookLogger();
-    ~SafeHookLogger();
+    PacketCapture();
+    ~PacketCapture();
 
     static inline constexpr size_t SLOT_PROBES = 8;
 
@@ -80,3 +80,6 @@ private:
 
     std::atomic<size_t> producer_fetch_{ 0 };
 };
+
+// Backward compatibility (remove after codebase updated)
+using SafeHookLogger = PacketCapture;
