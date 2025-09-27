@@ -6,18 +6,17 @@
 #include <Psapi.h>
 #include <algorithm>
 #include <cstring>
-#include <cctype>                   // ADD THIS for isprint
+#include <cctype>
 #include <vector>
 #include <set>
 #include <string>
-#include <string_view>              // NEW: for std::string_view
-#include <unordered_set>            // NEW
-#include <unordered_map>            // NEW
-#include <mutex>                    // NEW
+#include <string_view>
+#include <unordered_set>
+#include <unordered_map>
+#include <mutex>
 
 namespace SapphireHook {
 
-    // Simple memory validator helper used by safety checks
     class MemoryValidator {
     public:
         static bool CanRead(const void* addr, size_t size)
@@ -46,7 +45,6 @@ namespace SapphireHook {
         }
     };
 
-    // Small utilities to reduce repetition
     static void UniqueSortPtrVec(std::vector<uintptr_t>& v)
     {
         std::sort(v.begin(), v.end());
@@ -65,7 +63,6 @@ namespace SapphireHook {
         return addrs;
     }
 
-    // Helpers: PE section parsing
     static bool GetMainModuleBaseAndSize(uintptr_t& base, size_t& size)
     {
         HMODULE hModule = GetModuleHandle(nullptr);
@@ -109,7 +106,6 @@ namespace SapphireHook {
         return false;
     }
 
-    // Faster memmem for ASCII patterns
     static const uint8_t* FindBytes(const uint8_t* hay, size_t hayLen, const char* needle, size_t neeLen)
     {
         if (neeLen == 0 || hayLen < neeLen) return nullptr;
@@ -124,30 +120,24 @@ namespace SapphireHook {
         return nullptr;
     }
 
-    // Check if an instruction at 'ip' is a RIP-relative LEA/MOV that references targetAddress.
     static bool IsRipRelativeRefTo(uintptr_t ip, uintptr_t textEnd, uintptr_t targetAddress)
     {
         if (ip + 7 > textEnd) return false;
 
         const uint8_t* p = reinterpret_cast<const uint8_t*>(ip);
         bool match =
-            // lea r??, [rip+disp32]
             (p[0] == 0x48 && p[1] == 0x8D && (p[2] & 0xC7) == 0x05) ||
-            // mov r??, [rip+disp32]
             (p[0] == 0x48 && p[1] == 0x8B && (p[2] & 0xC7) == 0x05) ||
-            // lea r?? (with REX.W & REX.R), common for 64-bit regs
             (p[0] == 0x4C && p[1] == 0x8D && (p[2] & 0xC7) == 0x05);
 
         if (!match) return false;
 
         int32_t disp = *reinterpret_cast<const int32_t*>(p + 3);
-        uintptr_t nextIp = ip + 7; // size of these encodings
+        uintptr_t nextIp = ip + 7;
         uintptr_t computed = static_cast<uintptr_t>(static_cast<int64_t>(nextIp) + disp);
-        // Allow tiny tolerance (+/- 8 bytes) for strings with nearby labels
         return computed >= targetAddress - 8 && computed <= targetAddress + 8;
     }
 
-    // Scan .text for RIP-relative references to the string address and return referencing addresses.
     static std::vector<uintptr_t> FindCodeRefsToString(uintptr_t textBase, size_t textSize, uintptr_t strAddr, size_t maxRefs = 32)
     {
         std::vector<uintptr_t> refs;
@@ -164,8 +154,6 @@ namespace SapphireHook {
         return refs;
     }
 
-    // ===== New helpers for name-driven anchors =====
-
     static std::string StripNonAlnum(const std::string& s)
     {
         std::string out;
@@ -178,17 +166,16 @@ namespace SapphireHook {
     }
 
     static std::string_view BasenameFromQualified(std::string_view name) {
-        size_t pos = name.find_last_of(':');
-        if (pos != std::string_view::npos) {
-            size_t start = name.rfind("::");
-            if (start != std::string_view::npos)
-                return name.substr(start + 2);
+        size_t pos = name.find_last_of("::");
+        if (pos != std::string_view::npos)
+        {
+            size_t dbl = name.rfind("::");
+            if (dbl != std::string_view::npos)
+                return name.substr(dbl + 2);
         }
-
         size_t dot = name.find_last_of('.');
         if (dot != std::string_view::npos)
             return name.substr(dot + 1);
-
         return name;
     }
 
@@ -229,15 +216,14 @@ namespace SapphireHook {
 
         for (const auto& full : names)
         {
-            const std::string base = std::string(BasenameFromQualified(full)); // e.g., GetClassJob
-            const std::string baseClean = StripNonAlnum(base);                 // strip punctuation
+            const std::string base = std::string(BasenameFromQualified(full));
+            const std::string baseClean = StripNonAlnum(base);
             if (baseClean.size() >= 4)
             {
                 anchors.insert(baseClean);
                 anchorToOriginalName.emplace(baseClean, full);
             }
 
-            // Camel-case tokens
             auto toks = SplitCamelCaseTokens(baseClean);
             for (auto& t : toks)
             {
@@ -248,7 +234,6 @@ namespace SapphireHook {
                 }
             }
 
-            // Also add lowered exact basename (many strings in data are lower/upper)
             std::string lower = baseClean;
             std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
             if (lower.size() >= 4)
@@ -258,7 +243,6 @@ namespace SapphireHook {
             }
         }
 
-        // Emit as vector
         std::vector<std::string> out;
         out.reserve(anchors.size());
         for (const auto& a : anchors) out.push_back(a);
@@ -316,18 +300,15 @@ namespace SapphireHook {
 
     std::string FunctionScanner::ExtractFunctionNameFromMemory(uintptr_t address) const
     {
-        // Basic heuristic: try DB first (if wired from outside), else fall back to address-as-name.
         if (m_impl->functionDatabase && m_impl->functionDatabase->HasFunction(address))
             return m_impl->functionDatabase->GetFunctionName(address);
         return "sub_" + std::to_string(address);
     }
 
-    std::string FunctionScanner::ScanForNearbyStrings(uintptr_t address, size_t /*searchRadius*/) const
+    std::string FunctionScanner::ScanForNearbyStrings(uintptr_t address, size_t) const
     {
-        // Keep as a lightweight helper – full name extraction is handled by ScanMemoryForFunctionStrings.
         if (!address || !IsSafeMemoryAddress(reinterpret_cast<const void*>(address), 1))
             return "";
-        // Not implemented deeply here to avoid unsafe probing; the Enhanced search uses code-xref-based discovery.
         return "";
     }
 
@@ -341,24 +322,24 @@ namespace SapphireHook {
     bool FunctionScanner::IsLikelyFunctionStart(const uint8_t* code, size_t maxSize) const
     {
         if (!IsSafeMemoryAddress(code, (std::min)(maxSize, size_t(16)))) return false;
-        if (code[0] == 0x48 && code[1] == 0x89) return true; // mov ...
-        if (code[0] == 0x48 && code[1] == 0x83) return true; // sub rsp, xx
-        if (code[0] == 0x40 && code[1] >= 0x53 && code[1] <= 0x57) return true; // push r8-r15
-        if (code[0] == 0x48 && code[1] == 0x8B) return true; // mov ...
-        if (code[0] == 0x55) return true; // push rbp
-        if (code[0] == 0x53) return true; // push rbx
+        if (code[0] == 0x48 && code[1] == 0x89) return true;
+        if (code[0] == 0x48 && code[1] == 0x83) return true;
+        if (code[0] == 0x40 && code[1] >= 0x53 && code[1] <= 0x57) return true;
+        if (code[0] == 0x48 && code[1] == 0x8B) return true;
+        if (code[0] == 0x55) return true;
+        if (code[0] == 0x53) return true;
         return false;
     }
 
     uintptr_t FunctionScanner::FindFunctionStart(uintptr_t address) const
     {
-        // Conservative backward scan
         uintptr_t start = address;
         uintptr_t lower = (address > 0x1000) ? (address - 0x1000) : 0;
         for (uintptr_t scan = address; scan >= lower; --scan)
         {
             if (IsLikelyFunctionStart(scan))
                 start = scan;
+            if (scan == 0) break;
         }
         return start;
     }
@@ -385,11 +366,9 @@ namespace SapphireHook {
 
         if (!textBase || !textSize)
         {
-            // Fallback to whole module as text
             textBase = base; textSize = size;
         }
 
-        // Consolidate searchable data regions
         struct Region { uintptr_t base; size_t size; };
         std::vector<Region> dataRegions;
         if (rdataBase && rdataSize) dataRegions.push_back({ rdataBase, rdataSize });
@@ -397,11 +376,16 @@ namespace SapphireHook {
 
         if (dataRegions.empty())
         {
-            // Heuristic: treat everything except .text as data – but to be safe, just use .rdata fallback to module
             dataRegions.push_back({ base, size });
         }
 
-        // Search each target string in data and find code xrefs in text
+        auto isReadableProt = [](DWORD prot) {
+            const DWORD readable =
+                PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
+                PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+            return (prot & readable) != 0;
+            };
+
         size_t processed = 0;
         size_t total = targetStrings.size();
 
@@ -409,29 +393,43 @@ namespace SapphireHook {
         {
             if (!s.empty())
             {
-                for (const auto& region : dataRegions)
-                {
-                    if (!IsCommittedMemory(region.base, region.size)) continue;
+                for (const auto& region : dataRegions) {
+                    uintptr_t regionBegin = region.base;
+                    uintptr_t regionEnd = region.base + region.size;
 
-                    const uint8_t* start = reinterpret_cast<const uint8_t*>(region.base);
-                    const uint8_t* end = start + region.size;
-                    const uint8_t* cur = start;
+                    while (regionBegin < regionEnd) {
+                        MEMORY_BASIC_INFORMATION mbi{};
+                        if (VirtualQuery(reinterpret_cast<LPCVOID>(regionBegin), &mbi, sizeof(mbi)) == 0)
+                            break;
 
-                    while (cur < end)
-                    {
-                        const uint8_t* found = FindBytes(cur, static_cast<size_t>(end - cur), s.c_str(), s.size());
-                        if (!found) break;
+                        uintptr_t segStart = regionBegin;
+                        uintptr_t segEnd = (std::min)(regionEnd, regionBegin + static_cast<uintptr_t>(mbi.RegionSize));
 
-                        uintptr_t strAddr = reinterpret_cast<uintptr_t>(found);
-                        // Find code references in .text to this string
-                        auto refs = FindCodeRefsToString(textBase, textSize, strAddr);
-                        for (auto refIp : refs)
-                        {
-                            uintptr_t func = FindFunctionStart(refIp);
-                            results.emplace_back(strAddr, func, s, "RIP-REL", 100);
+                        if (mbi.State == MEM_COMMIT && isReadableProt(mbi.Protect)) {
+                            const uint8_t* segPtr = reinterpret_cast<const uint8_t*>(segStart);
+                            size_t segLen = static_cast<size_t>(segEnd - segStart);
+
+                            if (segLen > 0 && segLen <= size) {
+                                const uint8_t* cur = segPtr;
+                                const uint8_t* end = segPtr + segLen;
+                                while (cur < end) {
+                                    size_t remain = static_cast<size_t>(end - cur);
+                                    if (remain < s.size()) break;
+                                    const uint8_t* found = FindBytes(cur, remain, s.c_str(), s.size());
+                                    if (!found) break;
+
+                                    uintptr_t strAddr = reinterpret_cast<uintptr_t>(found);
+                                    auto refs = FindCodeRefsToString(textBase, textSize, strAddr);
+                                    for (auto refIp : refs) {
+                                        uintptr_t func = FindFunctionStart(refIp);
+                                        results.emplace_back(strAddr, func, s, "RIP-REL", 100);
+                                    }
+                                    cur = found + 1;
+                                }
+                            }
                         }
 
-                        cur = found + 1; // continue scanning after this position
+                        regionBegin = segEnd;
                     }
                 }
             }
@@ -441,7 +439,6 @@ namespace SapphireHook {
                 progress(processed, total, "StringScan");
         }
 
-        // Deduplicate by (stringAddress, nearbyFunctionAddress)
         std::sort(results.begin(), results.end(), [](const auto& a, const auto& b)
             {
                 if (a.nearbyFunctionAddress != b.nearbyFunctionAddress)
@@ -467,7 +464,6 @@ namespace SapphireHook {
         const ScanConfig& config,
         ProgressCallback progress) const
     {
-        // Simple fallback: scan .text for likely prologues
         uintptr_t base = 0; size_t size = 0;
         if (!GetMainModuleBaseAndSize(base, size)) return {};
 
@@ -481,8 +477,7 @@ namespace SapphireHook {
         results.reserve(10000);
 
         size_t total = textSize;
-        size_t step = 1;
-        for (size_t off = 0; off + 16 < textSize; off += step)
+        for (size_t off = 0; off + 16 < textSize; ++off)
         {
             uintptr_t addr = textBase + off;
             if (IsLikelyFunctionStart(addr))
@@ -503,7 +498,6 @@ namespace SapphireHook {
         const ScanConfig& config,
         ProgressCallback progress) const
     {
-        // Alias to interesting for now
         return ScanForAllInterestingFunctions(config, progress);
     }
 
@@ -519,7 +513,7 @@ namespace SapphireHook {
 
     std::future<std::vector<uintptr_t>> FunctionScanner::StartAsyncScanWithStrings(
         const std::vector<std::string>& targetStrings,
-        const ScanConfig& /*config*/,
+        const ScanConfig&,
         ProgressCallback progress)
     {
         return std::async(std::launch::async, [this, targetStrings, progress]()
@@ -559,7 +553,6 @@ namespace SapphireHook {
         ScanSafeRegion(textBase, textSize, functions);
     }
 
-    // IMPLEMENTED: Parse PE exports of main module
     void FunctionScanner::ScanExportedFunctions(std::vector<uintptr_t>& functions) const
     {
         uintptr_t base = 0; size_t size = 0;
@@ -572,23 +565,18 @@ namespace SapphireHook {
         if (dir.VirtualAddress == 0 || dir.Size == 0) return;
 
         auto exp = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(base + dir.VirtualAddress);
-        // Basic range sanity (avoid probing invalid memory)
         if (!IsSafeMemoryAddress(exp, sizeof(IMAGE_EXPORT_DIRECTORY))) return;
 
         DWORD* funcRVAs = reinterpret_cast<DWORD*>(base + exp->AddressOfFunctions);
-
         if (!funcRVAs || !IsSafeMemoryAddress(funcRVAs, exp->NumberOfFunctions * sizeof(DWORD)))
             return;
 
         std::set<uintptr_t> uniq;
-        // Prefer walking by functions (includes non-named exports)
         for (DWORD i = 0; i < exp->NumberOfFunctions; ++i)
         {
             DWORD rva = funcRVAs[i];
             if (rva == 0) continue;
-
             uintptr_t addr = base + rva;
-            // Only consider addresses inside module and executable
             if (addr >= base && addr < base + size && IsExecutableMemory(addr))
             {
                 uniq.insert(addr);
@@ -598,7 +586,6 @@ namespace SapphireHook {
         functions.insert(functions.end(), uniq.begin(), uniq.end());
     }
 
-    // IMPLEMENTED: Scan direct call targets (E8 rel32) in .text and map to likely function starts
     void FunctionScanner::ScanCallTargets(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions) const
     {
         uintptr_t textBase = 0; size_t textSize = 0;
@@ -613,32 +600,29 @@ namespace SapphireHook {
         for (uintptr_t ip = textBase; ip + 5 <= textEnd; ++ip)
         {
             const uint8_t* p = reinterpret_cast<const uint8_t*>(ip);
-            // CALL rel32
             if (p[0] == 0xE8)
             {
                 int32_t rel = *reinterpret_cast<const int32_t*>(p + 1);
                 uintptr_t next = ip + 5;
                 uintptr_t target = static_cast<uintptr_t>(static_cast<int64_t>(next) + rel);
 
-                // Only consider targets inside the main module range
                 if (target >= moduleBase && target < moduleBase + moduleSize)
                 {
                     uintptr_t fn = FindFunctionStart(target);
                     if (fn && IsExecutableMemory(fn))
                         uniq.insert(fn);
                 }
-                ip += 4; // skip over imm32 since loop also increments by 1
+                ip += 4;
             }
         }
 
         functions.insert(functions.end(), uniq.begin(), uniq.end());
     }
 
-    // Small helper to consolidate category scans
     static void ScanCategory(const FunctionScanner& self,
-                             const char* prefix,
-                             const std::vector<std::string>& anchors,
-                             std::map<uintptr_t, std::string>& namedFunctions)
+        const char* prefix,
+        const std::vector<std::string>& anchors,
+        std::map<uintptr_t, std::string>& namedFunctions)
     {
         auto hits = self.ScanMemoryForFunctionStrings(anchors, nullptr);
         for (const auto& h : hits)
@@ -650,8 +634,7 @@ namespace SapphireHook {
         }
     }
 
-    // IMPLEMENTED: Category-oriented scans using string xrefs
-    void FunctionScanner::ScanForUIFunctions(const uint8_t* /*memory*/, size_t /*size*/, std::map<uintptr_t, std::string>& namedFunctions) const
+    void FunctionScanner::ScanForUIFunctions(const uint8_t*, size_t, std::map<uintptr_t, std::string>& namedFunctions) const
     {
         static const std::vector<std::string> uiAnchors = {
             "AtkUnit","AtkResNode","Agent","Addon","Tooltip","Rapture","UI","Window","Widget"
@@ -659,7 +642,7 @@ namespace SapphireHook {
         ScanCategory(*this, "UI", uiAnchors, namedFunctions);
     }
 
-    void FunctionScanner::ScanForNetworkFunctions(const uint8_t* /*memory*/, size_t /*size*/, std::map<uintptr_t, std::string>& namedFunctions) const
+    void FunctionScanner::ScanForNetworkFunctions(const uint8_t*, size_t, std::map<uintptr_t, std::string>& namedFunctions) const
     {
         static const std::vector<std::string> netAnchors = {
             "socket","SOCKET","WSA","recv","send","Connect","HTTP","SSL","Network","Packet"
@@ -667,7 +650,7 @@ namespace SapphireHook {
         ScanCategory(*this, "Net", netAnchors, namedFunctions);
     }
 
-    void FunctionScanner::ScanForGameplayFunctions(const uint8_t* /*memory*/, size_t /*size*/, std::map<uintptr_t, std::string>& namedFunctions) const
+    void FunctionScanner::ScanForGameplayFunctions(const uint8_t*, size_t, std::map<uintptr_t, std::string>& namedFunctions) const
     {
         static const std::vector<std::string> gameAnchors = {
             "Action","Inventory","Quest","Chara","Battle","Actor","Ability","Skill","Status","Event"
@@ -694,8 +677,6 @@ namespace SapphireHook {
     {
         return m_impl->detectedFunctionNames;
     }
-
-    // ===== New: name-driven discovery =====
 
     std::vector<NameScanResult> FunctionScanner::AutoScanFunctionsByNames(
         const std::vector<std::string>& functionNames,
@@ -727,21 +708,19 @@ namespace SapphireHook {
             r.anchor = h.foundString;
             r.confidence = 90;
 
-            // Sanity: ensure we think this looks like a function
             if (r.functionAddress && IsExecutableMemory(r.functionAddress) && IsLikelyFunctionStart(r.functionAddress))
             {
                 results.push_back(r);
             }
         }
 
-        // Dedup by address+matchedName
         std::sort(results.begin(), results.end(), [](const auto& a, const auto& b) {
             if (a.functionAddress != b.functionAddress) return a.functionAddress < b.functionAddress;
             return a.matchedName < b.matchedName;
-        });
+            });
         results.erase(std::unique(results.begin(), results.end(), [](const auto& a, const auto& b) {
             return a.functionAddress == b.functionAddress && a.matchedName == b.matchedName;
-        }), results.end());
+            }), results.end());
 
         LogInfo("AutoScanFunctionsByNames: found " + std::to_string(results.size()) + " candidate functions");
         return results;
@@ -756,7 +735,6 @@ namespace SapphireHook {
             return {};
         }
 
-        // Gather names from DB
         std::vector<std::string> names;
         names.reserve(2048);
         auto all = m_impl->functionDatabase->GetAllFunctions();

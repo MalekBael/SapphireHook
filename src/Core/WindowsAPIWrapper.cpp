@@ -1,11 +1,9 @@
-// This file will compile with Windows headers, but won't be parsed by IntelliSense for main files
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-// Prevent winsock.h from being pulled by Windows.h in this TU
 #ifndef _WINSOCKAPI_
 #define _WINSOCKAPI_
 #endif
@@ -22,7 +20,6 @@
 #endif
 
 extern "C" {
-	// Module functions
 	void* GetGameModuleHandle()
 	{
 		return GetModuleHandleW(NULL);
@@ -52,8 +49,6 @@ extern "C" {
 	{
 		HMODULE hModule = nullptr;
 		
-		// Use _ReturnAddress() to get an address within the current module
-		// Then use GetModuleHandleExA to get the module base from that address
 		if (GetModuleHandleExA(
 			GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
 			reinterpret_cast<LPCSTR>(_ReturnAddress()),
@@ -62,17 +57,14 @@ extern "C" {
 			return hModule;
 		}
 		
-		// Fallback: try to get the main module handle
 		return GetModuleHandleW(NULL);
 	}
 
-	// Stack walking
 	unsigned short CaptureStack(unsigned long framesToSkip, unsigned long framesToCapture, void** backTrace)
 	{
 		return CaptureStackBackTrace(framesToSkip, framesToCapture, backTrace, NULL);
 	}
 
-	// Clipboard functions
 	bool OpenClipboardWrapper(void* hwnd)
 	{
 		return OpenClipboard((HWND)hwnd);
@@ -108,7 +100,6 @@ extern "C" {
 		return CloseClipboard();
 	}
 
-	// MinHook functions
 	int MH_InitializeWrapper()
 	{
 		return (int)MH_Initialize();
@@ -134,7 +125,6 @@ extern "C" {
 		return (int)MH_RemoveHook(pTarget);
 	}
 
-	// Memory query functions
 	bool VirtualQueryWrapper(const void* address, void* buffer, size_t length)
 	{
 		SIZE_T result = VirtualQuery(address, (PMEMORY_BASIC_INFORMATION)buffer, length);
@@ -146,7 +136,6 @@ extern "C" {
 		return IsBadReadPtr(address, size) != 0;
 	}
 
-	// Windows resource API wrappers
 	void* FindResourceAWrapper(void* hModule, const char* lpName, const char* lpType)
 	{
 		return FindResourceA(static_cast<HMODULE>(hModule), lpName, lpType);
@@ -177,20 +166,15 @@ extern "C" {
 		return MAKEINTRESOURCEA(id);
 	}
 
-	// Add the new GetModuleHandleExA wrapper
 	bool GetModuleHandleExAWrapper(unsigned long dwFlags, const char* lpModuleName, void** phModule)
 	{
 		return GetModuleHandleExA(dwFlags, lpModuleName, reinterpret_cast<HMODULE*>(phModule)) != 0;
 	}
 
-	// Add _ReturnAddress implementation if needed (though it's an intrinsic)
 	#ifdef _MSC_VER
-	// _ReturnAddress is already provided by the compiler as an intrinsic
-	// No implementation needed
 	#else
 	void* _ReturnAddress()
 	{
-		// For non-MSVC compilers, provide a fallback
 		return __builtin_return_address(0);
 	}
 	#endif

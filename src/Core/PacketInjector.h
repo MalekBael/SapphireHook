@@ -4,6 +4,8 @@
 
 namespace SapphireHook {
 
+    enum class PacketLogMode : int { Off = 0, Summary = 1, Verbose = 2 };
+
     class PacketInjector {
     public:
         // Install WSASend hook. Safe to call multiple times.
@@ -44,5 +46,14 @@ namespace SapphireHook {
 
     // NEW: expose learned local actor id for UI/modules
     uint32_t GetLearnedLocalActorId();
+
+    // Runtime control of packet logging verbosity
+    void SetPacketLogMode(PacketLogMode mode);
+    PacketLogMode GetPacketLogMode();
+    bool PacketLogAtLeast(PacketLogMode level);
+
+    // Persistence (INI: sapphirehook_settings.ini)
+    bool LoadPacketLogModeFromConfig();  // returns true if key found (creates file if missing)
+    bool SavePacketLogModeToConfig();    // returns true on successful write
 
 } // namespace SapphireHook

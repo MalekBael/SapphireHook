@@ -2,7 +2,7 @@
 
 // WindowsAPIWrapper.h - Header for Windows API wrapper functions
 // This provides C-style function declarations for Windows APIs without including Windows headers
-// in the main codebase, avoiding IntelliSense parsing issues.
+// in the main codebase, avoiding IntelliSense parsing issues, because Intellisense hates me......
 
 #include <cstddef>
 #include <cstdint>
@@ -332,4 +332,4 @@ extern "C" void* _ReturnAddress();
 #define PAGE_READWRITE 0x04
 #endif
 
-#endif // WINDOWS_API_WRAPPER_H
+#endif 

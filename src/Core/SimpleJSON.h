@@ -6,7 +6,6 @@
 
 namespace SapphireHook {
 
-    // Simple JSON parser for our specific use case
     class SimpleJSON {
     public:
         using Value = std::variant<std::string, std::map<std::string, std::string>>;
@@ -49,4 +48,4 @@ namespace SapphireHook {
         static std::string Escape(const std::string& str);
     };
 
-} // namespace SapphireHook
+}   

@@ -9,6 +9,7 @@
 #include <thread>
 #include <memory>
 #include <future>
+#include <unordered_map>
 
 // Include the full definitions for classes used as member variables
 #include "FunctionDatabase.h"
@@ -144,16 +145,17 @@ public:
     void RenderVirtualFunctionTable();
     void RenderEnhancedDatabaseSearch();
     void RenderManualHookSection();
-
-    // Specialized scanning methods (delegated to FunctionScanner)
-    void ScanAllFunctions();
-    void ScanExportedFunctions(std::vector<uintptr_t>& functions);
-    void ScanCallTargets(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions);
-    void ScanSafeRegion(uintptr_t baseAddr, size_t size, std::vector<uintptr_t>& functions);
-    void ScanForFunctionPrologues(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions);
-    void ScanForUIFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
-    void ScanForNetworkFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
-    void ScanForGameplayFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
+    void RenderMemoryScanTab();                 // NEW: memory scan UI
+ 
+     // Specialized scanning methods (delegated to FunctionScanner)
+     void ScanAllFunctions();
+     void ScanExportedFunctions(std::vector<uintptr_t>& functions);
+     void ScanCallTargets(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions);
+     void ScanSafeRegion(uintptr_t baseAddr, size_t size, std::vector<uintptr_t>& functions);
+     void ScanForFunctionPrologues(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions);
+     void ScanForUIFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
+     void ScanForNetworkFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
+     void ScanForGameplayFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
 
     // Database integration 
     void UpdateTemporaryFunctionDatabase(const std::map<uintptr_t, std::string>& detectedFunctions);
@@ -166,11 +168,17 @@ public:
     void HookRandomFunctions(int count);
     void UnhookAllFunctions();
     bool IsValidMemoryAddress(uintptr_t address, size_t size);
+ 
+     // Static hook callback
+     static __declspec(noinline) void __stdcall FunctionHookCallback(uintptr_t returnAddress, uintptr_t functionAddress);
+ 
+    // Orchestrate enhanced memory scan (async)
+    void StartMemoryScan(const std::vector<std::string>& targetStrings,
+                         bool scanPrologues,
+                         bool scanStrings);
+    void UpdateMemoryScanAsync();
 
-    // Static hook callback
-    static __declspec(noinline) void __stdcall FunctionHookCallback(uintptr_t returnAddress, uintptr_t functionAddress);
-
-private:
+ private:
     // Database instances (member variables)
     SapphireHook::FunctionDatabase m_functionDB;
     SapphireHook::SignatureDatabase m_signatureDB;
@@ -201,4 +209,23 @@ private:
     // Configuration
     bool m_useFunctionDatabase;
     bool m_enableRealHooking;
+
+    // ================= Memory scan state (NEW) =================
+    struct MemoryScanState {
+        bool running = false;
+        bool scanPrologues = true;
+        bool scanStrings = true;
+        bool cancelled = false;
+        std::future<std::vector<uintptr_t>> prologueFuture;
+        std::future<std::vector<SapphireHook::StringScanResult>> stringFuture;
+        std::vector<SapphireHook::StringScanResult> stringHits;
+        std::vector<uintptr_t> prologueFunctions;
+        std::chrono::steady_clock::time_point startTime{};
+        std::string status;
+    } m_memScan;
+
+    // Function address -> collected tags (string anchors, sources)
+    std::unordered_map<uintptr_t, std::vector<std::string>> m_memScanTags;
+    std::vector<uintptr_t> m_memScanMerged;   // merged & sorted
+    bool m_memScanDirty = false;
 };

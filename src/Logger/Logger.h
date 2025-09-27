@@ -24,7 +24,6 @@
 
 namespace SapphireHook {
 
-    // Log levels
     enum class LogLevel : int {
         Debug = 0,
         Information = 1,
@@ -46,7 +45,6 @@ namespace SapphireHook {
         }
     }
 
-    // Log categories
     enum class LogCategory : uint32_t {
         General = 1 << 0,
         Network = 1 << 1,
@@ -63,56 +61,32 @@ namespace SapphireHook {
             static_cast<uint32_t>(lhs) | static_cast<uint32_t>(rhs)
             );
     }
-
     inline LogCategory operator&(LogCategory lhs, LogCategory rhs) {
         return static_cast<LogCategory>(
             static_cast<uint32_t>(lhs) & static_cast<uint32_t>(rhs)
             );
     }
-
     inline LogCategory& operator|=(LogCategory& lhs, LogCategory rhs) {
-        lhs = lhs | rhs;
-        return lhs;
+        lhs = lhs | rhs; return lhs;
     }
 
-    // Context key-value aggregator
     class LogContext {
-    private:
         std::unordered_map<std::string, std::string> m_data;
-
     public:
         LogContext& Add(const std::string& key, const std::string& value) {
-            m_data[key] = value;
-            return *this;
+            m_data[key] = value; return *this;
         }
-
         template<typename T>
         LogContext& Add(const std::string& key, const T& value) {
-            if constexpr (std::is_same_v<T, std::string>) {
-                m_data[key] = value;
-            }
-            else if constexpr (std::is_same_v<T, const char*>) {
-                m_data[key] = std::string(value);
-            }
-            else if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) {
-                m_data[key] = std::to_string(value);
-            }
-            else {
-                std::ostringstream oss;
-                oss << value;
-                m_data[key] = oss.str();
-            }
+            if constexpr (std::is_same_v<T, std::string>) m_data[key] = value;
+            else if constexpr (std::is_same_v<T, const char*>) m_data[key] = std::string(value);
+            else if constexpr (std::is_arithmetic_v<T> || std::is_enum_v<T>) m_data[key] = std::to_string(value);
+            else { std::ostringstream oss; oss << value; m_data[key] = oss.str(); }
             return *this;
         }
-
         std::string ToString() const {
-            std::ostringstream oss;
-            bool first = true;
-            for (const auto& [key, value] : m_data) {
-                if (!first) oss << ", ";
-                oss << key << "=" << value;
-                first = false;
-            }
+            std::ostringstream oss; bool first = true;
+            for (const auto& [k, v] : m_data) { if (!first) oss << ", "; oss << k << "=" << v; first = false; }
             return oss.str();
         }
     };
@@ -120,11 +94,9 @@ namespace SapphireHook {
     struct LoggerConfig;
 
     class BinaryLogger {
-    private:
         void* m_mappedMemory = nullptr;
         size_t m_mappedSize = 0;
         std::atomic<size_t> m_writeOffset{ 0 };
-
     public:
         bool Initialize(const std::string& filename, size_t size = 100 * 1024 * 1024);
         void LogBinary(const void* data, size_t size, uint32_t type);
@@ -132,7 +104,6 @@ namespace SapphireHook {
     };
 
     class Logger {
-    private:
         static std::unique_ptr<Logger> s_instance;
         static std::mutex s_mutex;
 
@@ -143,7 +114,10 @@ namespace SapphireHook {
         bool m_logToFile = true;
 
         bool m_fallbackMode = false;
-        std::filesystem::path m_fallbackPath;
+        std::filesystem::path m_logDirectory;  // NEW: directory actually used
+        std::filesystem::path m_fallbackPath;  // full path to current log file
+        bool m_customDirectory = false;        // NEW: user supplied custom dir
+        bool m_createdDirectory = false;       // NEW: whether we created it
 
         std::thread m_asyncThread;
         std::atomic<bool> m_asyncRunning{ false };
@@ -158,19 +132,15 @@ namespace SapphireHook {
             std::atomic<uint64_t> avgWriteTimeNs{ 0 };
             std::atomic<uint64_t> maxWriteTimeNs{ 0 };
             std::chrono::steady_clock::time_point startTime;
-
             void Reset() {
-                totalMessages = 0;
-                droppedMessages = 0;
-                avgWriteTimeNs = 0;
-                maxWriteTimeNs = 0;
+                totalMessages = 0; droppedMessages = 0;
+                avgWriteTimeNs = 0; maxWriteTimeNs = 0;
                 startTime = std::chrono::steady_clock::now();
             }
-
             double GetMessagesPerSecond() const {
                 auto elapsed = std::chrono::steady_clock::now() - startTime;
-                auto seconds = std::chrono::duration<double>(elapsed).count();
-                return seconds > 0 ? totalMessages.load() / seconds : 0.0;
+                auto sec = std::chrono::duration<double>(elapsed).count();
+                return sec > 0 ? totalMessages.load() / sec : 0.0;
             }
         };
 
@@ -190,9 +160,12 @@ namespace SapphireHook {
         Logger() = default;
         ~Logger();
 
-        static bool Initialize(const std::filesystem::path& logPath,
+        // Updated: adds flags to control directory behavior
+        static bool Initialize(const std::filesystem::path& pathOrFile,
             bool enableConsole = true,
-            LogLevel minLevel = LogLevel::Information);
+            LogLevel minLevel = LogLevel::Information,
+            bool treatAsDirectory = false,
+            bool createDirectoryIfMissing = true);
 
         static Logger& Instance();
 
@@ -226,6 +199,16 @@ namespace SapphireHook {
         void SetAsyncLogging(bool enable);
         void FlushAsync();
 
+        bool IsConsoleOutputEnabled() const { return m_logToConsole; }
+        bool IsFileOutputEnabled() const { return m_logToFile; }
+        LogLevel GetMinimumLevel() const { return m_minimumLevel; }
+        const std::filesystem::path& GetLogFilePath() const { return m_fallbackPath; }
+        const std::filesystem::path& GetLogDirectory() const { return m_logDirectory; } // NEW
+        bool IsCustomDirectory() const { return m_customDirectory; }                    // NEW
+        bool WasDirectoryCreated() const { return m_createdDirectory; }                 // NEW
+
+        void AnnounceLogFileLocation(bool force = false);
+
         const LoggerMetrics& GetMetrics() const { return m_metrics; }
         void ResetMetrics() { m_metrics.Reset(); }
 
@@ -253,7 +236,6 @@ namespace SapphireHook {
         void LogETW(LogLevel level, const std::string& message);
 #endif
 
-        // Correlation timeout helper (instance method)
         void DebugPacketCorrelationTimeout(uint16_t requestOpcode, uint64_t connectionId, uint64_t ageMs) {
             if (LogLevel::Debug < m_minimumLevel) return;
             std::ostringstream oss;
@@ -264,6 +246,8 @@ namespace SapphireHook {
             WriteLog(LogLevel::Debug, oss.str());
         }
 
+        void ReattachConsole();
+
     private:
         void WriteLog(LogLevel level, const std::string& message);
         std::string GetTimestamp() const;
@@ -271,6 +255,10 @@ namespace SapphireHook {
         std::string FormatString(const char* format, va_list args);
         void RotateLogFile();
         void CompressOldLog(const std::filesystem::path& logPath);
+
+        // NEW: helpers
+        static std::filesystem::path GetDefaultTempDir(); // %TEMP%\SapphireHook
+        static bool EnsureDir(const std::filesystem::path& dir, bool create, bool& createdFlag);
     };
 
     struct LoggerConfig {
@@ -288,18 +276,10 @@ namespace SapphireHook {
         bool includeThreadId = true;
         bool includeFunction = false;
         std::string timestampFormat = "%Y-%m-%d %H:%M:%S.%f";
-
-        bool LoadFromFile(const std::filesystem::path& configPath) {
-            (void)configPath;
-            return true;
-        }
-        bool SaveToFile(const std::filesystem::path& configPath) {
-            (void)configPath;
-            return true;
-        }
+        bool LoadFromFile(const std::filesystem::path& configPath) { (void)configPath; return true; }
+        bool SaveToFile(const std::filesystem::path& configPath) { (void)configPath; return true; }
     };
 
-    // Shims
     inline void LogDebug(const std::string& message) { Logger::Instance().Debug(message); }
     inline void LogInfo(const std::string& message) { Logger::Instance().Information(message); }
     inline void LogWarning(const std::string& message) { Logger::Instance().Warning(message); }
@@ -313,42 +293,9 @@ namespace SapphireHook {
         Logger::Instance().ErrorWithContext(message, context);
     }
 
-    inline void LogDebugF(const char* format, ...) {
-        va_list args;
-        va_start(args, format);
-        Logger::Instance().DebugF(format, args);
-        va_end(args);
-    }
-    inline void LogInfoF(const char* format, ...) {
-        va_list args;
-        va_start(args, format);
-        Logger::Instance().InformationF(format, args);
-        va_end(args);
-    }
-    inline void LogWarningF(const char* format, ...) {
-        va_list args;
-        va_start(args, format);
-        Logger::Instance().WarningF(format, args);
-        va_end(args);
-    }
-    inline void LogErrorF(const char* format, ...) {
-        va_list args;
-        va_start(args, format);
-        Logger::Instance().ErrorF(format, args);
-        va_end(args);
-    }
-    inline void LogFatalF(const char* format, ...) {
-        va_list args;
-        va_start(args, format);
-        Logger::Instance().FatalF(format, args);
-        va_end(args);
-    }
-
-    // Free-function style correlation timeout shim (calls instance method)
     inline void DebugPacketCorrelationTimeout(uint16_t requestOpcode, uint64_t connectionId, uint64_t ageMs) {
         Logger::Instance().DebugPacketCorrelationTimeout(requestOpcode, connectionId, ageMs);
     }
-
     inline void LogException(const std::exception& ex, std::string_view ctx = {}) {
         Logger::Instance().LogException(ex, ctx);
     }

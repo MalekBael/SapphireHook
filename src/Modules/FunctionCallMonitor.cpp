@@ -23,6 +23,8 @@
 #include <cctype>    
 #include <locale>    
 #include <random>
+#include <future>
+#include <unordered_map>
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -405,6 +407,12 @@ void FunctionCallMonitor::RenderDataBrowser()
             ImGui::EndTabItem();
         }
 
+        if (ImGui::BeginTabItem("Memory Scan"))
+        {
+            RenderMemoryScanTab();
+            ImGui::EndTabItem();
+        }
+
         ImGui::EndTabBar();
     }
 }
@@ -762,6 +770,8 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
     static std::vector<uintptr_t> searchResults;
     static bool isSearching = false;
     static int lastNameScanCount = 0;
+    static std::future<std::vector<uintptr_t>> scanFuture;
+    static std::string scanStatus = "";
 
     ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "Enhanced Function Search");
     ImGui::Separator();
@@ -780,174 +790,275 @@ void FunctionCallMonitor::RenderEnhancedFunctionSearch()
     ImGui::PopItemWidth();
     
     ImGui::PushItemWidth(-80);
-    ImGui::InputTextWithHint("##searchterms", "Enter search terms (comma-separated)...", 
+    ImGui::InputTextWithHint("##searchterms", "Enter search terms (blank = scan all strings in memory)...", 
                             searchTerms, sizeof(searchTerms));
     ImGui::PopItemWidth();
     
+    // Check async scan status
+    if (isSearching && scanFuture.valid()) {
+        if (scanFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            try {
+                auto asyncResults = scanFuture.get();
+                searchResults.insert(searchResults.end(), asyncResults.begin(), asyncResults.end());
+                
+                // Remove duplicates
+                std::sort(searchResults.begin(), searchResults.end());
+                searchResults.erase(std::unique(searchResults.begin(), searchResults.end()), searchResults.end());
+                
+                // Apply max results limit
+                if (searchResults.size() > static_cast<size_t>(maxResults)) {
+                    searchResults.resize(maxResults);
+                }
+                
+                scanStatus = "Scan complete: " + std::to_string(searchResults.size()) + " functions found";
+                LogInfo(scanStatus);
+            } catch (const std::exception& e) {
+                scanStatus = std::string("Scan error: ") + e.what();
+                LogError(scanStatus);
+            }
+            isSearching = false;
+        } else {
+            scanStatus = "Scanning memory for all strings...";
+        }
+    }
+     
     ImGui::SameLine();
     if (ImGui::Button("Search") && !isSearching) {
         isSearching = true;
         searchResults.clear();
+        bool searchErrored = false;
+        scanStatus = "";
+          
+         std::vector<std::string> terms;
+         std::string termsStr = searchTerms;
         
-        std::vector<std::string> terms;
-        std::string termsStr = searchTerms;
-        std::stringstream ss(termsStr);
-        std::string term;
-        while (std::getline(ss, term, ',')) {
-            term.erase(0, term.find_first_not_of(" \t"));
-            term.erase(term.find_last_not_of(" \t") + 1);
-            if (!term.empty()) {
-                terms.push_back(term);
-            }
-        }
-        
-        if (!terms.empty()) {
-            LogInfo("Starting enhanced search with " + std::to_string(terms.size()) + " terms");
+        // Only parse terms if search box is not empty
+        if (!termsStr.empty() && termsStr.find_first_not_of(" \t\n\r") != std::string::npos) {
+            std::stringstream ss(termsStr);
+            std::string term;
+            while (std::getline(ss, term, ',')) {
+                term.erase(0, term.find_first_not_of(" \t"));
+                term.erase(term.find_last_not_of(" \t") + 1);
+                if (!term.empty()) {
+                    terms.push_back(term);
+                }
+             }
+         }
+         
+         // If search terms is empty, do comprehensive memory scan asynchronously
+         if (terms.empty() && searchInMemory) {
+            LogInfo("Starting comprehensive memory scan for ALL strings in memory (async)...");
+            isSearching = true;
+            scanStatus = "Scanning for ALL strings in memory...";
             
-            if (searchInMemory) {
-                auto memoryResults = ScanForFunctionsByStrings(terms);
-                searchResults.insert(searchResults.end(), memoryResults.begin(), memoryResults.end());
-            }
-            
-            if (searchInDatabase && m_functionDatabaseLoaded) {
-                auto allFunctions = m_functionDB.GetAllFunctions();
-                for (const auto& [addr, funcInfo] : allFunctions) {
-                    for (const auto& searchTerm : terms) {
-                        std::string lowerName = funcInfo.name;
-                        std::string lowerTerm = searchTerm;
-                        std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
-                        std::transform(lowerTerm.begin(), lowerTerm.end(), lowerTerm.begin(), ::tolower);
+            // Launch async scan to find ALL strings in memory
+            scanFuture = std::async(std::launch::async, [this]() {
+                std::vector<uintptr_t> results;
+                try {
+                    LogInfo("Scanning memory sections for any readable strings...");
+                    
+                    // First, scan for ALL strings in memory sections (.rdata, .data)
+                    std::vector<std::string> discoveredStrings;
+                    uintptr_t base = 0, size = 0;
+                    if (GetMainModuleInfo(base, size)) {
+                        // Scan .rdata and .data sections for any strings
+                        auto scanStringSection = [&](const char* sectionName) {
+                            uintptr_t sectionBase = 0;
+                            size_t sectionSize = 0;
+                            
+                            // This is a simplified approach - you'd need proper PE parsing
+                            // For now, let's scan readable memory regions
+                            MEMORY_BASIC_INFORMATION mbi{};
+                            uintptr_t current = base;
+                            
+                            while (current < base + size) {
+                                if (VirtualQuery(reinterpret_cast<LPCVOID>(current), &mbi, sizeof(mbi))) {
+                                    // Check if this region is readable and not executable (likely data)
+                                    const DWORD readable = PAGE_READONLY | PAGE_READWRITE;
+                                    if ((mbi.State == MEM_COMMIT) && 
+                                        ((mbi.Protect & readable) != 0) &&
+                                        ((mbi.Protect & PAGE_EXECUTE) == 0)) {
+                                        
+                                        // Scan this region for strings
+                                        const uint8_t* ptr = reinterpret_cast<const uint8_t*>(current);
+                                        size_t regionSize = mbi.RegionSize;
+                                        
+                                        for (size_t i = 0; i < regionSize - 4; ++i) {
+                                            // Look for potential ASCII strings
+                                            if (ptr[i] >= 0x20 && ptr[i] <= 0x7E) {
+                                                size_t strLen = 0;
+                                                while (i + strLen < regionSize && 
+                                                       ptr[i + strLen] >= 0x20 && 
+                                                       ptr[i + strLen] <= 0x7E &&
+                                                       strLen < 256) {
+                                                    strLen++;
+                                                }
+                                                
+                                                // Found a string of reasonable length
+                                                if (strLen >= 4 && strLen <= 128) {
+                                                    std::string found(reinterpret_cast<const char*>(ptr + i), strLen);
+                                                    
+                                                    // Basic filtering: must contain at least one letter
+                                                    bool hasLetter = false;
+                                                    for (char c : found) {
+                                                        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+                                                            hasLetter = true;
+                                                            break;
+                                                        }
+                                                    }
+                                                    
+                                                    if (hasLetter && discoveredStrings.size() < 5000) {
+                                                        discoveredStrings.push_back(found);
+                                                    }
+                                                    
+                                                    i += strLen; // Skip past this string
+                                                }
+                                            }
+                                        }
+                                    }
+                                    current += mbi.RegionSize;
+                                } else {
+                                    current += 0x1000; // Move to next page
+                                }
+                                
+                                // Stop if we have enough strings
+                                if (discoveredStrings.size() >= 5000) break;
+                            }
+                        };
                         
-                        bool matches = includePartialMatches ? 
-                                      (lowerName.find(lowerTerm) != std::string::npos) :
-                                      (lowerName == lowerTerm);
+                        scanStringSection(".rdata");
                         
-                        if (matches) {
-                            searchResults.push_back(addr);
-                            break;
+                        // Remove duplicates
+                        std::sort(discoveredStrings.begin(), discoveredStrings.end());
+                        discoveredStrings.erase(std::unique(discoveredStrings.begin(), discoveredStrings.end()), 
+                                               discoveredStrings.end());
+                        
+                        LogInfo("Found " + std::to_string(discoveredStrings.size()) + " unique strings in memory");
+                        
+                        // Now use these discovered strings to find functions
+                        if (!discoveredStrings.empty()) {
+                            // Limit to first 500 most interesting strings to avoid timeout
+                            if (discoveredStrings.size() > 500) {
+                                discoveredStrings.resize(500);
+                            }
+                            
+                            auto scanResults = m_functionScanner->ScanForFunctionsByStrings(discoveredStrings);
+                            results.insert(results.end(), scanResults.begin(), scanResults.end());
                         }
                     }
+                     
+                    // Also do a prologue scan to find even more functions
+                     SapphireHook::FunctionScanner::ScanConfig cfg{};
+                     cfg.maxResults = 20000; // Higher limit for comprehensive scan
+                     auto prologueResults = m_functionScanner->ScanForAllInterestingFunctions(cfg, nullptr);
+                     results.insert(results.end(), prologueResults.begin(), prologueResults.end());
+                     
+                     LogInfo("Total functions found: " + std::to_string(results.size()));
+                     
+                 } catch (const std::exception& e) {
+                     LogError("Async scan exception: " + std::string(e.what()));
+                 } catch (...) {
+                     LogError("Async scan unknown exception");
+                 }
+                 return results;
+             });
+             
+         } else if (!terms.empty()) {
+             // Normal search with specific terms
+             LogInfo("Starting enhanced search with " + std::to_string(terms.size()) + " terms");
+             isSearching = true;
+             
+             if (searchInMemory) {
+                 // Launch async for memory search with specific terms
+                 scanFuture = std::async(std::launch::async, [this, terms]() {
+                     std::vector<uintptr_t> results;
+                     try {
+                         results = m_functionScanner->ScanForFunctionsByStrings(terms);
+                     } catch (const std::exception& e) {
+                         LogError("Memory search exception: " + std::string(e.what()));
+                     }
+                     return results;
+                 });
+             }
+             
+             // Database searches can be done synchronously as they're fast
+             if (searchInDatabase && m_functionDatabaseLoaded) {
+                 auto allFunctions = m_functionDB.GetAllFunctions();
+                 for (const auto& [addr, funcInfo] : allFunctions) {
+                     for (const auto& searchTerm : terms) {
+                         std::string lowerName = funcInfo.name;
+                         std::string lowerTerm = searchTerm;
+                         std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+                         std::transform(lowerTerm.begin(), lowerTerm.end(), lowerTerm.begin(), ::tolower);
+                         
+                         bool matches = includePartialMatches ? 
+                                       (lowerName.find(lowerTerm) != std::string::npos) :
+                                       (lowerName == lowerTerm);
+                         
+                         if (matches) {
+                             searchResults.push_back(addr);
+                             break;
+                         }
+                     }
+                 }
+             }
+             
+             if (searchInSignatures && m_signatureDatabaseLoaded) {
+                 auto resolvedSigs = m_signatureDB.GetResolvedFunctions();
+                 for (const auto& [addr, name] : resolvedSigs) {
+                     for (const auto& searchTerm : terms) {
+                         std::string lowerName = name;
+                         std::string lowerTerm = searchTerm;
+                         std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
+                         std::transform(lowerTerm.begin(), lowerTerm.end(), lowerTerm.begin(), ::tolower);
+                         
+                         bool matches = includePartialMatches ? 
+                                       (lowerName.find(lowerTerm) != std::string::npos) :
+                                       (lowerName == lowerTerm);
+                         
+                         if (matches) {
+                             searchResults.push_back(addr);
+                             break;
+                         }
+                     }
+                 }
+             }
+
+            // Synchronous deduplication & limiting (requested re-add).
+            // We will dedup again after async memory future completes, so this is cheap now.
+            if (!searchResults.empty()) {
+                std::sort(searchResults.begin(), searchResults.end());
+                searchResults.erase(std::unique(searchResults.begin(), searchResults.end()), searchResults.end());
+                if (searchResults.size() > static_cast<size_t>(maxResults)) {
+                    searchResults.resize(maxResults);
                 }
             }
-            
-            if (searchInSignatures && m_signatureDatabaseLoaded) {
-                auto resolvedSigs = m_signatureDB.GetResolvedFunctions();
-                for (const auto& [addr, name] : resolvedSigs) {
-                    for (const auto& searchTerm : terms) {
-                        std::string lowerName = name;
-                        std::string lowerTerm = searchTerm;
-                        std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
-                        std::transform(lowerTerm.begin(), lowerTerm.end(), lowerTerm.begin(), ::tolower);
-                        
-                        bool matches = includePartialMatches ? 
-                                      (lowerName.find(lowerTerm) != std::string::npos) :
-                                      (lowerName == lowerTerm);
-                        
-                        if (matches) {
-                            searchResults.push_back(addr);
-                            break;
-                        }
-                    }
-                }
-            }
-            
-            std::sort(searchResults.begin(), searchResults.end());
-            searchResults.erase(std::unique(searchResults.begin(), searchResults.end()), searchResults.end());
-            
-            if (searchResults.size() > static_cast<size_t>(maxResults)) {
-                searchResults.resize(maxResults);
-            }
-        }
-        
-        isSearching = false;
-    }
-    
-    ImGui::SameLine();
-    if (ImGui::Button("Scan DB Names")) {
-        if (m_functionScanner) {
-            auto nameHits = m_functionScanner->AutoScanFunctionsFromDatabase(nullptr);
-            lastNameScanCount = static_cast<int>(nameHits.size());
-            for (const auto& r : nameHits) {
-                if (r.functionAddress) searchResults.push_back(r.functionAddress);
-                if (!r.matchedName.empty()) {
-                    m_detectedFunctionNames[r.functionAddress] = r.matchedName;
-                }
-            }
-            std::sort(searchResults.begin(), searchResults.end());
-            searchResults.erase(std::unique(searchResults.begin(), searchResults.end()), searchResults.end());
-            LogInfo("Name-driven scan discovered " + std::to_string(lastNameScanCount) + " candidates");
-        } else {
-            LogWarning("FunctionScanner not available for name-driven scan");
-        }
-    }
-    
-    ImGui::Separator();
-    ImGui::Text("Search Results: %zu functions found", searchResults.size());
-    if (lastNameScanCount > 0) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("(Name scan last found %d)", lastNameScanCount);
-    }
-    
-    if (!searchResults.empty()) {
-        if (ImGui::Button("Hook All Results")) {
-            for (uintptr_t addr : searchResults) {
-                std::string name = ResolveFunctionName(addr);
-                CreateSafeLoggingHook(addr, name, "EnhancedSearch");
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("Clear Results")) {
-            searchResults.clear();
-        }
-        
-        if (ImGui::BeginTable("SearchResultsTable", 4, 
-                             ImGuiTableFlags_Resizable | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Borders)) {
-            
-            ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 120.0f);
-            ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
-            ImGui::TableSetupColumn("Source", ImGuiTableColumnFlags_WidthFixed, 80.0f);
-            ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 100.0f);
-            ImGui::TableHeadersRow();
-            
-            for (uintptr_t addr : searchResults) {
-                ImGui::TableNextRow();
-                
-                ImGui::TableNextColumn();
-                ImGui::Text("0x%016llX", addr);
-                
-                ImGui::TableNextColumn();
-                std::string resolvedName = ResolveFunctionName(addr);
-                ImGui::Text("%s", resolvedName.c_str());
-                
-                ImGui::TableNextColumn();
-                std::string source = "Unknown";
-                if (m_functionDatabaseLoaded && m_functionDB.HasFunction(addr)) {
-                    source = "Database";
-                } else if (m_signatureDatabaseLoaded) {
-                    auto resolvedSigs = m_signatureDB.GetResolvedFunctions();
-                    auto it = std::find_if(resolvedSigs.begin(), resolvedSigs.end(),
-                        [addr](const auto& pair) { return pair.first == addr; });
-                    if (it != resolvedSigs.end()) {
-                        source = "Signature";
-                    } else {
-                        source = "Memory";
-                    }
-                }
-                ImGui::Text("%s", source.c_str());
-                
-                ImGui::TableNextColumn();
-                ImGui::PushID(static_cast<int>(addr));
-                if (ImGui::SmallButton("Hook")) {
-                    CreateSafeLoggingHook(addr, resolvedName, "SearchResult");
-                }
-                if (ImGui::SmallButton("Analyze")) {
-                    ValidateAndDebugAddress(addr, resolvedName);
-                }
-                ImGui::PopID();
-            }
-            
-            ImGui::EndTable();
-        }
+         } else {
+             // No terms and memory search disabled
+             LogInfo("No search terms provided and memory search disabled");
+         }
+         
+         if (searchErrored) {
+             ImGui::OpenPopup("SearchErrorPopup");
+         }
+     }
+     
+     // Display scan status
+     if (!scanStatus.empty()) {
+         ImGui::SameLine();
+         if (isSearching) {
+             ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "%s", scanStatus.c_str());
+         } else {
+             ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "%s", scanStatus.c_str());
+         }
+     }
+     
+     if (ImGui::BeginPopupModal("SearchErrorPopup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("An exception occurred during memory scanning. "
+                           "The scan logic was halted to prevent a crash.\n\n"
+                           "Consider narrowing your search terms.");
+        if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
     }
 }
 
@@ -2038,5 +2149,350 @@ void FunctionCallMonitor::StopScan() {
         LogInfo("Scan stopped successfully");
     } else {
         LogWarning("Scan may still be in progress");
+    }
+}
+
+// ===================== Missing wrapper / utility implementations (added) =====================
+
+void FunctionCallMonitor::VerifyDatabaseLoading() {
+    if (!m_functionAnalyzer) {
+        LogError("FunctionAnalyzer not initialized - cannot verify database loading");
+        return;
+    }
+    m_functionAnalyzer->VerifyDatabaseLoading();
+}
+
+void FunctionCallMonitor::TestAndDebugEmbeddedData() {
+    if (!m_functionAnalyzer) {
+        LogError("FunctionAnalyzer not initialized - cannot test embedded data");
+        return;
+    }
+    m_functionAnalyzer->TestAndDebugEmbeddedData();
+}
+
+void FunctionCallMonitor::DebugAddressSource(uintptr_t address, const std::string& name) {
+    if (!m_functionAnalyzer) {
+        LogError("FunctionAnalyzer not initialized - cannot debug address source");
+        return;
+    }
+    m_functionAnalyzer->DebugAddressSource(address, name);
+}
+
+void FunctionCallMonitor::DebugIdaAddress(const std::string& address) {
+    if (!m_functionAnalyzer) {
+        LogError("FunctionAnalyzer not initialized - cannot debug IDA address");
+        return;
+    }
+    m_functionAnalyzer->DebugIdaAddress(address);
+}
+
+void FunctionCallMonitor::ValidateDatabase() {
+    LogInfo("Validating function & signature database state...");
+    if (m_functionDatabaseLoaded)
+        LogInfo(" Function DB: loaded (" + std::to_string(m_functionDB.GetFunctionCount()) + " entries)");
+    else
+        LogWarning(" Function DB: NOT loaded");
+
+    if (m_signatureDatabaseLoaded)
+        LogInfo(" Signature DB: loaded (" + std::to_string(m_signatureDB.GetResolvedFunctions().size()) + " resolved)");
+    else
+        LogWarning(" Signature DB: NOT loaded");
+}
+
+void FunctionCallMonitor::SetupFunctionHooks() {
+    if (!m_hookManager) {
+        LogError("AdvancedHookManager not initialized - cannot setup hooks");
+        return;
+    }
+    m_hookManager->SetupFunctionHooks();
+}
+
+void FunctionCallMonitor::HookCommonAPIs() {
+    if (!m_hookManager) {
+        LogError("AdvancedHookManager not initialized - cannot hook common APIs");
+        return;
+    }
+    m_hookManager->HookCommonAPIs();
+}
+
+void FunctionCallMonitor::HookFunctionByAddress(uintptr_t address, const std::string& name) {
+    if (!m_hookManager) {
+        LogError("AdvancedHookManager not initialized - cannot hook function");
+        return;
+    }
+    AdvancedHookManager::HookConfig cfg{ "ManualHook" };
+    m_hookManager->HookFunctionByAddress(address, name, cfg);
+}
+
+bool FunctionCallMonitor::IsValidMemoryAddress(uintptr_t address, size_t size) {
+    if (address == 0 || size == 0) return false;
+    return IsCommittedMemory(address, size) && IsExecutableMemory(address);
+}
+
+void FunctionCallMonitor::RenderEnhancedDatabaseSearch() {
+    // Backward compatibility stub: call existing enhanced search UI.
+    RenderEnhancedFunctionSearch();
+}
+
+__declspec(noinline) void __stdcall FunctionCallMonitor::FunctionHookCallback(uintptr_t returnAddress,
+                                                                             uintptr_t functionAddress) {
+     LogDebug("FunctionHookCallback: ret=0x" + std::to_string(returnAddress) +
+              " addr=0x" + std::to_string(functionAddress));
+     if (s_instance) {
+         std::string name = s_instance->ResolveFunctionName(functionAddress);
+         s_instance->AddFunctionCall(name, functionAddress, "HookCallback");
+     }
+ }
+
+// ======================= Enhanced Memory Scan (NEW) =========================
+
+void FunctionCallMonitor::StartMemoryScan(const std::vector<std::string>& targetStrings,
+                                          bool scanPrologues,
+                                          bool scanStrings)
+{
+    if (!m_functionScanner) {
+        LogError("Memory scan: FunctionScanner not available");
+        return;
+    }
+    if (m_memScan.running) {
+        LogWarning("Memory scan already running");
+        return;
+    }
+
+    m_memScan = MemoryScanState{};
+    m_memScan.running = true;
+    m_memScan.scanPrologues = scanPrologues;
+    m_memScan.scanStrings = scanStrings;
+    m_memScan.startTime = std::chrono::steady_clock::now();
+    m_memScan.status = "Queued";
+    m_memScan.stringHits.clear();
+    m_memScan.prologueFunctions.clear();
+    m_memScanTags.clear();
+    m_memScanMerged.clear();
+    m_memScanDirty = true;
+
+    // Launch async tasks
+    if (scanPrologues) {
+        FunctionScanner::ScanConfig cfg{};
+        cfg.maxResults = 25000;
+        m_memScan.prologueFuture = std::async(std::launch::async, [this, cfg]() {
+            LogInfo("MemoryScan: starting prologue scan");
+            return m_functionScanner->ScanForAllInterestingFunctions(cfg, nullptr);
+        });
+    }
+    if (scanStrings) {
+        // If no user strings supplied, supply a small default anchor set
+        std::vector<std::string> anchors = targetStrings;
+        if (anchors.empty()) {
+            anchors = {
+                "Action","Inventory","Quest","Battle","Actor","UI","Addon",
+                "Agent","Network","Packet","Ability","Status","Render","Socket"
+            };
+        }
+        m_memScan.stringFuture = std::async(std::launch::async, [this, anchors]() {
+            LogInfo("MemoryScan: starting string/anchor scan (anchors=" + std::to_string(anchors.size()) + ")");
+            return m_functionScanner->ScanMemoryForFunctionStrings(anchors, nullptr);
+        });
+    }
+    LogInfo("Memory scan started");
+}
+
+void FunctionCallMonitor::UpdateMemoryScanAsync()
+{
+    if (!m_memScan.running) return;
+
+    bool prologueDone = !m_memScan.scanPrologues;
+    bool stringDone = !m_memScan.scanStrings;
+
+    if (m_memScan.scanPrologues && m_memScan.prologueFuture.valid()) {
+        if (m_memScan.prologueFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            m_memScan.prologueFunctions = m_memScan.prologueFuture.get();
+            LogInfo("MemoryScan: prologue scan completed with " + std::to_string(m_memScan.prologueFunctions.size()) + " candidates");
+            prologueDone = true;
+            m_memScanDirty = true;
+        }
+    }
+
+    if (m_memScan.scanStrings && m_memScan.stringFuture.valid()) {
+        if (m_memScan.stringFuture.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+            m_memScan.stringHits = m_memScan.stringFuture.get();
+            LogInfo("MemoryScan: string scan produced " + std::to_string(m_memScan.stringHits.size()) + " string hits");
+            // Build tag map
+            for (const auto& h : m_memScan.stringHits) {
+                if (!h.nearbyFunctionAddress) continue;
+                auto& vec = m_memScanTags[h.nearbyFunctionAddress];
+                if (std::find(vec.begin(), vec.end(), h.foundString) == vec.end())
+                    vec.push_back(h.foundString);
+            }
+            stringDone = true;
+            m_memScanDirty = true;
+        }
+    }
+
+    // Merge results if dirty
+    if (m_memScanDirty) {
+        std::unordered_set<uintptr_t> all;
+        all.reserve(m_memScan.prologueFunctions.size() + m_memScanTags.size());
+        for (auto a : m_memScan.prologueFunctions) all.insert(a);
+        for (const auto& kv : m_memScanTags) all.insert(kv.first);
+        m_memScanMerged.assign(all.begin(), all.end());
+        std::sort(m_memScanMerged.begin(), m_memScanMerged.end());
+        m_memScanDirty = false;
+    }
+
+    // Status & completion
+    size_t phases = (m_memScan.scanPrologues ? 1 : 0) + (m_memScan.scanStrings ? 1 : 0);
+    size_t done = (prologueDone ? 1 : 0) + (stringDone ? 1 : 0);
+    if (phases == 0) phases = 1; // avoid div0
+    float pct = 100.f * float(done) / float(phases);
+    std::ostringstream oss;
+    oss << "Progress: " << done << "/" << phases << " (" << std::fixed << std::setprecision(1) << pct << "%)";
+    m_memScan.status = oss.str();
+
+    if (prologueDone && stringDone) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - m_memScan.startTime).count();
+        LogInfo("Memory scan complete in " + std::to_string(elapsed) + " ms; merged functions=" +
+                std::to_string(m_memScanMerged.size()));
+        m_memScan.running = false;
+        m_memScan.status += " (Done)";
+    }
+}
+
+void FunctionCallMonitor::RenderMemoryScanTab()
+{
+    // Poll async futures
+    UpdateMemoryScanAsync();
+
+    static bool optPrologues = true;
+    static bool optStrings = true;
+    static char userAnchors[512] = "";
+    static int  maxDisplay = 5000;
+    static char addrFilter[32] = "";
+    static char nameFilter[64] = "";
+    static bool showOnlyTagged = false;
+
+    ImGui::SeparatorText("Configuration");
+    ImGui::Checkbox("Scan Prologues (.text)", &optPrologues); ImGui::SameLine();
+    ImGui::Checkbox("Scan String Anchors (.rdata/.data)", &optStrings);
+    ImGui::InputInt("Max display", &maxDisplay);
+    ImGui::InputTextWithHint("##anchors", "Custom anchors (comma separated, blank = defaults)", userAnchors, sizeof(userAnchors));
+    ImGui::Checkbox("Only tagged (has strings)", &showOnlyTagged);
+    ImGui::InputTextWithHint("##addrflt", "Address hex filter (prefix)", addrFilter, sizeof(addrFilter));
+    ImGui::InputTextWithHint("##nameflt", "Name substring filter", nameFilter, sizeof(nameFilter));
+
+    if (!m_memScan.running) {
+        if (ImGui::Button("Start Scan")) {
+            // Parse anchors
+            std::vector<std::string> anchors;
+            std::string raw = userAnchors;
+            std::stringstream ss(raw);
+            std::string tok;
+            while (std::getline(ss, tok, ',')) {
+                auto trim = [](std::string& s) {
+                    while (!s.empty() && (s.front()==' '||s.front()=='\t')) s.erase(s.begin());
+                    while (!s.empty() && (s.back()==' '||s.back()=='\t')) s.pop_back();
+                };
+                trim(tok);
+                if (!tok.empty()) anchors.push_back(tok);
+            }
+            StartMemoryScan(anchors, optPrologues, optStrings);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Clear Results")) {
+            m_memScanMerged.clear();
+            m_memScanTags.clear();
+        }
+    } else {
+        ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.1f, 1.f), "%s", m_memScan.status.c_str());
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel")) {
+            m_memScan.cancelled = true;
+            m_memScan.running = false;
+            m_memScan.status += " (Cancelled)";
+        }
+    }
+
+    ImGui::SeparatorText("Results");
+    ImGui::Text("Functions: %zu (tagged: %zu)", m_memScanMerged.size(), m_memScanTags.size());
+
+    if (ImGui::BeginTable("mem_scan_tbl", 5,
+        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_ScrollY | ImGuiTableFlags_Resizable)) {
+        ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 140.f);
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Sources", ImGuiTableColumnFlags_WidthFixed, 110.f);
+        ImGui::TableSetupColumn("Tags", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 110.f);
+        ImGui::TableHeadersRow();
+
+        size_t shown = 0;
+        std::string nameFilterLower = nameFilter;
+        std::transform(nameFilterLower.begin(), nameFilterLower.end(), nameFilterLower.begin(), ::tolower);
+
+        for (auto addr : m_memScanMerged) {
+            if (shown >= static_cast<size_t>(maxDisplay)) break;
+            bool tagged = m_memScanTags.find(addr) != m_memScanTags.end();
+            if (showOnlyTagged && !tagged) continue;
+
+            // Address filter (prefix hex)
+            if (addrFilter[0]) {
+                std::stringstream hs;
+                hs << std::hex << std::uppercase << addr;
+                if (hs.str().rfind(addrFilter, 0) != 0) continue;
+            }
+
+            std::string resolved = ResolveFunctionName(addr);
+            if (!nameFilterLower.empty()) {
+                std::string rl = resolved;
+                std::transform(rl.begin(), rl.end(), rl.begin(), ::tolower);
+                if (rl.find(nameFilterLower) == std::string::npos)
+                    continue;
+            }
+
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::Text("0x%016llX", static_cast<unsigned long long>(addr));
+
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(resolved.c_str());
+
+            ImGui::TableNextColumn();
+            std::string src;
+            if (optPrologues && std::binary_search(m_memScan.prologueFunctions.begin(),
+                                                   m_memScan.prologueFunctions.end(), addr))
+                src += "PRO;";
+            if (tagged) src += "STR;";
+            if (src.empty()) src = "-";
+            ImGui::TextUnformatted(src.c_str());
+
+            ImGui::TableNextColumn();
+            if (tagged) {
+                const auto& tags = m_memScanTags[addr];
+                std::string joined;
+                for (size_t i = 0; i < tags.size(); ++i) {
+                    if (i) joined += ", ";
+                    if (joined.size() > 120) { joined += "..."; break; }
+                    joined += tags[i];
+                }
+                ImGui::TextWrapped("%s", joined.c_str());
+            } else {
+                ImGui::TextDisabled("-");
+            }
+
+            ImGui::TableNextColumn();
+            ImGui::PushID(static_cast<int>(addr));
+            if (ImGui::SmallButton("Hook")) {
+                CreateSafeLoggingHook(addr, resolved, "MemScan");
+            }
+            if (ImGui::SmallButton("Analyze")) {
+                ValidateAndDebugAddress(addr, resolved);
+            }
+            ImGui::PopID();
+
+            ++shown;
+        }
+
+        ImGui::EndTable();
     }
 }

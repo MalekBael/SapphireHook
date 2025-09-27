@@ -16,6 +16,8 @@
 #include <pdhmsg.h>
 #include <iphlpapi.h>
 
+#include "../Modules/SettingsModule.h" // for SettingsModule registration
+
 #pragma comment(lib, "pdh.lib")
 #pragma comment(lib, "iphlpapi.lib")
 #pragma comment(lib, "psapi.lib")
@@ -427,6 +429,29 @@ void UIManager::RegisterDefaultModules()
 		LogError("Failed to register Net Diagnostics: unknown exception");
 	}
 
+try
+{
+    if (GetModule("settings") == nullptr)
+    {
+        LogInfo("Creating Settings module...");
+        auto settings = std::make_unique<SettingsModule>();
+        RegisterModule(std::move(settings));
+        LogInfo("[OK] Settings module registered");
+    }
+    else
+    {
+        LogInfo("Settings module already exists");
+    }
+}
+catch (const std::exception& e)
+{
+    LogError("Failed to register Settings module: " + std::string(e.what()));
+}
+catch (...)
+{
+    LogError("Failed to register Settings module: unknown exception");
+}
+
  LogInfo("=== MODULE REGISTRATION COMPLETE ===");
  LogInfo("Successfully registered: " + std::to_string(successCount) + "/5 modules");
  LogInfo("Final module count on instance " + std::to_string(reinterpret_cast<uintptr_t>(this)) +
@@ -536,7 +561,7 @@ void UIManager::RenderMainMenu()
 
 						try
 						{
-							module->RenderMenu();
+						 module->RenderMenu();
 						}
 						catch (...)
 						{
@@ -597,9 +622,23 @@ void UIManager::RenderMainMenu()
 			ImGui::EndMenu();
 		}
 
+
 		if (ImGui::BeginMenu("Settings"))
 		{
-			ImGui::MenuItem("Configuration", nullptr, nullptr);
+			static UIModule* s_settings = nullptr;
+			if (!s_settings)
+			 s_settings = GetModule("settings");
+
+			if (s_settings)
+			{
+				bool open = s_settings->IsWindowOpen();
+				if (ImGui::MenuItem("Settings Window", nullptr, open))
+				 s_settings->SetWindowOpen(!open);
+			}
+			else
+			{
+				ImGui::MenuItem("Settings Window", nullptr, false, false);
+			}
 			ImGui::EndMenu();
 		}
 
