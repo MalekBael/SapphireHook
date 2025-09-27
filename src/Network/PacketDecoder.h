@@ -94,7 +94,7 @@ namespace PacketDecoding {
             std::ostringstream os;
             os << "[";
             for (size_t i = 0; i < N; ++i) {
-                if (i > 0) os << ", ";  // Changed from 'if (i)' to 'if (i > 0)'
+                if (i > 0) os << ", ";
                 os << ToString(value[i]);
             }
             os << "]";
@@ -123,7 +123,10 @@ namespace PacketDecoding {
             return [descriptors](const uint8_t* payload, size_t payloadLen,
                                  std::function<void(const char*, const std::string&)> rowKV) {
                 if (payloadLen < sizeof(PacketT)) {
-                    rowKV("error", "payload too small");
+                    std::ostringstream em;
+                    em << "payload too small (have " << payloadLen
+                       << ", need " << sizeof(PacketT) << ")";
+                    rowKV("error", em.str());
                     return;
                 }
                 const PacketT* pkt = reinterpret_cast<const PacketT*>(payload);
@@ -138,7 +141,10 @@ namespace PacketDecoding {
         Create(FieldEmitters... emitters) {
             return [=](const uint8_t* payload, size_t payloadLen, RowEmitter rowKV) {
                 if (payloadLen < sizeof(PacketT)) {
-                    rowKV("error", "payload too small");
+                    std::ostringstream em;
+                    em << "payload too small (have " << payloadLen
+                       << ", need " << sizeof(PacketT) << ")";
+                    rowKV("error", em.str());
                     return;
                 }
                 const PacketT* pkt = reinterpret_cast<const PacketT*>(payload);
@@ -170,7 +176,7 @@ namespace PacketDecoding {
         std::ostringstream os;
         os << "[";
         for (size_t i = 0; i < N; ++i) {
-            if (i > 0) os << ", ";  // Changed from 'if (i)' to 'if (i > 0)'
+            if (i > 0) os << ", ";
             os << ValueToString(value[i]);
         }
         os << "]";
@@ -369,4 +375,261 @@ namespace PacketDecoding {
         };
     }
 
+    struct SizeMismatchStat { uint64_t attempts=0, failures=0; };
+    inline SizeMismatchStat& GetSizeMismatchStat() { static SizeMismatchStat s; return s; }
+
+// ----- Adaptive variant helper (add near bottom of header) -----
+    struct AdaptiveVariant {
+        size_t size;  // canonical size of this variant
+        // return false if decode should be considered failed (e.g. magic mismatch)
+        std::function<bool(const uint8_t* payload, size_t len, const RowEmitter&)> decode;
+        const char* name;
+    };
+
+    inline void RegisterAdaptivePacket(uint16_t connType,
+                                       bool outgoing,
+                                       uint16_t opcode,
+                                       std::vector<AdaptiveVariant> variants,
+                                       size_t minRequired = 0)
+    {
+        // Sort longest->shortest so longest exact match gets first chance on len >= size
+        std::sort(variants.begin(), variants.end(),
+                  [](auto& a, auto& b){ return a.size > b.size; });
+
+        PacketDecoderRegistry::Instance().RegisterDecoder(
+            connType, outgoing, opcode,
+            [variants = std::move(variants), minRequired, opcode]
+            (const uint8_t* payload, size_t len, RowEmitter emit)
+            {
+                if (len < minRequired) {
+                    std::ostringstream os;
+                    os << "payload too small (have " << len << ", need >= " << minRequired << ")";
+                    emit("error", os.str());
+                    return;
+                }
+
+                // Pass 1: exact size match
+                for (auto& v : variants) {
+                    if (len == v.size) {
+                        if (v.decode(payload, len, emit)) return;
+                    }
+                }
+                // Pass 2: largest variant whose declared size <= len
+                for (auto& v : variants) {
+                    if (len >= v.size) {
+                        if (v.decode(payload, len, emit)) {
+                            if (len != v.size) {
+                                std::ostringstream os;
+                                os << "note: extra tail bytes (" << (len - v.size)
+                                   << ") beyond variant '" << v.name << "'";
+                                emit("_tailInfo", os.str());
+                            }
+                            return;
+                        }
+                    }
+                }
+
+                std::ostringstream os;
+                os << "unhandled size " << len << " for opcode 0x"
+                   << std::hex << std::uppercase << opcode;
+                emit("error", os.str());
+            }
+        );
+    }
+
+// ============================================================================
+// Added helper: auto-strip outer transport/session framing to mirror external
+// capture tool (find embedded IPC segment of form: [len][...header(0x10-0x14)])
+// ============================================================================
+
+    // Forward declaration so we can validate opcode candidates.
+    const char* LookupOpcodeName(uint16_t opcode, bool outgoing, uint16_t connectionType) noexcept;
+
+    struct ExtractedIpcSegment {
+        bool   valid = false;
+        size_t outerSkip = 0;
+        const uint8_t* segmentStart = nullptr;
+        size_t segmentLen = 0;
+        const uint8_t* ipcHeader = nullptr;
+        size_t ipcHeaderLen = 0x14;   // current fixed assumption
+        const uint8_t* payload = nullptr;
+        size_t payloadLen = 0;
+        uint16_t opcode = 0;
+        uint16_t connectionTypeGuess = 1; // 1 = zone
+    };
+
+    inline uint32_t ReadLE32(const uint8_t* p) {
+        return (uint32_t)p[0] | ((uint32_t)p[1]<<8) | ((uint32_t)p[2]<<16) | ((uint32_t)p[3]<<24);
+    }
+    inline uint16_t ReadLE16(const uint8_t* p) {
+        return (uint16_t)p[0] | ((uint16_t)p[1]<<8);
+    }
+
+    inline bool IsLikelyOpcode(uint16_t opc) {
+        // Try both directions (incoming/outgoing) for zone (1) & chat(2)
+        if (LookupOpcodeName(opc, false, 1) != "?") return true;
+        if (LookupOpcodeName(opc, true, 1)  != "?") return true;
+        if (LookupOpcodeName(opc, false, 2) != "?") return true;
+        if (LookupOpcodeName(opc, true, 2)  != "?") return true;
+        return false;
+    }
+
+    inline ExtractedIpcSegment TryExtractIpcSegment(const uint8_t* full, size_t fullLen) {
+        ExtractedIpcSegment r;
+        if (!full || fullLen < 0x20) return r;
+
+        // Common offsets where the length field has been observed after outer framing.
+        static const size_t kCandidateOffsets[] = {
+            0, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24, 0x28
+        };
+
+        for (size_t off : kCandidateOffsets) {
+            if (off + 4 > fullLen) continue;
+            uint32_t segLen = ReadLE32(full + off);
+            if (segLen < 0x14) continue;                 // too small
+            if (segLen > fullLen - off) continue;        // past end
+            // For now require exact remainder match (mirrors external tool)
+            if (segLen != fullLen - off) continue;
+
+            // Minimum IPC header we rely on: opcode at offset +0x12 (after two 32-bit + routing shorts pattern)
+            if (off + 0x12 + 2 > fullLen) continue;
+            uint16_t opc = ReadLE16(full + off + 0x12);
+            if (!IsLikelyOpcode(opc)) continue;
+
+            // Assume fixed 0x14 header for now (observed)
+            size_t ipcHeaderLen = 0x14;
+            if (segLen < ipcHeaderLen) continue;
+
+            r.valid        = true;
+            r.outerSkip    = off;
+            r.segmentStart = full + off;
+            r.segmentLen   = segLen;
+            r.ipcHeader    = full + off;
+            r.ipcHeaderLen = ipcHeaderLen;
+            r.payload      = full + off + ipcHeaderLen;
+            r.payloadLen   = segLen - ipcHeaderLen;
+            r.opcode       = opc;
+            // Guess connection type: if opcode known only in zone table usually 1.
+            r.connectionTypeGuess = 1;
+            break;
+        }
+        return r;
+    }
+
+    inline bool StripAndDecodeIpc(const uint8_t* full, size_t fullLen,
+                                  bool outgoing,
+                                  RowEmitter emit,
+                                  uint16_t explicitConnType = 0xFFFF)
+    {
+        auto seg = TryExtractIpcSegment(full, fullLen);
+        if (!seg.valid) return false;
+
+        uint16_t connType = (explicitConnType == 0xFFFF) ? seg.connectionTypeGuess : explicitConnType;
+
+        // Overlay capture (outer framing = seg.outerSkip bytes)
+        BeginOverlayCapture(full, fullLen,
+                            full, seg.outerSkip,     // treat 'packetHeader' as the stripped outer region
+                            nullptr, 0,              // segmentHeader unused
+                            seg.ipcHeader, seg.ipcHeaderLen,
+                            seg.payload, seg.payloadLen,
+                            connType, /*segType*/0, true, seg.opcode);
+
+        // Emit a few meta rows (optional)
+        emit("_strip.outerSkip", std::to_string(seg.outerSkip));
+        emit("_strip.segmentLen", std::to_string(seg.segmentLen));
+        emit("_strip.opcode", FormatHex(seg.opcode));
+
+        // Forward to registered decoder
+        if (!PacketDecoderRegistry::Instance().TryDecode(connType, outgoing, seg.opcode,
+                                                         seg.payload, seg.payloadLen, emit)) {
+            emit("decoder", "no registered decoder");
+        }
+        return true;
+    }
+
+// ============================================================================
+// ADD near the bottom (just before the closing namespace) – refined strip helpers using known ConnectionType
+
+    // If you have a known connection type (Zone=1, Chat=2, Lobby=3) you can
+    // reduce false positives by validating opcodes only against that table.
+    inline bool IsLikelyOpcodeForConn(uint16_t opc, uint16_t connType) {
+        // Lobby currently shares most with zone table; treat Lobby like Zone.
+        uint16_t eff = (connType == 3) ? 1 : connType;
+        if (LookupOpcodeName(opc, false, eff) != "?") return true;
+        if (LookupOpcodeName(opc, true,  eff) != "?") return true;
+        return false;
+    }
+
+    struct ExtractedIpcSegmentKnown {
+        bool   valid = false;
+        size_t outerSkip = 0;
+        const uint8_t* segmentStart = nullptr;
+        size_t segmentLen = 0;
+        const uint8_t* ipcHeader = nullptr;
+        size_t ipcHeaderLen = 0x14;   // current fixed assumption
+        const uint8_t* payload = nullptr;
+        size_t payloadLen = 0;
+        uint16_t opcode = 0;
+    };
+
+    inline ExtractedIpcSegmentKnown TryExtractIpcSegmentKnown(const uint8_t* full, size_t fullLen, uint16_t connType) {
+        ExtractedIpcSegmentKnown r;
+        if (!full || fullLen < 0x20) return r;
+
+        // Offsets where the 32-bit segment length has been observed (outer framing sizes).
+        static const size_t kCandidateOffsets[] { 0, 0x10, 0x14, 0x18, 0x1C, 0x20, 0x24, 0x28 };
+
+        for (size_t off : kCandidateOffsets) {
+            if (off + 4 > fullLen) continue;
+            uint32_t segLen = ReadLE32(full + off);
+            if (segLen < 0x14) continue;
+            if (segLen > fullLen - off) continue;
+            if (segLen != fullLen - off) continue; // require exact remainder for now
+
+            if (off + 0x12 + 2 > fullLen) continue;
+            uint16_t opc = ReadLE16(full + off + 0x12);
+            if (!IsLikelyOpcodeForConn(opc, connType)) continue;
+
+            // Basic header sanity: we often see two repeating 16-bit IDs at +0x04..0x0B; optional future check.
+            r.valid        = true;
+            r.outerSkip    = off;
+            r.segmentStart = full + off;
+            r.segmentLen   = segLen;
+            r.ipcHeader    = full + off;
+            r.payload      = full + off + r.ipcHeaderLen;
+            r.payloadLen   = segLen - r.ipcHeaderLen;
+            r.opcode       = opc;
+            break;
+        }
+        return r;
+    }
+
+    // Public helper: strip outer frame (if present) and dispatch to registered decoder.
+    // Returns true if an IPC segment was found & dispatched.
+    inline bool StripAndDecodeIpcKnown(const uint8_t* full,
+                                       size_t fullLen,
+                                       uint16_t connectionType, // 1=Zone,2=Chat,3=Lobby
+                                       bool outgoing,
+                                       RowEmitter emit)
+    {
+        auto seg = TryExtractIpcSegmentKnown(full, fullLen, connectionType);
+        if (!seg.valid) return false;
+
+        BeginOverlayCapture(full, fullLen,
+                            full, seg.outerSkip,
+                            nullptr, 0,
+                            seg.ipcHeader, seg.ipcHeaderLen,
+                            seg.payload, seg.payloadLen,
+                            connectionType, 0, true, seg.opcode);
+
+        emit("_strip.outerSkip", std::to_string(seg.outerSkip));
+        emit("_strip.segmentLen", std::to_string(seg.segmentLen));
+        emit("_strip.opcode", FormatHex(seg.opcode));
+
+        if (!PacketDecoderRegistry::Instance().TryDecode(connectionType, outgoing, seg.opcode,
+                                                         seg.payload, seg.payloadLen, emit)) {
+            emit("decoder", "no registered decoder");
+        }
+        return true;
+    }
 } // namespace PacketDecoding

@@ -383,3 +383,4 @@ external/*/bin/
 /worldlog.txt
 /packet.txt
 /gmcommands.txt
+/prompt.txt

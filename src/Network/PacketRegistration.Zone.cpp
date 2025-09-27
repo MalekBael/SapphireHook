@@ -15,6 +15,7 @@
 #include <string>
 #include <array>
 #include <unordered_map>
+#include <unordered_set>
 #include <cstddef>
 #include <iterator>
 #include <cstring> // for std::memcpy
@@ -520,206 +521,75 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("Pos", FormatPosition(pkt->Pos[0], pkt->Pos[1], pkt->Pos[2]))
     );
 
-    REGISTER_PACKET(1, false, 0x01A0, FFXIVIpcPlayerStatus,
-        FIELD("CharaId", FormatHex(pkt->CharaId)),
-        FIELD("ClassJob", FieldToString(pkt->ClassJob)),
-        FIELD("Race", FieldToString(pkt->Race)),
-        FIELD("FirstLevel", FieldToString(pkt->Lv[0])),
-        FIELD("AetheryteMask0", FormatHex(pkt->Aetheryte[0]))
-    );
+    // --- Adaptive override for InitZone (0x019A) to handle 24-byte and 40-byte variants ---
+    {
+#pragma pack(push,1)
+        struct FFXIVIpcInitZoneShort {
+            uint16_t ZoneId;
+            uint16_t TerritoryType;
+            uint16_t TerritoryIndex;
+            uint8_t  WeatherId;
+            uint8_t  Flag;
+            uint32_t LayoutOrLayerSet; // Ambiguous: could be LayoutId or LayerSetId in this build
+            float    Pos[3];
+        };
+#pragma pack(pop)
+        static_assert(sizeof(FFXIVIpcInitZoneShort) == 24, "InitZoneShort must be 24 bytes");
+        using FullInitZone = PacketStructures::Server::Zone::FFXIVIpcInitZone;
 
-    REGISTER_PACKET(1, false, 0x01A1, FFXIVIpcBaseParam,
-        FIELD("Param0", FieldToString(pkt->Param[0])),
-        FIELD("Param1", FieldToString(pkt->Param[1])),
-        FIELD("Original0", FieldToString(pkt->OriginalParam[0]))
-    );
+        PacketDecoding::PacketDecoderRegistry::Instance().RegisterDecoder(
+            1, false, 0x019A,
+            [](const uint8_t* payload, size_t len, PacketDecoding::RowEmitter emit)
+            {
+                static std::unordered_set<size_t> g_seenInitZoneSizes;
 
-    REGISTER_PACKET(1, false, 0x01A2, FFXIVIpcFirstAttack,
-        FIELD("Type", FieldToString(pkt->Type)),
-        FIELD("Id", FormatHex(pkt->Id))
-    );
+                if (!g_seenInitZoneSizes.count(len)) {
+                    g_seenInitZoneSizes.insert(len);
+                    std::ostringstream note;
+                    note << "first time seeing size " << len;
+                    emit("_notice", note.str());
+                }
 
-    REGISTER_PACKET(1, false, 0x01A3, FFXIVIpcCondition,
-        FIELD("FlagBytesFirst", FormatHex(pkt->flags[0])),
-        FIELD("Padding", FormatHex(pkt->padding))
-    );
-
-    REGISTER_PACKET(1, false, 0x01A4, FFXIVIpcChangeClass,
-        FIELD("ClassJob", FieldToString(pkt->ClassJob)),
-        FIELD("Penalty", FieldToString(pkt->Penalty)),
-        FIELD("Lv", FieldToString(pkt->Lv)),
-        FIELD("BorrowAction0", FieldToString(pkt->BorrowAction[0]))
-    );
-
-    REGISTER_PACKET(1, false, 0x01A5, FFXIVIpcEquip,
-        FIELD("MainWeapon", FormatHex(pkt->MainWeapon)),
-        FIELD("SubWeapon", FormatHex(pkt->SubWeapon)),
-        FIELD("CrestEnable", FieldToString(pkt->CrestEnable)),
-        FIELD("Equipment0", FormatHex(pkt->Equipment[0]))
-    );
-
-    REGISTER_PACKET(1, false, 0x01A6, FFXIVIpcInspect,
-        FIELD("Name", FormatString(pkt->Name, 32)),
-        FIELD("ClassJob", FieldToString(pkt->ClassJob)),
-        FIELD("Lv", FieldToString(pkt->Lv)),
-        FIELD("ItemLv", FieldToString(pkt->ItemLv)),
-        FIELD("FirstEquipCatalogId", FieldToString(pkt->Equipment[0].CatalogId))
-    );
-
-    REGISTER_PACKET(1, false, 0x01A7, FFXIVIpcName,
-        FIELD("ContentId", FormatHex(pkt->contentId)),
-        FIELD("Name", FormatString(pkt->name, 32))
-    );
-
-    // INVENTORY / ITEMS (server → client)
-    REGISTER_PACKET(1, false, 0x01AE, FFXIVIpcItemStorage,
-        FIELD("ContextId", FormatHex(pkt->contextId)),
-        FIELD("StorageId", FieldToString(pkt->storage.storageId)),
-        FIELD("ContainerSize", FieldToString(pkt->storage.containerSize))
-    );
-
-    REGISTER_PACKET(1, false, 0x01AF, FFXIVIpcNormalItem,
-        FIELD("ContextId", FormatHex(pkt->contextId)),
-        FIELD("StorageId", FieldToString(pkt->item.storageId)),
-        FIELD("ContainerIndex", FieldToString(pkt->item.containerIndex)),
-        FIELD("Stack", FieldToString(pkt->item.stack)),
-        FIELD("CatalogId", FieldToString(pkt->item.catalogId)),
-        FIELD("Durability", FieldToString(pkt->item.durability)),
-        FIELD("Refine", FieldToString(pkt->item.refine)),
-        FIELD("Stain", FieldToString(pkt->item.stain)),
-        FIELD("Pattern", FormatHex(pkt->item.pattern)),
-        FIELD("MateriaTypes0_4", FieldToString(pkt->item.materiaType[0]) + "," +
-            FieldToString(pkt->item.materiaType[1]) + "," +
-            FieldToString(pkt->item.materiaType[2]) + "," +
-            FieldToString(pkt->item.materiaType[3]) + "," +
-            FieldToString(pkt->item.materiaType[4])),
-        FIELD("MateriaGrades0_4", FieldToString(pkt->item.materiaGrade[0]) + "," +
-            FieldToString(pkt->item.materiaGrade[1]) + "," +
-            FieldToString(pkt->item.materiaGrade[2]) + "," +
-            FieldToString(pkt->item.materiaGrade[3]) + "," +
-            FieldToString(pkt->item.materiaGrade[4]))
-    );
-
-    REGISTER_PACKET(1, false, 0x01B6, FFXIVIpcUpdateItem,
-        FIELD("ContextId", FormatHex(pkt->contextId)),
-        FIELD("StorageId", FieldToString(pkt->item.storageId)),
-        FIELD("CatalogId", FieldToString(pkt->item.catalogId)),
-        FIELD("Stack", FieldToString(pkt->item.stack))
-    );
-
-    REGISTER_PACKET(1, false, 0x01B0, FFXIVIpcItemSize,
-        FIELD("ContextId", FormatHex(pkt->contextId)),
-        FIELD("StorageId", FieldToString(pkt->storageId)),
-        FIELD("Size", FieldToString(pkt->size))
-    );
-
-    // --- MODIFIED: ItemOperationBatch now exposes discovered raw fields in Decoded Payload ---
-#if ENABLE_PACKET_LAYERS
-    REGISTER_PACKET(1, false, 0x01B1, FFXIVIpcItemOperationBatch,
-        FIELD("ContextId",        FormatHex(pkt->contextId)),
-        FIELD("OperationId",      FieldToString(pkt->operationId)),
-        FIELD("OperationTypeHdr", FieldToString(pkt->operationType)),
-        FIELD("ErrorType",        FieldToString(pkt->errorType)),
-        FIELD("PacketNum",        FieldToString(pkt->packetNum)),
-
-        /* Newly exposed raw offsets (heuristic layout) */
-        FIELD("storageId(+0x04)", FieldToString(*reinterpret_cast<const uint32_t*>(
-              reinterpret_cast<const uint8_t*>(pkt) + 0x04))),
-        FIELD("sourceId(+0x08)",  FieldToString(*reinterpret_cast<const uint32_t*>(
-              reinterpret_cast<const uint8_t*>(pkt) + 0x08))),
-        FIELD("stackSize(+0x14)", FieldToString(*reinterpret_cast<const uint32_t*>(
-              reinterpret_cast<const uint8_t*>(pkt) + 0x14))),
-        FIELD("itemId(+0x18)",    FieldToString(*reinterpret_cast<const uint32_t*>(
-              reinterpret_cast<const uint8_t*>(pkt) + 0x18))),
-
-        FIELD("_layers",      LayerSideEffect_ItemOperationBatch(pkt)),
-        FIELD("_layers_raw",  LayerSideEffect_ItemOperationBatchRaw(pkt))
-    );
-#else
-    REGISTER_PACKET(1, false, 0x01B1, FFXIVIpcItemOperationBatch,
-        FIELD("ContextId",        FormatHex(pkt->contextId)),
-        FIELD("OperationId",      FieldToString(pkt->operationId)),
-        FIELD("OperationTypeHdr", FieldToString(pkt->operationType)),
-        FIELD("ErrorType",        FieldToString(pkt->errorType)),
-        FIELD("PacketNum",        FieldToString(pkt->packetNum)),
-        FIELD("storageId(+0x04)", FieldToString(*reinterpret_cast<const uint32_t*>(
-              reinterpret_cast<const uint8_t*>(pkt) + 0x04))),
-        FIELD("sourceId(+0x08)",  FieldToString(*reinterpret_cast<const uint32_t*>(
-              reinterpret_cast<const uint8_t*>(pkt) + 0x08))),
-        FIELD("stackSize(+0x14)", FieldToString(*reinterpret_cast<const uint32_t*>(
-              reinterpret_cast<const uint8_t*>(pkt) + 0x14))),
-        FIELD("itemId(+0x18)",    FieldToString(*reinterpret_cast<const uint32_t*>(
-              reinterpret_cast<const uint8_t*>(pkt) + 0x18)))
-    );
-#endif
-
-// 2) Server -> Client ItemOperation (opcode 0x01B2)
-// Keep full detailed decode AND ensure core raw inventory movement fields are visible.
-#if ENABLE_PACKET_LAYERS
-    REGISTER_PACKET(1, false, 0x01B2, FFXIVIpcItemOperation,
-        FIELD("ContextId",          FormatHex(pkt->contextId)),
-        FIELD("OperationTypeRaw",   FieldToString(pkt->operationType)),
-
-        // Source
-        FIELD("SrcEntity",          FormatHex(pkt->srcEntity)),
-        FIELD("SrcStorageId",       FieldToString(pkt->srcStorageId)),
-        FIELD("SrcContainerIndex",  FieldToString(pkt->srcContainerIndex)),
-        FIELD("SrcStack",           FieldToString(pkt->srcStack)),
-        FIELD("SrcCatalogId",       FieldToString(pkt->srcCatalogId)),
-
-        // Destination
-        FIELD("DstEntity",          FormatHex(pkt->dstEntity)),
-        FIELD("DstStorageId",       FieldToString(pkt->dstStorageId)),
-        FIELD("DstContainerIndex",  FieldToString(pkt->dstContainerIndex)),
-        FIELD("DstStack",           FieldToString(pkt->dstStack)),
-        FIELD("DstCatalogId",       FieldToString(pkt->dstCatalogId)),
-
-        // Heuristic + raw
-        FIELD("Heuristic",          ClassifyItemOperation(pkt)),
-        FIELD("Raw48Bytes",         DumpBytes(pkt, sizeof(*pkt))),
-        FIELD("_layers",            LayerSideEffect_ItemOperation(pkt)),
-        FIELD("_layers_rawBatchView", LayerSideEffect_ItemOperationBatchRaw(
-              reinterpret_cast<const PacketStructures::Server::Zone::FFXIVIpcItemOperationBatch*>(pkt)))
-    );
-#else
-    REGISTER_PACKET(1, false, 0x01B2, FFXIVIpcItemOperation,
-        FIELD("ContextId",          FormatHex(pkt->contextId)),
-        FIELD("OperationTypeRaw",   FieldToString(pkt->operationType)),
-        FIELD("SrcEntity",          FormatHex(pkt->srcEntity)),
-        FIELD("SrcStorageId",       FieldToString(pkt->srcStorageId)),
-        FIELD("SrcContainerIndex",  FieldToString(pkt->srcContainerIndex)),
-        FIELD("SrcStack",           FieldToString(pkt->srcStack)),
-        FIELD("SrcCatalogId",       FieldToString(pkt->srcCatalogId)),
-        FIELD("DstEntity",          FormatHex(pkt->dstEntity)),
-        FIELD("DstStorageId",       FieldToString(pkt->dstStorageId)),
-        FIELD("DstContainerIndex",  FieldToString(pkt->dstContainerIndex)),
-        FIELD("DstStack",           FieldToString(pkt->dstStack)),
-        FIELD("DstCatalogId",       FieldToString(pkt->dstCatalogId)),
-        FIELD("Heuristic",          ClassifyItemOperation(pkt)),
-        FIELD("Raw48Bytes",         DumpBytes(pkt, sizeof(*pkt)))
-    );
-#endif
-
-// 3) Client -> Server ClientItemOperation (opcode 0x01AE, outgoing)
-// Add raw-offset fields exactly as user requested (storageId, stackSize @ two offsets, itemId)
-REGISTER_PACKET(1, true, 0x01AE, PacketStructures::Client::Zone::FFXIVIpcClientInventoryItemOperation,
-    FIELD("ContextId",              FieldToString(pkt->ContextId)),
-    FIELD("OperationType",          FieldToString(pkt->OperationType)),
-
-    // Requested raw logical fields
-    FIELD("storageId(+0x04)",       FieldToString(pkt->SrcStorageId)), // maps to +0x04 in observed raw
-    FIELD("stackSize_pre(+0x14)",   FieldToString(pkt->SrcStack)),     // assuming SrcStack at +0x14
-    FIELD("stackSize_post(+0x28)",  FieldToString(pkt->DstStack)),     // second stack at +0x28
-    FIELD("itemId(+0x2C)",          FieldToString(pkt->DstCatalogId)), // item/catalog id at +0x2C
-
-    // (Optional) keep full context
-    FIELD("SrcActorId",             FormatHex(pkt->SrcActorId)),
-    FIELD("SrcContainerIndex",      FieldToString(pkt->SrcContainerIndex)),
-    FIELD("SrcCatalogId",           FieldToString(pkt->SrcCatalogId)),
-    FIELD("DstActorId",             FormatHex(pkt->DstActorId)),
-    FIELD("DstStorageId",           FieldToString(pkt->DstStorageId)),
-    FIELD("DstContainerIndex",      FieldToString(pkt->DstContainerIndex)),
-    FIELD("DstCatalogId",           FieldToString(pkt->DstCatalogId))
-);
+                if (len == sizeof(FFXIVIpcInitZoneShort)) {
+                    auto* p = reinterpret_cast<const FFXIVIpcInitZoneShort*>(payload);
+                    emit("Variant", "Short(24)");
+                    emit("ZoneId",        PacketDecoding::FieldToString(p->ZoneId));
+                    emit("TerritoryType", PacketDecoding::FieldToString(p->TerritoryType));
+                    emit("TerritoryIndex",PacketDecoding::FieldToString(p->TerritoryIndex));
+                    emit("WeatherId",     PacketDecoding::FieldToString(p->WeatherId));
+                    emit("Flag",          PacketDecoding::FieldToString(p->Flag));
+                    emit("LayoutOrLayerSet", PacketDecoding::FormatHex(p->LayoutOrLayerSet));
+                    emit("Pos", PacketDecoding::FormatPosition(p->Pos[0], p->Pos[1], p->Pos[2]));
+                }
+                else if (len >= sizeof(FullInitZone)) {
+                    auto* p = reinterpret_cast<const FullInitZone*>(payload);
+                    emit("Variant", "Full(40)");
+                    emit("ZoneId",        PacketDecoding::FieldToString(p->ZoneId));
+                    emit("TerritoryType", PacketDecoding::FieldToString(p->TerritoryType));
+                    emit("TerritoryIndex",PacketDecoding::FieldToString(p->TerritoryIndex));
+                    emit("LayerSetId",    PacketDecoding::FormatHex(p->LayerSetId));
+                    emit("LayoutId",      PacketDecoding::FieldToString(p->LayoutId));
+                    emit("WeatherId",     PacketDecoding::FieldToString(p->WeatherId));
+                    emit("Flag",          PacketDecoding::FieldToString(p->Flag));
+                    emit("FestivalEid0",  PacketDecoding::FieldToString(p->FestivalEid0));
+                    emit("FestivalPid0",  PacketDecoding::FieldToString(p->FestivalPid0));
+                    emit("FestivalEid1",  PacketDecoding::FieldToString(p->FestivalEid1));
+                    emit("FestivalPid1",  PacketDecoding::FieldToString(p->FestivalPid1));
+                    emit("Pos", PacketDecoding::FormatPosition(p->Pos[0], p->Pos[1], p->Pos[2]));
+                }
+                else {
+                    std::ostringstream os;
+                    os << "payload too small (have " << len << ", expect 24 or 40)";
+                    emit("error", os.str());
+                    // Helpful raw dump for diagnostics
+                    if (len > 0) {
+                        std::ostringstream hex;
+                        hex << "raw=" << PacketDecoding::DumpBytesAsHex(std::span(payload, len));
+                        emit("raw", hex.str());
+                    }
+                }
+            }
+        );
+    }
 
 }  // End of RegisterZonePackets() function

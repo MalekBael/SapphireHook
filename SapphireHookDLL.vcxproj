@@ -99,6 +99,7 @@
     <ClCompile Include="src\Modules\MemoryViewerModule.cpp" />
     <ClCompile Include="src\Modules\NetDiagnosticsModule.cpp" />
     <ClCompile Include="src\Monitor\NetworkMonitor.cpp" />
+    <ClCompile Include="src\Monitor\NetworkMonitorHelper.cpp" />
     <ClCompile Include="src\Network\OpcodeNames.cpp" />
     <ClCompile Include="src\Network\PacketRegistration.Chat.cpp" />
     <ClCompile Include="src\Network\PacketRegistration.cpp" />
@@ -152,6 +153,8 @@
     <ClInclude Include="src\Modules\CommandInterface.h" />
     <ClInclude Include="src\Modules\MemoryViewerModule.h" />
     <ClInclude Include="src\Modules\NetDiagnosticsModule.h" />
+    <ClInclude Include="src\Monitor\NetworkMonitorHelper.h" />
+    <ClInclude Include="src\Monitor\NetworkMonitorTypes.h" />
     <ClInclude Include="src\Network\OpcodeNames.h" />
     <ClInclude Include="src\Network\PacketDecoder.h" />
     <ClInclude Include="src\Network\PacketRegistration.h" />

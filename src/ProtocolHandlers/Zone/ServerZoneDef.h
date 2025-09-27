@@ -1452,10 +1452,15 @@ namespace PacketStructures::Server::Zone {
     DECLARE_PACKET_FIELDS(FFXIVIpcInitZone,
         STRUCT_FIELD(FFXIVIpcInitZone, ZoneId),
         STRUCT_FIELD(FFXIVIpcInitZone, TerritoryType),
+        STRUCT_FIELD(FFXIVIpcInitZone, TerritoryIndex),
         STRUCT_FIELD(FFXIVIpcInitZone, LayerSetId),
         STRUCT_FIELD(FFXIVIpcInitZone, LayoutId),
         STRUCT_FIELD(FFXIVIpcInitZone, WeatherId),
         STRUCT_FIELD(FFXIVIpcInitZone, Flag),
+        STRUCT_FIELD(FFXIVIpcInitZone, FestivalEid0),
+        STRUCT_FIELD(FFXIVIpcInitZone, FestivalPid0),
+        STRUCT_FIELD(FFXIVIpcInitZone, FestivalEid1),
+        STRUCT_FIELD(FFXIVIpcInitZone, FestivalPid1),
         STRUCT_FIELD(FFXIVIpcInitZone, Pos)
     );
 #endif // DECLARE_PACKET_FIELDS

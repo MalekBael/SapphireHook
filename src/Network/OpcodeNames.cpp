@@ -549,31 +549,32 @@ const char* LookupOpcodeName(uint16_t opcode, bool outgoing, uint16_t connection
 
     if (outgoing) {
         if (chat) {
-            auto it = kClientChatOpcodes.find(opcode);
-            if (it != kClientChatOpcodes.end()) return it->second;
+            if (auto it = kClientChatOpcodes.find(opcode); it != kClientChatOpcodes.end()) return it->second;
         } else {
-            auto it = kClientZoneOpcodes.find(opcode);
-            if (it != kClientZoneOpcodes.end()) return it->second;
+            if (auto it = kClientZoneOpcodes.find(opcode); it != kClientZoneOpcodes.end()) return it->second;
             // If unknown connection type, try chat table too as last resort
             if (connectionType == 0xFFFF) {
-                auto itc = kClientChatOpcodes.find(opcode);
-                if (itc != kClientChatOpcodes.end()) return itc->second;
+                if (auto itc = kClientChatOpcodes.find(opcode); itc != kClientChatOpcodes.end()) return itc->second;
             }
         }
     } else {
         if (chat) {
-            auto it = kServerChatOpcodes.find(opcode);
-            if (it != kServerChatOpcodes.end()) return it->second;
+            if (auto it = kServerChatOpcodes.find(opcode); it != kServerChatOpcodes.end()) return it->second;
         } else {
-            auto it = kServerZoneOpcodes.find(opcode);
-            if (it != kServerZoneOpcodes.end()) return it->second;
+            if (auto it = kServerZoneOpcodes.find(opcode); it != kServerZoneOpcodes.end()) return it->second;
             if (connectionType == 0xFFFF) {
-                auto its = kServerChatOpcodes.find(opcode);
-                if (its != kServerChatOpcodes.end()) return its->second;
+                if (auto its = kServerChatOpcodes.find(opcode); its != kServerChatOpcodes.end()) return its->second;
             }
         }
     }
     return "?";
+}
+
+// Wrapper added to satisfy references expecting PacketDecoding::LookupOpcodeName
+namespace PacketDecoding {
+    const char* LookupOpcodeName(uint16_t opcode, bool outgoing, uint16_t connectionType) noexcept {
+        return ::LookupOpcodeName(opcode, outgoing, connectionType);
+    }
 }
 
 // Centralized ActorControl (Order/ActorControl) category names
@@ -692,6 +693,7 @@ namespace {
 }
 
 const char* LookupActorControlCategoryName(uint16_t category) noexcept {
-    auto it = kActorControlCategories.find(category);
-    return (it != kActorControlCategories.end()) ? it->second : "?";
+    if (auto it = kActorControlCategories.find(category); it != kActorControlCategories.end())
+        return it->second;
+    return "?";
 }

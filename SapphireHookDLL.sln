@@ -11,6 +11,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		gmcommands.txt = gmcommands.txt
 		..\..\..\AppData\Local\Temp\hook.log = ..\..\..\AppData\Local\Temp\hook.log
 		packet.txt = packet.txt
+		prompt.txt = prompt.txt
 		logs\server_log.txt = logs\server_log.txt
 		suspected_opcodes.txt = suspected_opcodes.txt
 		worldlog.txt = worldlog.txt
