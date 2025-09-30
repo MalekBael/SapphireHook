@@ -37,7 +37,7 @@
 #include <windows.h>
 #include <Psapi.h>
 
-#include "../Core/WindowsAPIWrapper.h"
+#include "../Helper/WindowsAPIWrapper.h"
 
 #ifdef _MSC_VER
 #pragma intrinsic(_ReturnAddress)
@@ -45,7 +45,23 @@
 
 using namespace SapphireHook;
 
-extern bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize);
+static bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize)
+{
+    baseAddress = 0;
+    moduleSize = 0;
+
+    HMODULE hModule = ::GetModuleHandleW(nullptr);
+    if (!hModule)
+        return false;
+
+    MODULEINFO moduleInfo{};
+    if (!::GetModuleInformation(::GetCurrentProcess(), hModule, &moduleInfo, sizeof(moduleInfo)))
+        return false;
+
+    baseAddress = reinterpret_cast<uintptr_t>(moduleInfo.lpBaseOfDll);
+    moduleSize = static_cast<size_t>(moduleInfo.SizeOfImage);
+    return true;
+}
 
 namespace SapphireHook {
     class AdvancedHookManager {

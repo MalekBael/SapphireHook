@@ -15,8 +15,7 @@
 #include <cctype>
 
 using namespace SapphireHook;
-
-bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize);
+#include "../Hooking/hook_factory_impl.h"
 
 static std::string FormatHexAddress(uintptr_t address)
 {
@@ -674,3 +673,9 @@ static std::vector<FuncEntry> ExtractFunctionsFromJSONContent(const std::string&
     LogDebug("Heuristic JSON function extract: " + std::to_string(result.size()) + " entries");
     return result;
 }
+
+/* AUTO-INSERTED TYPE SIGNATURE DUMP (REMOVE IF RE-APPEARS)
+   If a tool re-injects the “SIGNATURES OF REFERENCED TYPES” block, ensure it is
+   wrapped in a comment like this or deleted; it is NOT valid C++ and will break
+   IntelliSense / compilation.
+*/

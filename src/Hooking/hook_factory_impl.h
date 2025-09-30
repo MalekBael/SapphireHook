@@ -1,49 +1,56 @@
 #pragma once
-#include "hook_manager.h"
-#include "../Core/patternscanner.h"
-#include "../Core/WindowsAPIWrapper.h"  // For GetModuleHandleW, GetModuleInformation
+
+#include "hook_manager.h"          // Must provide IHook, HookManager::CreateHook, ValidateHookAddress, IsAddressHooked
 #include "../Logger/Logger.h"
-#include <Psapi.h>  // For MODULEINFO
-#include <sstream>
+
+#include <memory>
+#include <string>
+#include <cstdint>
 
 namespace SapphireHook {
 
-    // Declaration only - implementation is in hook_manager.cpp
-    extern bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize);
+// Provided by another translation unit (implemented in hook_manager.cpp or similar)
+extern bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize);
 
-    // ===== HookFactory Template Implementations =====
+// HookFactory: creates hooks given a detour function pointer.
+// TDelegate is the detour function pointer type (e.g. decltype(&MyDetour)).
+class HookFactory {
+public:
+    HookFactory() = default;
 
     template<typename TDelegate>
-    std::shared_ptr<IHook> HookFactory::CreateFunctionHook(const std::string& name,
-        uintptr_t address,
-        TDelegate detour,
-        const std::string& assemblyName)
+    std::shared_ptr<IHook> CreateFunctionHook(const std::string& name,
+                                              uintptr_t address,
+                                              TDelegate detour,
+                                              const std::string& assemblyName = {})
     {
         LogInfo("Creating function hook: " + name + " at 0x" + std::to_string(address));
 
-        // Validate the address before creating the hook
-        if (!HookManager::ValidateHookAddress(address))
-        {
-            LogError("Invalid address for hook: " + name);
+        if (address == 0) {
+            LogError("HookFactory: address is null for " + name);
             return nullptr;
         }
 
-        // Check if hook already exists
-        if (HookManager::IsAddressHooked(address))
-        {
-            LogWarning("Address already hooked: " + name);
+        if (!HookManager::ValidateHookAddress(address)) {
+            LogError("HookFactory: invalid address for " + name);
             return nullptr;
         }
 
-        // Create the hook using HookManager
-        auto hook = HookManager::CreateHook(name, address, detour, assemblyName);
+        if (HookManager::IsAddressHooked(address)) {
+            LogWarning("HookFactory: address already hooked for " + name);
+            return nullptr;
+        }
 
-        if (hook)
-        {
-            // ...
+        auto hook = HookManager::CreateHook(name, address,
+                                            reinterpret_cast<void*>(detour),
+                                            assemblyName);
+        if (!hook) {
+            LogError("HookFactory: failed to create hook for " + name);
+            return nullptr;
         }
 
         return hook;
     }
+};
 
 } // namespace SapphireHook

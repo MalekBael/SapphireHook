@@ -9,7 +9,7 @@
 #include <thread>
 #include <chrono>
 #include "SimpleJSON.h"
-#include "WindowsApiWrapper.h" // use wrapper, no windows.h
+#include "../Helper/WindowsApiWrapper.h" // use wrapper, no windows.h
 
 using namespace SapphireHook;
 

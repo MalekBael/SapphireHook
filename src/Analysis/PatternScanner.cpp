@@ -1,6 +1,6 @@
 #include "PatternScanner.h"
 #include "../Logger/Logger.h"
-#include "../Core/WindowsAPIWrapper.h"
+#include "../Helper/WindowsAPIWrapper.h"
 #include <algorithm>
 #include <sstream>
 #include <iomanip>

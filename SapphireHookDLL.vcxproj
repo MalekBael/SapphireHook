@@ -37,7 +37,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\capstone\include;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include</AdditionalIncludeDirectories>
       <AdditionalOptions>/FS /bigobj /Gy /Gw /sdl- %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -50,16 +50,41 @@
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>$(ProjectDir)vendor\minhook\include\lib\libMinHook.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>libMinHook.x64.lib;capstone.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMTD</IgnoreSpecificDefaultLibraries>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
       <OptimizeReferences>true</OptimizeReferences>
       <AdditionalOptions>/OPT:REF /OPT:ICF /LTCG</AdditionalOptions>
       <MergeSections> .rdata=.text</MergeSections>
+      <AdditionalLibraryDirectories>$(ProjectDir)vendor\capstone\lib;$(ProjectDir)vendor\minhook\include\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>echo SapphireHookDLL C++20 build completed successfully (MinHook statically linked)</Command>
+      <Command>@echo off
+echo [BUILD] SapphireHookDLL C++20 build completed (MinHook statically linked)
+
+set "CAP_DLL=$(ProjectDir)vendor\capstone\bin\capstone.dll"
+set "CAP_PDB=$(ProjectDir)vendor\capstone\bin\capstone.pdb"
+set "OUT=$(TargetDir)"
+
+if not exist "%CAP_DLL%" (
+  echo [WARN] Capstone DLL not found: %CAP_DLL%
+  goto :eof
+)
+
+echo [COPY] capstone.dll -&gt; %OUT%
+copy /Y "%CAP_DLL%" "%OUT%" &gt;nul
+if errorlevel 1 (
+  echo [ERROR] Failed to copy capstone.dll
+  goto :eof
+)
+
+if exist "%CAP_PDB%" (
+  echo [COPY] capstone.pdb -&gt; %OUT%
+  copy /Y "%CAP_PDB%" "%OUT%" &gt;nul
+)
+
+echo [DONE] Capstone runtime deployed.</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -79,12 +104,14 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\Core\CommandInvoker.cpp" />
+    <ClCompile Include="src\Helper\CapstoneWrapper.cpp" />
     <ClCompile Include="src\Hooking\dynamic_hook_engine.cpp" />
     <ClCompile Include="src\Core\FunctionAnalyzer.cpp" />
     <ClCompile Include="src\Modules\FunctionCallMonitor.cpp" />
     <ClCompile Include="src\Core\FunctionDatabase.cpp" />
     <ClCompile Include="src\Analysis\FunctionScanner.cpp" />
     <ClCompile Include="src\Hooking\hook_manager.cpp" />
+    <ClInclude Include="src\Helper\CapstoneWrapper.h" />
     <ClInclude Include="src\Modules\SettingsModule.h" />
     <ClInclude Include="src\Monitor\NetworkMonitor.h" />
     <ClCompile Include="src\Core\PacketInjector.cpp" />
@@ -92,7 +119,7 @@
     <ClCompile Include="src\Core\SafeMemory.cpp" />
     <ClCompile Include="src\Core\SignatureDatabase.cpp" />
     <ClCompile Include="src\Core\SimpleJSON.cpp" />
-    <ClCompile Include="src\Core\WindowsAPIWrapper.cpp" />
+    <ClCompile Include="src\Helper\WindowsAPIWrapper.cpp" />
     <ClCompile Include="src\Analysis\PatternScanner.cpp" />
     <ClCompile Include="src\Modules\DebugCommandsModule.cpp" />
     <ClCompile Include="src\Modules\GMCommandsModule.cpp" />
@@ -146,7 +173,7 @@
     <ClInclude Include="src\Analysis\PatternScanner.h" />
     <ClInclude Include="src\Analysis\SignatureScanner.h" />
     <ClInclude Include="src\Core\SimpleJSON.h" />
-    <ClInclude Include="src\Core\WindowsApiWrapper.h" />
+    <ClInclude Include="src\Helper\WindowsApiWrapper.h" />
     <ClInclude Include="src\Hooking\hook_factory_impl.h" />
     <ClInclude Include="src\Hooking\hook_manager.h" />
     <ClInclude Include="src\Modules\DebugCommandsModule.h" />
@@ -171,6 +198,34 @@
     <ClInclude Include="src\UI\UIManager.h" />
     <ClInclude Include="src\UI\UIModule.h" />
     <ClInclude Include="src\Hooking\lua_hook.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\aarch64.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\alpha.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\arc.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\arm.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\arm64.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\bpf.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\capstone.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\cs_operand.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\evm.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\hppa.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\loongarch.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\m680x.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\m68k.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\mips.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\mos65xx.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\platform.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\ppc.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\riscv.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\sh.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\sparc.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\systemz.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\systemz_compatibility.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\tms320c64x.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\tricore.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\wasm.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\x86.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\xcore.h" />
+    <ClInclude Include="vendor\capstone\include\capstone\xtensa.h" />
     <ClInclude Include="vendor\hex_editor\imgui_hex.h" />
     <ClInclude Include="vendor\ImGuiFD\ImGuiFD.h" />
     <ClInclude Include="vendor\ImGuiFD\ImGuiFD_internal.h" />
@@ -185,6 +240,7 @@
     <ClInclude Include="src\Logger\Logger.h" />
     <ClInclude Include="vendor\implot\implot.h" />
     <ClInclude Include="vendor\implot\implot_internal.h" />
+    <ClInclude Include="vendor\minhook\include\MinHook.h" />
     <ClInclude Include="vendor\miniz\miniz.h" />
   </ItemGroup>
   <ItemGroup>
@@ -199,7 +255,10 @@
     <None Include="injector\run_injector_admin.bat">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <None Include="packages.config" />
+    <None Include="PseudocodeGenerator.md" />
+    <None Include="vendor\capstone\bin\capstone.dll" />
+    <None Include="vendor\capstone\bin\capstone.pdb" />
+    <None Include="vendor\capstone\bin\cstool.exe" />
     <None Include="vendor\ImGuiFD\LICENCE" />
     <None Include="vendor\ImGuiFD\README.md" />
     <None Include="vendor\implot\LICENSE" />
@@ -207,12 +266,9 @@
     <None Include="vendor\implot\TODO.md" />
     <None Include="vendor\miniz\LICENSE" />
   </ItemGroup>
+  <ItemGroup>
+    <Library Include="vendor\capstone\lib\capstone.lib" />
+    <Library Include="vendor\minhook\include\lib\libMinHook.x64.lib" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
-  <Import Project="packages\Serilog.4.3.0\build\Serilog.targets" Condition="Exists('packages\Serilog.4.3.0\build\Serilog.targets')" />
-  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
-    <PropertyGroup>
-      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
-    </PropertyGroup>
-    <Error Condition="!Exists('packages\Serilog.4.3.0\build\Serilog.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\Serilog.4.3.0\build\Serilog.targets'))" />
-  </Target>
 </Project>
