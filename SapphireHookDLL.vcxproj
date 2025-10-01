@@ -1,5 +1,4 @@
 <Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-
   <!-- Project Configurations -->
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -11,7 +10,6 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
-
   <!-- Globals -->
   <PropertyGroup Label="Globals">
     <ProjectGuid>{386F28A7-F0FC-9A17-E38B-A32BE480F2BD}</ProjectGuid>
@@ -21,9 +19,7 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
-
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-
   <!-- Both configs will use /MDd for now -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
@@ -31,7 +27,6 @@
     <PlatformToolset>v143</PlatformToolset>
     <LanguageStandard>stdcpp20</LanguageStandard>
   </PropertyGroup>
-
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
@@ -39,21 +34,19 @@
     <LanguageStandard>stdcpp20</LanguageStandard>
     <EnableUnitySupport>true</EnableUnitySupport>
   </PropertyGroup>
-
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-
   <!-- Include paths -->
   <PropertyGroup>
     <IncludePath>$(ProjectDir)src\Core;$(ProjectDir)src\Modules;$(ProjectDir)src\UI;$(ProjectDir)src\Hooking;$(ProjectDir)data;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include;$(ProjectDir)vendor\capstone\include;$(IncludePath)</IncludePath>
   </PropertyGroup>
-
   <!-- Debug: static capstone + minhook (/MDd) -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include;$(ProjectDir)vendor\capstone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary> <!-- /MDd -->
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <!-- /MDd -->
       <Optimization>Disabled</Optimization>
       <WholeProgramOptimization>false</WholeProgramOptimization>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -69,7 +62,8 @@
         $(ProjectDir)vendor\minhook;
         %(AdditionalLibraryDirectories)
       </AdditionalLibraryDirectories>
-      <IgnoreSpecificDefaultLibraries></IgnoreSpecificDefaultLibraries>
+      <IgnoreSpecificDefaultLibraries>
+      </IgnoreSpecificDefaultLibraries>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
@@ -79,13 +73,13 @@
       <Command>echo [BUILD] SapphireHookDLL Debug (static Capstone + MinHook) - no dependency DLL copy needed</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
-
   <!-- Release: same /MDd runtime for now & static libs -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include;$(ProjectDir)vendor\capstone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary> <!-- intentionally /MDd per request -->
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <!-- intentionally /MDd per request -->
       <EnableModules>false</EnableModules>
       <Optimization>MaxSpeed</Optimization>
       <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -98,7 +92,8 @@
         $(ProjectDir)vendor\minhook;
         %(AdditionalLibraryDirectories)
       </AdditionalLibraryDirectories>
-      <IgnoreSpecificDefaultLibraries></IgnoreSpecificDefaultLibraries>
+      <IgnoreSpecificDefaultLibraries>
+      </IgnoreSpecificDefaultLibraries>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
@@ -107,7 +102,6 @@
       <Command>echo SapphireHookDLL Release (static Capstone + MinHook, /MDd runtime temporary)</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
-
   <!-- Headers -->
   <ItemGroup>
     <ClInclude Include="src\Analysis\FunctionScanner.h" />
@@ -178,9 +172,9 @@
     <ClInclude Include="vendor\implot\implot_internal.h" />
     <ClInclude Include="vendor\miniz\miniz.h" />
   </ItemGroup>
-
   <!-- Sources -->
   <ItemGroup>
+    <ClCompile Include="SapphireHookInjector\injector.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />
     <ClCompile Include="src\Analysis\FunctionScanner.cpp" />
@@ -231,7 +225,6 @@
     <ClCompile Include="vendor\implot\implot_items.cpp" />
     <ClCompile Include="vendor\miniz\miniz.c" />
   </ItemGroup>
-
   <!-- Non-compilable -->
   <ItemGroup>
     <None Include=".editorconfig" />
@@ -241,12 +234,10 @@
     <None Include="vendor\implot\LICENSE" />
     <None Include="vendor\miniz\LICENSE" />
   </ItemGroup>
-
   <!-- Remove dynamic library references; keep static listing only if you want it visible -->
   <ItemGroup>
     <Library Include="vendor\capstone\capstone.lib" />
   </ItemGroup>
-
   <ItemGroup>
     <Font Include="vendor\imgui\misc\fonts\Cousine-Regular.ttf" />
     <Font Include="vendor\imgui\misc\fonts\DroidSans.ttf" />
@@ -255,6 +246,5 @@
     <Font Include="vendor\imgui\misc\fonts\ProggyTiny.ttf" />
     <Font Include="vendor\imgui\misc\fonts\Roboto-Medium.ttf" />
   </ItemGroup>
-
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

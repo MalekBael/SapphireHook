@@ -125,7 +125,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\injector\injector.cpp" />
+    <ClCompile Include="injector.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

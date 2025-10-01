@@ -209,10 +209,10 @@ private:
     bool m_pendingPseudoRequest{ false };
     bool m_showSideBySide{ false };
 
-    // Selectable pseudocode buffer
+    // Pseudocode buffer (always selectable now)
     std::string m_pseudoDisplayBuffer;
     uint64_t    m_pseudoDisplayBufferVersion{ 0 };
-    bool        m_useSelectablePseudo{ true };
+    std::vector<char> m_pseudoSelectableBuffer;
 
     // Export UI
     bool  m_exportPopupOpen{ false };
@@ -238,4 +238,5 @@ private:
     // Export helpers
     std::string BuildExportText(const PseudoCacheEntry& entry) const;
     bool WriteTextFileUTF8(const char* path, const std::string& content, bool overwrite, std::string& err);
+    void RenderPseudoSelectable(const char* id, const std::string& text, ImVec2 size);
 };

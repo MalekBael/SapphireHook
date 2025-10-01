@@ -13,10 +13,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SapphireHookInjector", "SapphireHookInjector\SapphireHookInjector.vcxproj", "{F15D9F99-E492-44BC-A293-2DE22061909F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dalamud", "..\Dalamud\Dalamud\Dalamud.csproj", "{7C028155-3264-A4D6-659C-FE1FEA3F88E6}"
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Dalamud.Boot", "..\Dalamud\Dalamud.Boot\Dalamud.Boot.vcxproj", "{55198DC3-A03D-408E-A8EB-2077780C8576}"
-EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Dalamud.Injector", "..\Dalamud\Dalamud.Injector\Dalamud.Injector.csproj", "{1BC52734-C8A2-DE05-0BD2-8826F17A4542}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sapphire_reference", "..\sapphire_reference\sapphire_reference.vcxproj", "{3D8B5DCA-96C3-494A-9F26-9D5569A044E6}"
@@ -35,10 +31,6 @@ Global
 		{F15D9F99-E492-44BC-A293-2DE22061909F}.Debug|x64.Build.0 = Debug|x64
 		{F15D9F99-E492-44BC-A293-2DE22061909F}.Release|x64.ActiveCfg = Release|x64
 		{F15D9F99-E492-44BC-A293-2DE22061909F}.Release|x64.Build.0 = Release|x64
-		{7C028155-3264-A4D6-659C-FE1FEA3F88E6}.Debug|x64.ActiveCfg = Debug|x64
-		{7C028155-3264-A4D6-659C-FE1FEA3F88E6}.Release|x64.ActiveCfg = Release|x64
-		{55198DC3-A03D-408E-A8EB-2077780C8576}.Debug|x64.ActiveCfg = Debug|x64
-		{55198DC3-A03D-408E-A8EB-2077780C8576}.Release|x64.ActiveCfg = Release|x64
 		{1BC52734-C8A2-DE05-0BD2-8826F17A4542}.Debug|x64.ActiveCfg = Debug|x64
 		{1BC52734-C8A2-DE05-0BD2-8826F17A4542}.Release|x64.ActiveCfg = Release|x64
 		{3D8B5DCA-96C3-494A-9F26-9D5569A044E6}.Debug|x64.ActiveCfg = Debug|x64

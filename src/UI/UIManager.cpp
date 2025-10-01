@@ -15,8 +15,7 @@
 #include <pdh.h>
 #include <pdhmsg.h>
 #include <iphlpapi.h>
-
-#include "../Modules/SettingsModule.h" // for SettingsModule registration
+#include "../Modules/SettingsModule.h"
 
 #pragma comment(lib, "pdh.lib")
 #pragma comment(lib, "iphlpapi.lib")
@@ -297,111 +296,111 @@ UIModule* UIManager::GetModule(const char* name)
 
 void UIManager::RegisterDefaultModules()
 {
- LogInfo("=== RegisterDefaultModules() called on instance: " +
-  std::to_string(reinterpret_cast<uintptr_t>(this)) + " ===");
- LogInfo("Current module count before registration: " + std::to_string(m_modules.size()));
+    LogInfo("=== RegisterDefaultModules() called on instance: " +
+        std::to_string(reinterpret_cast<uintptr_t>(this)) + " ===");
+    LogInfo("Current module count before registration: " + std::to_string(m_modules.size()));
 
- int successCount = 0;
+    int successCount = 0;
 
- try
- {
-  if (GetModule("debug_commands") == nullptr)
-  {
-   LogInfo("Creating Debug Commands module...");
-   auto debugModule = std::make_unique<DebugCommandsModule>();
-   RegisterModule(std::move(debugModule));
-   LogInfo("[OK] Debug Commands module registered");
-   successCount++;
-  }
-  else
-  {
-   LogInfo("Debug Commands module already exists");
-   successCount++;
-  }
- }
- catch (const std::exception& e)
- {
-  LogError("Failed to register Debug Commands: " + std::string(e.what()));
- }
- catch (...)
- {
-  LogError("Failed to register Debug Commands: unknown exception");
- }
+    try
+    {
+        if (GetModule("debug_commands") == nullptr)
+        {
+            LogInfo("Creating Debug Commands module...");
+            auto debugModule = std::make_unique<DebugCommandsModule>();
+            RegisterModule(std::move(debugModule));
+            LogInfo("[OK] Debug Commands module registered");
+            successCount++;
+        }
+        else
+        {
+            LogInfo("Debug Commands module already exists");
+            successCount++;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        LogError("Failed to register Debug Commands: " + std::string(e.what()));
+    }
+    catch (...)
+    {
+        LogError("Failed to register Debug Commands: unknown exception");
+    }
 
- try
- {
-  if (GetModule("function_monitor") == nullptr)
-  {
-   LogInfo("Creating Function Call Monitor module...");
-   auto functionModule = std::make_unique<FunctionCallMonitor>();
-   RegisterModule(std::move(functionModule));
-   LogInfo("[OK] Function Call Monitor module registered");
-   successCount++;
-  }
-  else
-  {
-   LogInfo("Function Call Monitor module already exists");
-   successCount++;
-  }
- }
- catch (const std::exception& e)
- {
-  LogError("Failed to register Function Call Monitor: " + std::string(e.what()));
- }
- catch (...)
- {
-  LogError("Failed to register Function Call Monitor: unknown exception");
- }
+    try
+    {
+        if (GetModule("function_monitor") == nullptr)
+        {
+            LogInfo("Creating Function Call Monitor module...");
+            auto functionModule = std::make_unique<FunctionCallMonitor>();
+            RegisterModule(std::move(functionModule));
+            LogInfo("[OK] Function Call Monitor module registered");
+            successCount++;
+        }
+        else
+        {
+            LogInfo("Function Call Monitor module already exists");
+            successCount++;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        LogError("Failed to register Function Call Monitor: " + std::string(e.what()));
+    }
+    catch (...)
+    {
+        LogError("Failed to register Function Call Monitor: unknown exception");
+    }
 
- try
- {
-  if (GetModule("memory_viewer") == nullptr)
-  {
-   LogInfo("Creating Memory Viewer module...");
-   auto memView = std::make_unique<MemoryViewerModule>();
-   RegisterModule(std::move(memView));
-   LogInfo("[OK] Memory Viewer module registered");
-   successCount++;
-  }
-  else
-  {
-   LogInfo("Memory Viewer module already exists");
-   successCount++;
-  }
- }
- catch (const std::exception& e)
- {
-  LogError("Failed to register Memory Viewer: " + std::string(e.what()));
- }
- catch (...)
- {
-  LogError("Failed to register Memory Viewer: unknown exception");
- }
+    try
+    {
+        if (GetModule("memory_viewer") == nullptr)
+        {
+            LogInfo("Creating Memory Viewer module...");
+            auto memView = std::make_unique<MemoryViewerModule>();
+            RegisterModule(std::move(memView));
+            LogInfo("[OK] Memory Viewer module registered");
+            successCount++;
+        }
+        else
+        {
+            LogInfo("Memory Viewer module already exists");
+            successCount++;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        LogError("Failed to register Memory Viewer: " + std::string(e.what()));
+    }
+    catch (...)
+    {
+        LogError("Failed to register Memory Viewer: unknown exception");
+    }
 
- try
- {
-  if (GetModule("gm_commands") == nullptr)
-  {
-   LogInfo("Creating GM Commands module...");
-   auto gm = std::make_unique<GMCommandsModule>();
-   RegisterModule(std::move(gm));
-   LogInfo("[OK] GM Commands module registered");
-   successCount++;
-  }
-  else
-  {
-   LogInfo("GM Commands module already exists");
-   successCount++;
-  }
- }
- catch (const std::exception& e)
- {
-  LogError("Failed to register GM Commands: " + std::string(e.what()));
- }
- catch (...)
- {
-  LogError("Failed to register GM Commands: unknown exception");
- }
+    try
+    {
+        if (GetModule("gm_commands") == nullptr)
+        {
+            LogInfo("Creating GM Commands module...");
+            auto gm = std::make_unique<GMCommandsModule>();
+            RegisterModule(std::move(gm));
+            LogInfo("[OK] GM Commands module registered");
+            successCount++;
+        }
+        else
+        {
+            LogInfo("GM Commands module already exists");
+            successCount++;
+        }
+    }
+    catch (const std::exception& e)
+    {
+        LogError("Failed to register GM Commands: " + std::string(e.what()));
+    }
+    catch (...)
+    {
+        LogError("Failed to register GM Commands: unknown exception");
+    }
 
 	// Unified Network Monitor (packets + graphs)
 	try
@@ -429,28 +428,28 @@ void UIManager::RegisterDefaultModules()
 		LogError("Failed to register Net Diagnostics: unknown exception");
 	}
 
-try
-{
-    if (GetModule("settings") == nullptr)
-    {
-        LogInfo("Creating Settings module...");
-        auto settings = std::make_unique<SettingsModule>();
-        RegisterModule(std::move(settings));
-        LogInfo("[OK] Settings module registered");
-    }
-    else
-    {
-        LogInfo("Settings module already exists");
-    }
-}
-catch (const std::exception& e)
-{
-    LogError("Failed to register Settings module: " + std::string(e.what()));
-}
-catch (...)
-{
-    LogError("Failed to register Settings module: unknown exception");
-}
+	try
+	{
+	    if (GetModule("settings") == nullptr)
+	    {
+	        LogInfo("Creating Settings module...");
+	        auto settings = std::make_unique<SettingsModule>();
+	        RegisterModule(std::move(settings));
+	        LogInfo("[OK] Settings module registered");
+	    }
+	    else
+	    {
+	        LogInfo("Settings module already exists");
+	    }
+	}
+	catch (const std::exception& e)
+	{
+	    LogError("Failed to register Settings module: " + std::string(e.what()));
+	}
+	catch (...)
+	{
+	    LogError("Failed to register Settings module: unknown exception");
+	}
 
  LogInfo("=== MODULE REGISTRATION COMPLETE ===");
  LogInfo("Successfully registered: " + std::to_string(successCount) + "/5 modules");
@@ -470,6 +469,54 @@ catch (...)
    LogError("  " + std::to_string(i + 1) + ". NULL MODULE!");
   }
  }
+}
+
+void UIManager::VerifyDefaultModules()
+{
+    // Single source of truth for expected default modules
+    static constexpr const char* kDefaultModules[] = {
+        "debug_commands",
+        "function_monitor",
+        "memory_viewer",
+        "gm_commands",
+        "net_diagnostics",
+        "settings"
+    };
+
+    LogInfo("=== DEFAULT MODULE VERIFICATION START ===");
+    size_t missing = 0;
+    for (const char* name : kDefaultModules)
+    {
+        if (GetModule(name))
+            LogInfo(std::string("[OK] ") + name);
+        else
+        {
+            LogError(std::string("[MISSING] ") + name);
+            ++missing;
+        }
+    }
+    if (missing == 0)
+        LogInfo("All default modules present");
+    else
+        LogError(std::to_string(missing) + " default modules missing");
+    LogInfo("=== DEFAULT MODULE VERIFICATION END ===");
+}
+
+void UIManager::LogModuleSummary() const
+{
+    LogInfo("=== MODULE SUMMARY (" + std::to_string(m_modules.size()) + ") ===");
+    if (m_modules.empty())
+    {
+        LogError("No modules registered");
+        return;
+    }
+    for (const auto& mod : m_modules)
+    {
+        if (mod)
+            LogInfo(" - " + std::string(mod->GetDisplayName()) + " (" + mod->GetName() + ")");
+        else
+            LogError(" - NULL MODULE POINTER");
+    }
 }
 
 void UIManager::RenderMainMenu()

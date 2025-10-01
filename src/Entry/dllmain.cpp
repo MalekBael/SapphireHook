@@ -132,40 +132,19 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
     }
 
     try {
-        LogInfo("=== STARTING UI MODULE REGISTRATION ===");
+        LogInfo("=== INITIALIZING UI MODULES ===");
         UIManager& uiManager = UIManager::GetInstance();
-        LogInfo("Got UIManager instance at: " + std::to_string(reinterpret_cast<uintptr_t>(&uiManager)));
+        LogInfo("UIManager instance: " + std::to_string(reinterpret_cast<uintptr_t>(&uiManager)));
+
         uiManager.RegisterDefaultModules();
-        UIManager& verifyManager = UIManager::GetInstance();
-        LogInfo("Verification: UIManager instance at: " + std::to_string(reinterpret_cast<uintptr_t>(&verifyManager)));
+        uiManager.VerifyDefaultModules();      // dynamic verification
+        uiManager.LogModuleSummary();          // enumerate what actually loaded
 
-        if (&uiManager != &verifyManager) {
-            LogError("CRITICAL: UIManager singleton inconsistency detected!");
-            LogError("Registration instance: " + std::to_string(reinterpret_cast<uintptr_t>(&uiManager)));
-            LogError("Verification instance: " + std::to_string(reinterpret_cast<uintptr_t>(&verifyManager)));
-        } else {
-            LogInfo("✓ UIManager singleton consistency verified");
-        }
-
-        bool ipcFound = (uiManager.GetModule("ipc_commands") != nullptr);
-        bool debugFound = (uiManager.GetModule("debug_commands") != nullptr);
-        bool functionFound = (uiManager.GetModule("function_monitor") != nullptr);
-
-        LogInfo("=== MODULE REGISTRATION VERIFICATION ===");
-        LogInfo("IPC Commands: " + std::string(ipcFound ? " FOUND" : "MISSING"));
-        LogInfo("Debug Commands: " + std::string(debugFound ? " FOUND" : " MISSING"));
-        LogInfo("Function Monitor: " + std::string(functionFound ? " FOUND" : " MISSING"));
-
-        if (ipcFound && debugFound && functionFound)
-            LogInfo("ALL UI MODULES REGISTERED SUCCESSFULLY!");
-        else
-            LogError("SOME MODULES FAILED TO REGISTER!");
-
-        LogInfo("UI modules registration completed");
+        LogInfo("UI module initialization sequence complete");
     } catch (const std::exception& e) {
-        LogError("UI module registration failed with exception: " + std::string(e.what()));
+        LogError("UI module initialization failed: " + std::string(e.what()));
     } catch (...) {
-        LogError("UI module registration failed with unknown exception");
+        LogError("UI module initialization failed with unknown exception");
     }
 
     LogInfo("=== All systems initialized! ===");

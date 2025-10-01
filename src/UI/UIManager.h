@@ -5,13 +5,13 @@
 
 namespace SapphireHook
 {
-    class UIModule; 
+    class UIModule;
 
     class UIManager
     {
     public:
         static UIManager& GetInstance();
-        static bool HasInstance(); 
+        static bool HasInstance();
         static void Shutdown();
 
         void Initialize();
@@ -30,6 +30,10 @@ namespace SapphireHook
         static void RequestUnload();
         static bool IsUnloadRequested();
         const std::vector<std::unique_ptr<UIModule>>& GetModules() const { return m_modules; }
+
+        // NEW: Centralized reporting / verification
+        void VerifyDefaultModules();
+        void LogModuleSummary() const;
 
     private:
         UIManager();
