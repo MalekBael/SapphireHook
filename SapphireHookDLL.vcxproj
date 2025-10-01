@@ -174,7 +174,6 @@
   </ItemGroup>
   <!-- Sources -->
   <ItemGroup>
-    <ClCompile Include="SapphireHookInjector\injector.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />
     <ClCompile Include="src\Analysis\FunctionScanner.cpp" />
@@ -220,7 +219,6 @@
     <ClCompile Include="vendor\imgui\imgui_draw.cpp" />
     <ClCompile Include="vendor\imgui\imgui_tables.cpp" />
     <ClCompile Include="vendor\imgui\imgui_widgets.cpp" />
-    <ClCompile Include="vendor\imgui\misc\fonts\binary_to_compressed_c.cpp" />
     <ClCompile Include="vendor\implot\implot.cpp" />
     <ClCompile Include="vendor\implot\implot_items.cpp" />
     <ClCompile Include="vendor\miniz\miniz.c" />
@@ -237,14 +235,6 @@
   <!-- Remove dynamic library references; keep static listing only if you want it visible -->
   <ItemGroup>
     <Library Include="vendor\capstone\capstone.lib" />
-  </ItemGroup>
-  <ItemGroup>
-    <Font Include="vendor\imgui\misc\fonts\Cousine-Regular.ttf" />
-    <Font Include="vendor\imgui\misc\fonts\DroidSans.ttf" />
-    <Font Include="vendor\imgui\misc\fonts\Karla-Regular.ttf" />
-    <Font Include="vendor\imgui\misc\fonts\ProggyClean.ttf" />
-    <Font Include="vendor\imgui\misc\fonts\ProggyTiny.ttf" />
-    <Font Include="vendor\imgui\misc\fonts\Roboto-Medium.ttf" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

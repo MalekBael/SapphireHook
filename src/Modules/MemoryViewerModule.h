@@ -32,7 +32,8 @@ struct PseudoVariable {
     std::string name;
     int64_t value{};
     PseudoVariable(Kind k = Register, const std::string& n = "", int64_t v = 0)
-        : kind(k), name(n), value(v) {}
+        : kind(k), name(n), value(v) {
+    }
 };
 
 struct PseudoStatement {
@@ -59,8 +60,8 @@ struct PseudoFunctionIR {
     uintptr_t start{};
     size_t size{};
     std::vector<PseudoStatement> statements;
-    bool truncated{false};
-    int stackFrameSize{0};
+    bool truncated{ false };
+    int stackFrameSize{ 0 };
 };
 
 class IDisassemblyBackend {
@@ -209,10 +210,10 @@ private:
     bool m_pendingPseudoRequest{ false };
     bool m_showSideBySide{ false };
 
-    // Pseudocode buffer (always selectable now)
+    // Selectable pseudocode buffer
     std::string m_pseudoDisplayBuffer;
     uint64_t    m_pseudoDisplayBufferVersion{ 0 };
-    std::vector<char> m_pseudoSelectableBuffer;
+    bool        m_useSelectablePseudo{ true };
 
     // Export UI
     bool  m_exportPopupOpen{ false };
@@ -238,5 +239,4 @@ private:
     // Export helpers
     std::string BuildExportText(const PseudoCacheEntry& entry) const;
     bool WriteTextFileUTF8(const char* path, const std::string& content, bool overwrite, std::string& err);
-    void RenderPseudoSelectable(const char* id, const std::string& text, ImVec2 size);
 };

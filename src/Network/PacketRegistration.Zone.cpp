@@ -1,24 +1,40 @@
-#include "PacketRegistration.h"
-#include "PacketRegistration.Macros.h"
 #include "../Network/OpcodeNames.h"
 #include "../ProtocolHandlers/CommonTypes.h"
-#include "../ProtocolHandlers/Zone/ServerZoneDef.h"
 #include "../ProtocolHandlers/Zone/ClientZoneDef.h"
+#include "../ProtocolHandlers/Zone/ServerZoneDef.h"
+#include "PacketRegistration.h"
+#include "PacketRegistration.Macros.h"
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstring> // for std::memcpy
+#include <iomanip>
+#include <iterator>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 #ifndef ENABLE_PACKET_LAYERS
 #define ENABLE_PACKET_LAYERS 0
 #endif
 
-#include <sstream>
-#include <iomanip>
-#include <algorithm>
-#include <string>
-#include <array>
-#include <unordered_map>
-#include <unordered_set>
-#include <cstddef>
-#include <iterator>
-#include <cstring> // for std::memcpy
+#ifdef __INTELLISENSE__
+// IntelliSense-friendly fallbacks: prevent deep macro expansion noise
+#ifdef REGISTER_PACKET
+#undef REGISTER_PACKET
+#endif
+#ifdef FIELD
+#undef FIELD
+#endif
+
+// Make REGISTER_PACKET syntactically valid while exposing 'pkt' for member browsing
+#define REGISTER_PACKET(Channel, Outgoing, Opcode, StructType, ...) \
+        if constexpr (false) { const StructType* pkt = nullptr; (void)pkt; }
+
+    // Suppress FIELD macro bodies
+#define FIELD(Name, Expr)
+#endif
 
 using namespace PacketDecoding;
 using namespace PacketStructures;
@@ -169,10 +185,13 @@ namespace PacketDecoding {
 
 // ================= REGISTER PACKETS =================
 void PacketDecoding::RegisterZonePackets() {
-    using namespace PacketStructures::Server::Zone;
+    // Don't use blanket "using namespace" to avoid ambiguity
+    namespace ServerZone = PacketStructures::Server::Zone;
+    namespace ClientZone = PacketStructures::Client::Zone;
 
+    // ================= REGISTER SERVER PACKETS =================
     // CORE / SESSION
-    REGISTER_PACKET(1, false, 0x0065, FFXIVIpcSync,
+    REGISTER_PACKET(1, false, 0x0065, ServerZone::FFXIVIpcSync,
         FIELD("ClientTimeValue", FieldToString(pkt->clientTimeValue)),
         FIELD("TransmissionInterval", FieldToString(pkt->transmissionInterval)),
         FIELD("OriginEntityId", FormatHex(pkt->position.originEntityId)),
@@ -180,18 +199,18 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("Direction", FormatAngle(pkt->position.dir))
     );
 
-    REGISTER_PACKET(1, false, 0x0066, FFXIVIpcLogin,
+    REGISTER_PACKET(1, false, 0x0066, ServerZone::FFXIVIpcLogin,
         FIELD("ClientTimeValue", FieldToString(pkt->clientTimeValue)),
         FIELD("LoginTicketId", FormatHex(pkt->loginTicketId)),
         FIELD("PlayerActorId", FormatHex(pkt->playerActorId))
     );
 
-    REGISTER_PACKET(1, false, 0x02D6, FFXIVIpcEnableLogout,
+    REGISTER_PACKET(1, false, 0x02D6, ServerZone::FFXIVIpcEnableLogout,
         FIELD("Content", FieldToString(pkt->content))
     );
 
     // CHAT / SOCIAL
-    REGISTER_PACKET(1, false, 0x0067, FFXIVIpcChat,
+    REGISTER_PACKET(1, false, 0x0067, ServerZone::FFXIVIpcChat,
         FIELD("Type", FieldToString(pkt->type) + " (" + GetChatTypeName(pkt->type) + ")"),
         FIELD("EntityId", FormatHex(pkt->entityId)),
         FIELD("CharacterId", FormatHex(pkt->characterId)),
@@ -199,7 +218,7 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("Message", FormatString(pkt->message, std::min<size_t>(200, sizeof(pkt->message))))
     );
 
-    REGISTER_PACKET(1, false, 0x00CC, FFXIVIpcGetCommonlistResult,
+    REGISTER_PACKET(1, false, 0x00CC, ServerZone::FFXIVIpcGetCommonlistResult,
         FIELD("CommunityId", FormatHex(pkt->CommunityID)),
         FIELD("Index", FieldToString(pkt->Index)),
         FIELD("NextIndex", FieldToString(pkt->NextIndex)),
@@ -207,7 +226,7 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("Entry0Name", FormatString(pkt->entries[0].CharacterName, 32))
     );
 
-    REGISTER_PACKET(1, false, 0x00CD, FFXIVIpcGetCommonlistDetailResult,
+    REGISTER_PACKET(1, false, 0x00CD, ServerZone::FFXIVIpcGetCommonlistDetailResult,
         FIELD("DetailCharacterID", FormatHex(pkt->DetailCharacterID)),
         FIELD("CommunityID", FormatHex(pkt->CommunityID)),
         FIELD("SelectClassID", FormatHex(pkt->SelectClassID)),
@@ -215,161 +234,161 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("FirstClassJobId", FieldToString(pkt->ClassData[0].id))
     );
 
-    REGISTER_PACKET(1, false, 0x00EB, FFXIVIpcPcSearchResult,
+    REGISTER_PACKET(1, false, 0x00EB, ServerZone::FFXIVIpcPcSearchResult,
         FIELD("ResultCount", FieldToString(pkt->ResultCount))
     );
 
-    REGISTER_PACKET(1, false, 0x00F0, FFXIVIpcLinkshellResult,
+    REGISTER_PACKET(1, false, 0x00F0, ServerZone::FFXIVIpcLinkshellResult,
         FIELD("LinkshellID", FormatHex(pkt->LinkshellID)),
         FIELD("Result", FieldToString(pkt->Result)),
         FIELD("TargetName", FormatString(pkt->TargetName, 32))
     );
 
-    REGISTER_PACKET(1, false, 0x00C9, FFXIVIpcInviteResult,
+    REGISTER_PACKET(1, false, 0x00C9, ServerZone::FFXIVIpcInviteResult,
         FIELD("Result", FieldToString(pkt->Result)),
         FIELD("AuthType", FieldToString(pkt->AuthType)),
         FIELD("TargetName", FormatString(pkt->TargetName, 32))
     );
 
-    REGISTER_PACKET(1, false, 0x00CA, FFXIVIpcInviteReplyResult,
+    REGISTER_PACKET(1, false, 0x00CA, ServerZone::FFXIVIpcInviteReplyResult,
         FIELD("Result", FieldToString(pkt->Result)),
         FIELD("Answer", FieldToString(pkt->Answer)),
         FIELD("InviteCharacter", FormatString(pkt->InviteCharacterName, 32))
     );
 
-    REGISTER_PACKET(1, false, 0x00CB, FFXIVIpcInviteUpdate,
+    REGISTER_PACKET(1, false, 0x00CB, ServerZone::FFXIVIpcInviteUpdate,
         FIELD("InviteCharacterID", FormatHex(pkt->InviteCharacterID)),
         FIELD("InviteTime", FieldToString(pkt->InviteTime)),
         FIELD("InviteName", FormatString(pkt->InviteName, 32))
     );
 
-    REGISTER_PACKET(1, false, 0x00E6, FFXIVIpcFriendlistRemoveResult,
+    REGISTER_PACKET(1, false, 0x00E6, ServerZone::FFXIVIpcFriendlistRemoveResult,
         FIELD("RemovedCharacterID", FormatHex(pkt->RemovedCharacterID)),
         FIELD("Result", FieldToString(pkt->Result)),
         FIELD("RemovedName", FormatString(pkt->RemovedCharacterName, 32))
     );
 
-    REGISTER_PACKET(1, false, 0x00E1, FFXIVIpcBlacklistAddResult,
+    REGISTER_PACKET(1, false, 0x00E1, ServerZone::FFXIVIpcBlacklistAddResult,
         FIELD("AddedCharacterID", FormatHex(pkt->AddedCharacter.CharacterID)),
         FIELD("CharacterName", FormatString(pkt->AddedCharacter.CharacterName, 32)),
         FIELD("Result", FieldToString(pkt->Result))
     );
 
-    REGISTER_PACKET(1, false, 0x00E2, FFXIVIpcBlacklistRemoveResult,
+    REGISTER_PACKET(1, false, 0x00E2, ServerZone::FFXIVIpcBlacklistRemoveResult,
         FIELD("RemovedCharacterID", FormatHex(pkt->RemovedCharacter.CharacterID)),
         FIELD("CharacterName", FormatString(pkt->RemovedCharacter.CharacterName, 32)),
         FIELD("Result", FieldToString(pkt->Result))
     );
 
-    REGISTER_PACKET(1, false, 0x00E3, FFXIVIpcGetBlacklistResult,
+    REGISTER_PACKET(1, false, 0x00E3, ServerZone::FFXIVIpcGetBlacklistResult,
         FIELD("Count", FieldToString((int)20)),
         FIELD("Index", FieldToString(pkt->Index)),
         FIELD("NextIndex", FieldToString(pkt->NextIndex))
     );
 
-    REGISTER_PACKET(1, false, 0x00F1, FFXIVIpcGetLinkshellListResult,
+    REGISTER_PACKET(1, false, 0x00F1, ServerZone::FFXIVIpcGetLinkshellListResult,
         FIELD("FirstLinkshellID", FormatHex(pkt->LinkshellList[0].LinkshellID))
     );
 
-    REGISTER_PACKET(1, false, 0x00D2, FFXIVIpcChatChannelResult,
+    REGISTER_PACKET(1, false, 0x00D2, ServerZone::FFXIVIpcChatChannelResult,
         FIELD("ChannelID", FormatHex(pkt->ChannelID)),
         FIELD("CommunityID", FormatHex(pkt->CommunityID)),
         FIELD("Result", FieldToString(pkt->Result))
     );
 
-    REGISTER_PACKET(1, false, 0x00D5, FFXIVIpcSetOnlineStatus,
+    REGISTER_PACKET(1, false, 0x00D5, ServerZone::FFXIVIpcSetOnlineStatus,
         FIELD("OnlineStatusFlags", FormatHex(pkt->onlineStatusFlags))
     );
 
     // PROFILE
-    REGISTER_PACKET(1, false, 0x00CE, FFXIVIpcSetProfileResult,
+    REGISTER_PACKET(1, false, 0x00CE, ServerZone::FFXIVIpcSetProfileResult,
         FIELD("Result", FieldToString(pkt->Result)),
         FIELD("Region", FieldToString(pkt->Region)),
         FIELD("Comment", FormatString(pkt->SearchComment, 60))
     );
 
-    REGISTER_PACKET(1, false, 0x00CF, FFXIVIpcGetProfileResult,
+    REGISTER_PACKET(1, false, 0x00CF, ServerZone::FFXIVIpcGetProfileResult,
         FIELD("Region", FieldToString(pkt->Region)),
         FIELD("Comment", FormatString(pkt->SearchComment, 60))
     );
 
-    REGISTER_PACKET(1, false, 0x00D0, FFXIVIpcGetSearchCommentResult,
+    REGISTER_PACKET(1, false, 0x00D0, ServerZone::FFXIVIpcGetSearchCommentResult,
         FIELD("TargetEntityID", FormatHex(pkt->TargetEntityID)),
         FIELD("Comment", FormatString(pkt->SearchComment, 60))
     );
 
-    REGISTER_PACKET(1, false, 0x00D1, FFXIVIpcGetCharacterNameResult,
+    REGISTER_PACKET(1, false, 0x00D1, ServerZone::FFXIVIpcGetCharacterNameResult,
         FIELD("CharacterID", FormatHex(pkt->CharacterID)),
         FIELD("Name", FormatString(pkt->CharacterName, 32))
     );
 
     // SYSTEM MESSAGES
-    REGISTER_PACKET(1, false, 0x00D3, FFXIVIpcSendSystemMessage,
+    REGISTER_PACKET(1, false, 0x00D3, ServerZone::FFXIVIpcSendSystemMessage,
         FIELD("MessageParam", FieldToString(pkt->MessageParam)),
         FIELD("Message", FormatString(pkt->Message, 120))
     );
 
-    REGISTER_PACKET(1, false, 0x00D4, FFXIVIpcSendLoginMessage,
+    REGISTER_PACKET(1, false, 0x00D4, ServerZone::FFXIVIpcSendLoginMessage,
         FIELD("MessageParam", FieldToString(pkt->MessageParam)),
         FIELD("Message", FormatString(pkt->Message, 120))
     );
 
     // ACHIEVEMENT
-    REGISTER_PACKET(1, false, 0x02DD, FFXIVIpcAchievement,
+    REGISTER_PACKET(1, false, 0x02DD, ServerZone::FFXIVIpcAchievement,
         FIELD("CompleteMaskFirstByte", FormatHex(pkt->complete[0])),
         FIELD("History0", FieldToString(pkt->history[0]))
     );
 
     // MAIL
-    REGISTER_PACKET(1, false, 0x00FB, FFXIVIpcGetLetterMessageResult,
+    REGISTER_PACKET(1, false, 0x00FB, ServerZone::FFXIVIpcGetLetterMessageResult,
         FIELD("FirstSender", FormatHex(pkt->LetterMessage[0].SenderCharacterID)),
         FIELD("FirstMessage", FormatString(pkt->LetterMessage[0].Message, 40)),
         FIELD("NextIndex", FieldToString(pkt->NextIndex))
     );
 
-    REGISTER_PACKET(1, false, 0x00FC, FFXIVIpcGetLetterMessageDetailResult,
+    REGISTER_PACKET(1, false, 0x00FC, ServerZone::FFXIVIpcGetLetterMessageDetailResult,
         FIELD("SenderCharacterID", FormatHex(pkt->SenderCharacterID)),
         FIELD("Message", FormatString(pkt->Message, 80))
     );
 
-    REGISTER_PACKET(1, false, 0x00FA, FFXIVIpcLetterResult,
+    REGISTER_PACKET(1, false, 0x00FA, ServerZone::FFXIVIpcLetterResult,
         FIELD("SenderCharacterID", FormatHex(pkt->SenderCharacterID)),
         FIELD("Result", FieldToString(pkt->Result))
     );
 
-    REGISTER_PACKET(1, false, 0x00FD, FFXIVIpcGetLetterStatusResult,
+    REGISTER_PACKET(1, false, 0x00FD, ServerZone::FFXIVIpcGetLetterStatusResult,
         FIELD("UnreadCount", FieldToString(pkt->UnreadCount)),
         FIELD("TotalCount", FieldToString(pkt->TotalCount)),
         FIELD("ItemCount", FieldToString(pkt->ItemCount))
     );
 
     // MARKET / ITEM SEARCH
-    REGISTER_PACKET(1, false, 0x0105, FFXIVIpcGetItemSearchListResult,
+    REGISTER_PACKET(1, false, 0x0105, ServerZone::FFXIVIpcGetItemSearchListResult,
         FIELD("FirstCatalogID", FieldToString(pkt->ItemSearchList[0].CatalogID)),
         FIELD("FirstPrice", FieldToString(pkt->ItemSearchList[0].SellPrice)),
         FIELD("Index", FieldToString(pkt->Index))
     );
 
-    REGISTER_PACKET(1, false, 0x0109, FFXIVIpcGetItemHistoryResult,
+    REGISTER_PACKET(1, false, 0x0109, ServerZone::FFXIVIpcGetItemHistoryResult,
         FIELD("CatalogID", FieldToString(pkt->CatalogID)),
         FIELD("FirstHistoryPrice", FieldToString(pkt->ItemHistoryList[0].SellPrice))
     );
 
-    REGISTER_PACKET(1, false, 0x010C, FFXIVIpcCatalogSearchResult,
+    REGISTER_PACKET(1, false, 0x010C, ServerZone::FFXIVIpcCatalogSearchResult,
         FIELD("FirstCatalogID", FieldToString(pkt->CatalogList[0].CatalogID)),
         FIELD("Result", FieldToString(pkt->Result)),
         FIELD("Index", FieldToString(pkt->Index))
     );
 
     // COMBAT / ACTIONS
-    REGISTER_PACKET(1, false, 0x0141, FFXIVIpcActionIntegrity,
+    REGISTER_PACKET(1, false, 0x0141, ServerZone::FFXIVIpcActionIntegrity,
         FIELD("ResultId", FieldToString(pkt->ResultId)),
         FIELD("Target", FormatHex(pkt->Target)),
         FIELD("StatusCount", FieldToString(pkt->StatusCount)),
         FIELD("FirstStatusId", FormatHex(pkt->Status[0].Id))
     );
 
-    REGISTER_PACKET(1, false, 0x0142, FFXIVIpcActorControl,
+    REGISTER_PACKET(1, false, 0x0142, ServerZone::FFXIVIpcActorControl,
         FIELD("Category", FieldToString(pkt->category) + " (" + std::string(::LookupActorControlCategoryName(pkt->category)) + ")"),
         FIELD("Param1", FormatHex(pkt->param1)),
         FIELD("Param2", FormatHex(pkt->param2)),
@@ -377,7 +396,7 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("Param4", FormatHex(pkt->param4))
     );
 
-    REGISTER_PACKET(1, false, 0x0143, FFXIVIpcActorControlSelf,
+    REGISTER_PACKET(1, false, 0x0143, ServerZone::FFXIVIpcActorControlSelf,
         FIELD("Category", FieldToString(pkt->category) + " (" + std::string(::LookupActorControlCategoryName(pkt->category)) + ")"),
         FIELD("Param1", FormatHex(pkt->param1)),
         FIELD("Param2", FormatHex(pkt->param2)),
@@ -387,7 +406,7 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("Param6", FormatHex(pkt->param6))
     );
 
-    REGISTER_PACKET(1, false, 0x0144, FFXIVIpcActorControlTarget,
+    REGISTER_PACKET(1, false, 0x0144, ServerZone::FFXIVIpcActorControlTarget,
         FIELD("Category", FieldToString(pkt->category) + " (" + std::string(::LookupActorControlCategoryName(pkt->category)) + ")"),
         FIELD("Param1", FormatHex(pkt->param1)),
         FIELD("Param2", FormatHex(pkt->param2)),
@@ -396,13 +415,13 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("TargetId", FormatHex(pkt->targetId))
     );
 
-    REGISTER_PACKET(1, false, 0x0145, FFXIVIpcResting,
+    REGISTER_PACKET(1, false, 0x0145, ServerZone::FFXIVIpcResting,
         FIELD("Hp", FieldToString(pkt->Hp)),
         FIELD("Mp", FieldToString(pkt->Mp)),
         FIELD("Tp", FieldToString(pkt->Tp))
     );
 
-    REGISTER_PACKET(1, false, 0x0146, FFXIVIpcActionResult1,
+    REGISTER_PACKET(1, false, 0x0146, ServerZone::FFXIVIpcActionResult1,
         FIELD("Action", FieldToString(pkt->Action)),
         FIELD("ActionKind", FieldToString(pkt->ActionKind)),
         FIELD("RequestId", FieldToString(pkt->RequestId)),
@@ -411,7 +430,7 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("Flag", FormatHex(pkt->Flag))
     );
 
-    REGISTER_PACKET(1, false, 0x0147, FFXIVIpcActionResult,
+    REGISTER_PACKET(1, false, 0x0147, ServerZone::FFXIVIpcActionResult,
         FIELD("Action", FieldToString(pkt->Action)),
         FIELD("ActionKind", FieldToString(pkt->ActionKind)),
         FIELD("RequestId", FieldToString(pkt->RequestId)),
@@ -421,54 +440,54 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("CalcResults", SummarizeCalcResults(pkt->CalcResult, 16))
     );
 
-    REGISTER_PACKET(1, false, 0x0148, FFXIVIpcStatus,
+    REGISTER_PACKET(1, false, 0x0148, ServerZone::FFXIVIpcStatus,
         FIELD("StatusSummary", SummarizeStatusWork(pkt->effect, 30))
     );
 
-    REGISTER_PACKET(1, false, 0x0149, FFXIVIpcFreeCompany,
+    REGISTER_PACKET(1, false, 0x0149, ServerZone::FFXIVIpcFreeCompany,
         FIELD("Crest", FormatHex(pkt->Crest)),
         FIELD("Tag", FormatString(pkt->Tag, 6))
     );
 
-    REGISTER_PACKET(1, false, 0x014A, FFXIVIpcRecastGroup,
+    REGISTER_PACKET(1, false, 0x014A, ServerZone::FFXIVIpcRecastGroup,
         FIELD("FirstRecast", FieldToString(pkt->Recast[0])),
         FIELD("FirstRecastMax", FieldToString(pkt->RecastMax[0]))
     );
 
     // PARTY / ALLIANCE
-    REGISTER_PACKET(1, false, 0x0199, FFXIVIpcUpdateParty,
+    REGISTER_PACKET(1, false, 0x0199, ServerZone::FFXIVIpcUpdateParty,
         FIELD("PartyID", FormatHex(pkt->PartyID)),
         FIELD("AllianceFlags", FormatHex(pkt->AllianceFlags)),
         FIELD("Member0Name", FormatString(pkt->Member[0].Name, 32))
     );
 
-    REGISTER_PACKET(1, false, 0x14B, FFXIVIpcUpdateAlliance,
+    REGISTER_PACKET(1, false, 0x14B, ServerZone::FFXIVIpcUpdateAlliance,
         FIELD("AllianceFlags", FormatHex(pkt->AllianceFlags)),
         FIELD("AllianceLocalIndex", FieldToString(pkt->AllianceLocalIndex)),
         FIELD("AllianceMemberCount", FieldToString(pkt->AllianceMemberCount))
     );
 
-    REGISTER_PACKET(1, false, 0x14C, FFXIVIpcPartyPos,
+    REGISTER_PACKET(1, false, 0x14C, ServerZone::FFXIVIpcPartyPos,
         FIELD("Index", FieldToString(pkt->Index)),
         FIELD("TerritoryType", FieldToString(pkt->TerritoryType)),
         FIELD("Pos", FormatPosition(pkt->X, pkt->Y, pkt->Z)),
         FIELD("EntityId", FormatHex(pkt->EntityId))
     );
 
-    REGISTER_PACKET(1, false, 0x14D, FFXIVIpcAlliancePos,
+    REGISTER_PACKET(1, false, 0x14D, ServerZone::FFXIVIpcAlliancePos,
         FIELD("AllianceIndex", FieldToString(pkt->AllianceIndex)),
         FIELD("PartyIndex", FieldToString(pkt->PartyIndex)),
         FIELD("Pos", FormatPosition(pkt->X, pkt->Y, pkt->Z)),
         FIELD("EntityId", FormatHex(pkt->EntityId))
     );
 
-    REGISTER_PACKET(1, false, 0x14F, FFXIVIpcGrandCompany,
+    REGISTER_PACKET(1, false, 0x14F, ServerZone::FFXIVIpcGrandCompany,
         FIELD("GrandCompany", FieldToString(pkt->GrandCompany)),
         FIELD("Rank", FieldToString(pkt->GrandCompanyRank))
     );
 
     // MOVEMENT / SPAWN
-    REGISTER_PACKET(1, false, 0x0190, FFXIVIpcPlayerSpawn,
+    REGISTER_PACKET(1, false, 0x0190, ServerZone::FFXIVIpcPlayerSpawn,
         FIELD("LayoutId", FieldToString(pkt->LayoutId)),
         FIELD("NameId", FieldToString(pkt->NameId)),
         FIELD("ObjKind", FieldToString(pkt->ClassJob)),
@@ -478,32 +497,35 @@ void PacketDecoding::RegisterZonePackets() {
         FIELD("Pos", FormatPosition(pkt->Pos[0], pkt->Pos[1], pkt->Pos[2]))
     );
 
-    REGISTER_PACKET(1, false, 0x0191, FFXIVIpcActorFreeSpawn,
+    REGISTER_PACKET(1, false, 0x0191, ServerZone::FFXIVIpcActorFreeSpawn,
         FIELD("SpawnId", FormatHex(pkt->spawnId)),
         FIELD("ActorId", FormatHex(pkt->actorId))
     );
 
-    REGISTER_PACKET(1, false, 0x0192, FFXIVIpcActorMove,
+    REGISTER_PACKET(1, false, 0x0192, ServerZone::FFXIVIpcActorMove,
         FIELD("Dir", FieldToString(pkt->dir)),
+        FIELD("DirBeforeSlip", FieldToString(pkt->dirBeforeSlip)),
         FIELD("Flag", FormatHex(pkt->flag)),
+        FIELD("Flag2", FormatHex(pkt->flag2)),
         FIELD("Speed", FieldToString(pkt->speed)),
-        FIELD("Pos", std::string("(") + std::to_string(pkt->pos[0]) + "," + std::to_string(pkt->pos[1]) + "," + std::to_string(pkt->pos[2]) + ")")
+        FIELD("Pos", std::string("compressed(") + std::to_string(pkt->pos[0]) + "," + std::to_string(pkt->pos[1]) + "," + std::to_string(pkt->pos[2]) + ") decoded(" + 
+            std::to_string(pkt->pos[0] * 0.001f) + "," + std::to_string(pkt->pos[1] * 0.001f) + "," + std::to_string(pkt->pos[2] * 0.001f) + ")")
     );
 
-    REGISTER_PACKET(1, false, 0x0193, FFXIVIpcTransfer,
+    REGISTER_PACKET(1, false, 0x0193, ServerZone::FFXIVIpcTransfer,
         FIELD("Dir", FieldToString(pkt->dir)),
         FIELD("Duration", FieldToString(pkt->duration)),
         FIELD("Flag", FormatHex(pkt->flag))
     );
 
-    REGISTER_PACKET(1, false, 0x0194, FFXIVIpcWarp,
+    REGISTER_PACKET(1, false, 0x0194, ServerZone::FFXIVIpcWarp,
         FIELD("Dir", FieldToString(pkt->Dir)),
         FIELD("Type", FieldToString(pkt->Type) + " (" + GetWarpTypeName(pkt->Type) + ")"),
         FIELD("LayerSet", FormatHex(pkt->LayerSet)),
         FIELD("Pos", FormatPosition(pkt->x, pkt->y, pkt->z))
     );
 
-    REGISTER_PACKET(1, false, 0x0196, FFXIVIpcActorCast,
+    REGISTER_PACKET(1, false, 0x0196, ServerZone::FFXIVIpcActorCast,
         FIELD("Action", FieldToString(pkt->Action)),
         FIELD("ActionKind", FieldToString(pkt->ActionKind)),
         FIELD("ActionKey", FieldToString(pkt->ActionKey)),
@@ -512,58 +534,60 @@ void PacketDecoding::RegisterZonePackets() {
     );
 
     // ZONE / PLAYER STATE
-    REGISTER_PACKET(1, false, 0x019A, FFXIVIpcInitZone,
-        FIELD("ZoneId", FieldToString(pkt->ZoneId)),
-        FIELD("TerritoryType", FieldToString(pkt->TerritoryType)),
-        FIELD("LayerSetId", FormatHex(pkt->LayerSetId)),
-        FIELD("LayoutId", FieldToString(pkt->LayoutId)),
-        FIELD("WeatherId", FieldToString(pkt->WeatherId)),
-        FIELD("Pos", FormatPosition(pkt->Pos[0], pkt->Pos[1], pkt->Pos[2]))
-    );
+    // Remove the old simple REGISTER_PACKET for 0x019A InitZone here
 
-    // --- Adaptive override for InitZone (0x019A) to handle 24-byte and 40-byte variants ---
+    // --- Handle 0x019A based on direction: Client->Server = Move, Server->Client = InitZone ---
     {
+        // Define the Client->Server Move packet structure
 #pragma pack(push,1)
-        struct FFXIVIpcInitZoneShort {
-            uint16_t ZoneId;
-            uint16_t TerritoryType;
-            uint16_t TerritoryIndex;
-            uint8_t  WeatherId;
-            uint8_t  Flag;
-            uint32_t LayoutOrLayerSet; // Ambiguous: could be LayoutId or LayerSetId in this build
-            float    Pos[3];
+        struct FFXIVIpcClientMove {
+            uint8_t dir;
+            uint8_t dirBeforeSlip;
+            uint8_t flag;
+            uint8_t flag2;
+            uint8_t speed;
+            uint8_t __padding1;
+            uint16_t pos[3];  // Compressed position (similar to ActorMove)
         };
 #pragma pack(pop)
-        static_assert(sizeof(FFXIVIpcInitZoneShort) == 24, "InitZoneShort must be 24 bytes");
-        using FullInitZone = PacketStructures::Server::Zone::FFXIVIpcInitZone;
+        static_assert(sizeof(FFXIVIpcClientMove) == 12, "ClientMove must be 12 bytes");
 
+        // Register decoder for CLIENT->SERVER 0x019A (Move)
         PacketDecoding::PacketDecoderRegistry::Instance().RegisterDecoder(
-            1, false, 0x019A,
+            1, true, 0x019A,  // Note: true = outgoing/client->server
             [](const uint8_t* payload, size_t len, PacketDecoding::RowEmitter emit)
             {
-                static std::unordered_set<size_t> g_seenInitZoneSizes;
-
-                if (!g_seenInitZoneSizes.count(len)) {
-                    g_seenInitZoneSizes.insert(len);
-                    std::ostringstream note;
-                    note << "first time seeing size " << len;
-                    emit("_notice", note.str());
+                if (len >= sizeof(FFXIVIpcClientMove)) {
+                    auto* p = reinterpret_cast<const FFXIVIpcClientMove*>(payload);
+                    emit("PacketType", "ClientMove");
+                    emit("Dir", PacketDecoding::FieldToString(p->dir));
+                    emit("DirBeforeSlip", PacketDecoding::FieldToString(p->dirBeforeSlip));
+                    emit("Flag", PacketDecoding::FormatHex(p->flag));
+                    emit("Flag2", PacketDecoding::FormatHex(p->flag2));
+                    emit("Speed", PacketDecoding::FieldToString(p->speed));
+                    
+                    // Decode compressed position
+                    float x = p->pos[0] * 0.001f;
+                    float y = p->pos[1] * 0.001f;
+                    float z = p->pos[2] * 0.001f;
+                    emit("Pos_Compressed", std::string("(") + std::to_string(p->pos[0]) + "," + 
+                         std::to_string(p->pos[1]) + "," + std::to_string(p->pos[2]) + ")");
+                    emit("Pos_Decoded", PacketDecoding::FormatPosition(x, y, z));
                 }
-
-                if (len == sizeof(FFXIVIpcInitZoneShort)) {
-                    auto* p = reinterpret_cast<const FFXIVIpcInitZoneShort*>(payload);
-                    emit("Variant", "Short(24)");
-                    emit("ZoneId",        PacketDecoding::FieldToString(p->ZoneId));
-                    emit("TerritoryType", PacketDecoding::FieldToString(p->TerritoryType));
-                    emit("TerritoryIndex",PacketDecoding::FieldToString(p->TerritoryIndex));
-                    emit("WeatherId",     PacketDecoding::FieldToString(p->WeatherId));
-                    emit("Flag",          PacketDecoding::FieldToString(p->Flag));
-                    emit("LayoutOrLayerSet", PacketDecoding::FormatHex(p->LayoutOrLayerSet));
-                    emit("Pos", PacketDecoding::FormatPosition(p->Pos[0], p->Pos[1], p->Pos[2]));
+                else {
+                    emit("error", "ClientMove packet too small (expected >= 12 bytes, got " + std::to_string(len) + ")");
                 }
-                else if (len >= sizeof(FullInitZone)) {
-                    auto* p = reinterpret_cast<const FullInitZone*>(payload);
-                    emit("Variant", "Full(40)");
+            }
+        );
+
+        // Register decoder for SERVER->CLIENT 0x019A (InitZone) 
+        PacketDecoding::PacketDecoderRegistry::Instance().RegisterDecoder(
+            1, false, 0x019A,  // Note: false = incoming/server->client
+            [](const uint8_t* payload, size_t len, PacketDecoding::RowEmitter emit)
+            {
+                if (len >= sizeof(ServerZone::FFXIVIpcInitZone)) {
+                    auto* p = reinterpret_cast<const ServerZone::FFXIVIpcInitZone*>(payload);
+                    emit("PacketType", "InitZone");
                     emit("ZoneId",        PacketDecoding::FieldToString(p->ZoneId));
                     emit("TerritoryType", PacketDecoding::FieldToString(p->TerritoryType));
                     emit("TerritoryIndex",PacketDecoding::FieldToString(p->TerritoryIndex));
@@ -579,17 +603,248 @@ void PacketDecoding::RegisterZonePackets() {
                 }
                 else {
                     std::ostringstream os;
-                    os << "payload too small (have " << len << ", expect 24 or 40)";
+                    os << "InitZone packet too small (expected >= " << sizeof(ServerZone::FFXIVIpcInitZone) 
+                       << " bytes, got " << len << ")";
                     emit("error", os.str());
                     // Helpful raw dump for diagnostics
                     if (len > 0) {
-                        std::ostringstream hex;
-                        hex << "raw=" << PacketDecoding::DumpBytesAsHex(std::span(payload, len));
-                        emit("raw", hex.str());
+                        emit("raw", PacketDecoding::DumpBytesAsHex(std::span(payload, len)));
                     }
                 }
             }
         );
     }
+
+    // ================= REGISTER CLIENT PACKETS =================
+    // Now register CLIENT->SERVER packets with proper structures
+    using namespace PacketStructures::Client::Zone;
+
+    // CLIENT SESSION/PING
+    REGISTER_PACKET(1, true, 0x0065, ClientZone::FFXIVIpcPingHandler,
+        FIELD("ClientTimeValue", FieldToString(pkt->clientTimeValue)),
+        FIELD("Position", FormatPosition(pkt->position.pos[0], pkt->position.pos[1], pkt->position.pos[2])),
+        FIELD("Direction", FormatAngle(pkt->position.dir))
+    );
+
+    REGISTER_PACKET(1, true, 0x0066, ClientZone::FFXIVIpcLoginHandler,
+        FIELD("ClientTimeValue", FieldToString(pkt->clientTimeValue)),
+        FIELD("ContentFinderStatus", FieldToString(pkt->contentFinderStatus)),
+        FIELD("Name", FormatString(pkt->name, 32))
+    );
+
+    // CLIENT CHAT
+    REGISTER_PACKET(1, true, 0x0067, ClientZone::FFXIVIpcChatHandler,
+        FIELD("ClientTimeValue", FieldToString(pkt->clientTimeValue)),
+        FIELD("ChatType", FieldToString(pkt->chatType) + " (" + GetChatTypeName(pkt->chatType) + ")"),
+        FIELD("Message", FormatString(pkt->message, std::min<size_t>(200, sizeof(pkt->message)))),
+        FIELD("Position", FormatPosition(pkt->position.pos[0], pkt->position.pos[1], pkt->position.pos[2]))
+    );
+
+    // CLIENT ACTIONS
+    REGISTER_PACKET(1, true, 0x0196, ClientZone::FFXIVIpcActionRequest,
+        FIELD("ActionKind", FieldToString(pkt->ActionKind) + " (" + GetActionTypeName(pkt->ActionKind) + ")"),
+        FIELD("ActionKey", FormatHex(pkt->ActionKey)),
+        FIELD("RequestId", FieldToString(pkt->RequestId)),
+        FIELD("Target", FormatHex(pkt->Target)),
+        FIELD("Dir", FormatAngle((uint16_t)pkt->Dir)),
+        FIELD("DirTarget", FormatAngle((uint16_t)pkt->DirTarget))
+    );
+
+    REGISTER_PACKET(1, true, 0x0199, ClientZone::FFXIVIpcSelectGroundActionRequest,
+        FIELD("ActionKind", FieldToString(pkt->ActionKind) + " (" + GetActionTypeName(pkt->ActionKind) + ")"),
+        FIELD("ActionKey", FormatHex(pkt->ActionKey)),
+        FIELD("RequestId", FieldToString(pkt->RequestId)),
+        FIELD("Position", FormatPosition(pkt->Pos.x, pkt->Pos.y, pkt->Pos.z)),
+        FIELD("Dir", FormatAngle((uint16_t)pkt->Dir))
+    );
+
+    // CLIENT MOVEMENT - Already handled above for 0x019A
+    // but let's also add the UpdatePosition variants
+    REGISTER_PACKET(1, true, 0x01A0, ClientZone::FFXIVIpcUpdatePosition,
+        FIELD("Dir", FormatAngle(pkt->dir)),
+        FIELD("DirBeforeSlip", FormatAngle(pkt->dirBeforeSlip)),
+        FIELD("Flag", FormatHex(pkt->flag)),
+        FIELD("Flag2", FormatHex(pkt->flag2)),
+        FIELD("Position", FormatPosition(pkt->pos.x, pkt->pos.y, pkt->pos.z))
+    );
+
+    // CLIENT EVENTS
+    REGISTER_PACKET(1, true, 0x01C2, ClientZone::FFXIVIpcEventHandlerTalk,
+        FIELD("ActorId", FormatHex(pkt->actorId)),
+        FIELD("EventId", FormatHex(pkt->eventId))
+    );
+
+    REGISTER_PACKET(1, true, 0x01C3, ClientZone::FFXIVIpcEventHandlerEmote,
+        FIELD("ActorId", FormatHex(pkt->actorId)),
+        FIELD("EventId", FormatHex(pkt->eventId)),
+        FIELD("EmoteId", FieldToString(pkt->emoteId))
+    );
+
+    REGISTER_PACKET(1, true, 0x01C4, ClientZone::FFXIVIpcEventHandlerWithinRange,
+        FIELD("EventId", FormatHex(pkt->eventId)),
+        FIELD("Param1", FormatHex(pkt->param1)),
+        FIELD("Position", FormatPosition(pkt->position.x, pkt->position.y, pkt->position.z))
+    );
+
+    REGISTER_PACKET(1, true, 0x01C5, ClientZone::FFXIVIpcEventHandlerOutsideRange,
+        FIELD("EventId", FormatHex(pkt->eventId)),
+        FIELD("Param1", FormatHex(pkt->param1)),
+        FIELD("Position", FormatPosition(pkt->position.x, pkt->position.y, pkt->position.z))
+    );
+
+    REGISTER_PACKET(1, true, 0x01C6, ClientZone::FFXIVIpcEnterTerritoryHandler,
+        FIELD("EventId", FormatHex(pkt->eventId)),
+        FIELD("Param1", FieldToString(pkt->param1)),
+        FIELD("Param2", FieldToString(pkt->param2))
+    );
+
+    // CLIENT ITEM OPERATIONS
+    REGISTER_PACKET(1, true, 0x01AE, ClientZone::FFXIVIpcClientInventoryItemOperation,
+        FIELD("ContextId", FormatHex(pkt->ContextId)),
+        FIELD("OperationType", FieldToString(pkt->OperationType)),
+        FIELD("SrcStorage", FieldToString(pkt->SrcStorageId)),
+        FIELD("SrcContainer", FieldToString(pkt->SrcContainerIndex)),
+        FIELD("DstStorage", FieldToString(pkt->DstStorageId)),
+        FIELD("DstContainer", FieldToString(pkt->DstContainerIndex))
+    );
+
+    // Note: FFXIVIpcTradeCommand appears to be server-only
+    // If there's a client trade packet, it might have a different structure or name
+
+    // CLIENT GM COMMANDS
+    REGISTER_PACKET(1, true, 0x0197, ClientZone::FFXIVIpcGmCommand,
+        FIELD("Id", FormatHex(pkt->Id)),
+        FIELD("Target", FormatHex(pkt->Target)),
+        FIELD("Arg0", FormatHex(pkt->Arg0)),
+        FIELD("Arg1", FormatHex(pkt->Arg1))
+    );
+
+    REGISTER_PACKET(1, true, 0x0198, ClientZone::FFXIVIpcGmCommandName,
+        FIELD("Id", FormatHex(pkt->Id)),
+        FIELD("Name", FormatString(pkt->Name, 32)),
+        FIELD("Arg0", FormatHex(pkt->Arg0))
+    );
+
+    // CLIENT SOCIAL
+    REGISTER_PACKET(1, true, 0x00C9, ClientZone::FFXIVIpcInvite,
+        FIELD("AuthType", FieldToString(pkt->AuthType)),
+        FIELD("TargetName", FormatString(pkt->TargetName, 32))
+    );
+
+    REGISTER_PACKET(1, true, 0x00CA, ClientZone::FFXIVIpcInviteReply,
+        FIELD("InviteCharacterID", FormatHex(pkt->InviteCharacterID)),
+        FIELD("AuthType", FieldToString(pkt->AuthType)),
+        FIELD("Answer", FieldToString(pkt->Answer))
+    );
+
+    REGISTER_PACKET(1, true, 0x00CB, ClientZone::FFXIVIpcGetCommonlist,
+        FIELD("CommunityID", FormatHex(pkt->CommunityID)),
+        FIELD("ListType", FieldToString(pkt->ListType)),
+        FIELD("NextIndex", FieldToString(pkt->NextIndex))
+    );
+
+    REGISTER_PACKET(1, true, 0x00CC, ClientZone::FFXIVIpcGetCommonlistDetail,
+        FIELD("DetailCharacterID", FormatHex(pkt->DetailCharacterID)),
+        FIELD("CommunityID", FormatHex(pkt->CommunityID)),
+        FIELD("ListType", FieldToString(pkt->ListType))
+    );
+
+    REGISTER_PACKET(1, true, 0x00E1, ClientZone::FFXIVIpcBlacklistAdd,
+        FIELD("TargetName", FormatString(pkt->TargetCharacterName, 32))
+    );
+
+    REGISTER_PACKET(1, true, 0x00E2, ClientZone::FFXIVIpcBlacklistRemove,
+        FIELD("TargetCharacterID", FormatHex(pkt->TargetCharacterID)),
+        FIELD("TargetName", FormatString(pkt->TargetCharacterName, 32))
+    );
+
+    // CLIENT PARTY
+    REGISTER_PACKET(1, true, 0x00DC, ClientZone::FFXIVIpcPcPartyLeave,
+        FIELD("Reserve", FieldToString(pkt->Reserve))
+    );
+
+    REGISTER_PACKET(1, true, 0x00DD, ClientZone::FFXIVIpcPcPartyDisband,
+        FIELD("Reserve", FieldToString(pkt->Reserve))
+    );
+
+    REGISTER_PACKET(1, true, 0x00DE, ClientZone::FFXIVIpcPcPartyKick,
+        FIELD("LeaveCharacterName", FormatString(pkt->LeaveCharacterName, 32))
+    );
+
+    REGISTER_PACKET(1, true, 0x00DF, ClientZone::FFXIVIpcPcPartyChangeLeader,
+        FIELD("NextLeaderName", FormatString(pkt->NextLeaderCharacterName, 32))
+    );
+
+    // CLIENT CONFIG
+    REGISTER_PACKET(1, true, 0x0262, ClientZone::FFXIVIpcConfig,
+        FIELD("Flag", FormatHex(pkt->flag))
+    );
+
+    // CLIENT DISCOVERY
+    REGISTER_PACKET(1, true, 0x0194, ClientZone::FFXIVIpcNewDiscovery,
+        FIELD("LayoutId", FormatHex(pkt->LayoutId)),
+        FIELD("Position", FormatPosition(pkt->PositionX, pkt->PositionY, pkt->PositionZ))
+    );
+
+    // CLIENT MARKET BOARD
+    REGISTER_PACKET(1, true, 0x1102, ClientZone::FFXIVIpcMarketBoardRequestItemListingInfo,
+        FIELD("CatalogId", FormatHex(pkt->catalogId)),
+        FIELD("RequestId", FormatHex(pkt->requestId))
+    );
+
+    REGISTER_PACKET(1, true, 0x1103, ClientZone::FFXIVIpcMarketBoardRequestItemListings,
+        FIELD("ItemCatalogId", FieldToString(pkt->itemCatalogId))
+    );
+
+    // CLIENT HOUSING
+    REGISTER_PACKET(1, true, 0x01B0, ClientZone::FFXIVIpcHousingExteriorChange,
+        FIELD("LandId", FormatHex(pkt->landIdOrIndex.landId)),
+        FIELD("RemoveFlags", FormatHex(pkt->RemoveFlags))
+    );
+
+    REGISTER_PACKET(1, true, 0x01B1, ClientZone::FFXIVIpcHousingPlaceYardItem,
+        FIELD("LandId", FormatHex(pkt->landIdOrIndex.landId)),
+        FIELD("StorageId", FieldToString(pkt->StorageId)),
+        FIELD("Position", FormatPosition(pkt->Pos.x, pkt->Pos.y, pkt->Pos.z)),
+        FIELD("Rotation", FormatAngle(pkt->Rotation))
+    );
+
+    REGISTER_PACKET(1, true, 0x026A, ClientZone::FFXIVIpcHousingHouseName,
+        FIELD("LandId", FormatHex(pkt->landId.landId)),
+        FIELD("HouseName", FormatString(pkt->houseName, 20))
+    );
+
+    REGISTER_PACKET(1, true, 0x026B, ClientZone::FFXIVIpcHousingGreeting,
+        FIELD("LandId", FormatHex(pkt->landId.landId)),
+        FIELD("Greeting", FormatString(pkt->greeting, std::min<size_t>(80, sizeof(pkt->greeting))))
+    );
+
+    // CLIENT LINKSHELL
+    REGISTER_PACKET(1, true, 0x00F0, ClientZone::FFXIVIpcLinkshellJoin,
+        FIELD("LinkshellID", FormatHex(pkt->LinkshellID)),
+        FIELD("MemberName", FormatString(pkt->MemberCharacterName, 32))
+    );
+
+    REGISTER_PACKET(1, true, 0x00F2, ClientZone::FFXIVIpcLinkshellLeave,
+        FIELD("LinkshellID", FormatHex(pkt->LinkshellID))
+    );
+
+    // CLIENT CONTENT FINDER
+    REGISTER_PACKET(1, true, 0x01FD, ClientZone::FFXIVIpcFind5Contents,
+        FIELD("AcceptHalfway", FieldToString(pkt->acceptHalfway)),
+        FIELD("Language", FieldToString(pkt->language)),
+        FIELD("Territory0", FieldToString(pkt->territoryTypes[0])),
+        FIELD("Territory1", FieldToString(pkt->territoryTypes[1]))
+    );
+
+    REGISTER_PACKET(1, true, 0x01FB, ClientZone::FFXIVIpcAcceptContent,
+        FIELD("Accept", FieldToString(pkt->accept)),
+        FIELD("TerritoryType", FieldToString(pkt->territoryType)),
+        FIELD("TerritoryId", FormatHex(pkt->territoryId))
+    );
+
+    REGISTER_PACKET(1, true, 0x01FC, ClientZone::FFXIVIpcCancelFindContent,
+        FIELD("Cause", FieldToString(pkt->cause))
+    );
 
 }  // End of RegisterZonePackets() function

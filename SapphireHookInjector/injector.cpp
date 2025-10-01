@@ -343,6 +343,7 @@ static bool InjectDLL(DWORD pid, const std::wstring& fullDllPath) {
     return loaded;
 }
 
+#ifndef SH_DISABLE_INJECTOR_MAIN
 int main(int argc, char** argv) {
     SetConsoleTitleW(L"SapphireHook Injector");
     EnableCancelHandler();
@@ -396,7 +397,7 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
         return 0;
-        };
+    };
 
     DWORD selectedPid = waitForProcess(args.waitSeconds);
     if (selectedPid == 0) {
@@ -415,7 +416,7 @@ int main(int argc, char** argv) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
         }
         return false;
-        };
+    };
 
     if (!args.watch) {
         return injectWithRetries(selectedPid) ? 0 : 4;
@@ -425,8 +426,7 @@ int main(int argc, char** argv) {
     while (!g_cancel) {
         if (!injectWithRetries(selectedPid)) {
             Log(LogLevel::Error, "Failed to inject into current instance");
-        }
-        else {
+        } else {
             Log(LogLevel::Info, "Monitoring process (PID " + std::to_string(selectedPid) + ")");
             while (!g_cancel && IsProcessRunning(selectedPid))
                 std::this_thread::sleep_for(std::chrono::seconds(2));
@@ -439,8 +439,9 @@ int main(int argc, char** argv) {
             break;
         }
     }
-
     return 0;
 }
+#endif // SH_DISABLE_INJECTOR_MAIN
 
-//clean up test
+
+//TESTTESTTEST
