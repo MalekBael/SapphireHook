@@ -2,7 +2,7 @@
 #include "hook_manager.h"
 #include "../Logger/Logger.h"
 
-#include <MinHook.h>
+#include <../vendor/minhook/Minhook.h>
 #include <array>
 #include <atomic>
 #include <mutex>

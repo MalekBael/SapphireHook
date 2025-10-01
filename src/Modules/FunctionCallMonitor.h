@@ -11,32 +11,27 @@
 #include <future>
 #include <unordered_map>
 
-// Include the full definitions for classes used as member variables
 #include "FunctionDatabase.h"
 #include "SignatureDatabase.h"
-#include "../Analysis/FunctionScanner.h"  // This will bring in StringScanResult
+#include "../Analysis/FunctionScanner.h"
 #include "../UI/UIModule.h"
 
-// Forward declarations for new classes
+// Forward declarations for types only used via std::shared_ptr in this header.
+// Their full definitions are included in the .cpp (FunctionAnalyzer.h) or
+// defined inside the .cpp (AdvancedHookManager).
 namespace SapphireHook {
     class FunctionAnalyzer;
     class AdvancedHookManager;
-    
-    // StringScanResult is now defined in FunctionScanner.h
-    // Remove the duplicate definition from here
 }
 
-// Structure for function call records
 struct FunctionCall {
     std::string functionName;
     uintptr_t address;
     std::chrono::steady_clock::time_point timestamp;
     std::string context;
-
     FunctionCall() : address(0) {}
 };
 
-// Main function call monitoring class
 class FunctionCallMonitor : public SapphireHook::UIModule {
 public:
     static FunctionCallMonitor* s_instance;
@@ -44,7 +39,6 @@ public:
     FunctionCallMonitor();
     ~FunctionCallMonitor() = default;
 
-    // UIModule interface implementation
     const char* GetName() const override { return "function_monitor"; }
     const char* GetDisplayName() const override { return "Function Call Monitor"; }
     void Initialize() override;
@@ -53,85 +47,66 @@ public:
     bool IsWindowOpen() const override { return m_windowOpen; }
     void SetWindowOpen(bool open) override { m_windowOpen = open; }
 
-    // Function call tracking
     void AddFunctionCall(const std::string& name, uintptr_t address, const std::string& context);
     void ClearCalls();
     void SetDiscoveredFunctions(const std::vector<uintptr_t>& functions);
-
-    // Function name resolution
     std::string ResolveFunctionName(uintptr_t address) const;
 
-    // Function hooking
     bool CreateFunctionHook(uintptr_t address, const std::string& name, const std::string& context);
     bool CreateSafeLoggingHook(uintptr_t address, const std::string& name, const std::string& context);
     bool CreateRealLoggingHook(uintptr_t address, const std::string& name, const std::string& context);
 
-    // Function scanning and discovery (delegated to FunctionScanner)
     std::vector<uintptr_t> ScanForFunctionsByStrings(const std::vector<std::string>& searchStrings);
     std::vector<uintptr_t> ScanForAllInterestingFunctions();
     std::vector<uintptr_t> ScanForAllFunctions();
     std::vector<SapphireHook::StringScanResult> ScanMemoryForFunctionStrings(const std::vector<std::string>& targetStrings);
 
-    // Database operations
     void ReloadDatabase();
     void ReloadSignatureDatabase();
     void LoadDatabasesWithErrorHandling();
 
-    // Memory safety and analysis (delegated to FunctionScanner)
     bool IsSafeMemoryAddress(const void* address, size_t size);
     bool IsSafeAddress(uintptr_t address);
     uintptr_t FindFunctionStart(uintptr_t address);
 
-    // FunctionScanner delegations
     bool IsLikelyFunctionStart(uintptr_t address) const;
     bool IsLikelyFunctionStart(const uint8_t* code, size_t maxSize) const;
     std::string ScanForNearbyStrings(uintptr_t address, size_t searchRadius = 1024) const;
 
-    // Address parsing and conversion (delegated to FunctionAnalyzer)
     uintptr_t ResolveManualAddress(const std::string& input);
     bool ParseAddressInput(const std::string& input, uintptr_t& result);
     uintptr_t ConvertRVAToRuntimeAddress(uintptr_t rva);
 
-    // Validation and debugging (delegated to FunctionAnalyzer)
     bool ValidateAndDebugAddress(uintptr_t address, const std::string& name);
     void DebugAddressSource(uintptr_t address, const std::string& name);
     void DebugIdaAddress(const std::string& address);
 
-    // Database operations (delegated to FunctionAnalyzer)
     void VerifyDatabaseLoading();
     void TestAndDebugEmbeddedData();
 
-    // Async operations (delegated to FunctionScanner)
     std::future<std::vector<uintptr_t>> StartAsyncScan();
     std::future<std::vector<uintptr_t>> StartAsyncScanWithStrings(const std::vector<std::string>& targetStrings);
     void StopScan();
 
-    // String-based function discovery (delegated to FunctionScanner)
     std::string ExtractFunctionNameFromMemory(uintptr_t address);
-
-    // Memory analysis (delegated to FunctionScanner)
     bool IsValidString(const char* str, size_t maxLen) const;
     bool IsCommittedMemory(uintptr_t address, size_t size) const;
     bool IsExecutableMemory(uintptr_t address) const;
 
-    // Signature-based analysis (delegated to FunctionAnalyzer)
     void InitializeWithSignatures();
     void StartAsyncSignatureResolution();
     void IntegrateSignaturesWithDatabase();
     void DiscoverFunctionsFromSignatures();
 
-    // Type-based analysis (delegated to FunctionAnalyzer)
     void InitializeWithTypeInformation();
     void DiscoverFunctionsByType(const std::string& className);
     void AnalyzeVirtualFunctionTables();
     void GenerateTypeBasedHooks();
 
-    // Diagnostics (delegated to FunctionAnalyzer)
     void DiagnoseSignatureIssues();
     void EnhancedSignatureResolution();
     void DebugSignatureScanning();
 
-    // UI rendering methods
     void RenderDataBrowser();
     void RenderFunctionDatabaseBrowser();
     void RenderSignatureDatabaseBrowser();
@@ -145,22 +120,19 @@ public:
     void RenderVirtualFunctionTable();
     void RenderEnhancedDatabaseSearch();
     void RenderManualHookSection();
-    void RenderMemoryScanTab();                 // NEW: memory scan UI
- 
-     // Specialized scanning methods (delegated to FunctionScanner)
-     void ScanAllFunctions();
-     void ScanExportedFunctions(std::vector<uintptr_t>& functions);
-     void ScanCallTargets(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions);
-     void ScanSafeRegion(uintptr_t baseAddr, size_t size, std::vector<uintptr_t>& functions);
-     void ScanForFunctionPrologues(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions);
-     void ScanForUIFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
-     void ScanForNetworkFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
-     void ScanForGameplayFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
+    void RenderMemoryScanTab();
 
-    // Database integration 
+    void ScanAllFunctions();
+    void ScanExportedFunctions(std::vector<uintptr_t>& functions);
+    void ScanCallTargets(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions);
+    void ScanSafeRegion(uintptr_t baseAddr, size_t size, std::vector<uintptr_t>& functions);
+    void ScanForFunctionPrologues(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions);
+    void ScanForUIFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
+    void ScanForNetworkFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
+    void ScanForGameplayFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
+
     void UpdateTemporaryFunctionDatabase(const std::map<uintptr_t, std::string>& detectedFunctions);
 
-    // Hook management delegated to AdvancedHookManager
     void ValidateDatabase();
     void SetupFunctionHooks();
     void HookCommonAPIs();
@@ -168,64 +140,192 @@ public:
     void HookRandomFunctions(int count);
     void UnhookAllFunctions();
     bool IsValidMemoryAddress(uintptr_t address, size_t size);
- 
-     // Static hook callback
-     static __declspec(noinline) void __stdcall FunctionHookCallback(uintptr_t returnAddress, uintptr_t functionAddress);
- 
-    // Orchestrate enhanced memory scan (async)
+
+    static __declspec(noinline) void __stdcall FunctionHookCallback(uintptr_t returnAddress, uintptr_t functionAddress);
+
     void StartMemoryScan(const std::vector<std::string>& targetStrings,
                          bool scanPrologues,
                          bool scanStrings);
     void UpdateMemoryScanAsync();
 
- private:
-    // Database instances (member variables)
+private:
+    void RebuildAnchorStringMatches();
+    void SelectFunctionForAnalysis(uintptr_t address);
+    std::string GenerateFunctionAnalysis(uintptr_t address,
+                                         const std::vector<std::string>* tags = nullptr);
+    std::string GetPrologueBytes(uintptr_t address, size_t maxLen = 16);
+    bool DisassembleSnippet(uintptr_t address, std::string& out, int maxInstr = 12, size_t maxBytes = 96);
+    void BuildMultiDiff();
+    std::string BuildMultiDiffText(const std::vector<uintptr_t>& addrs);
+    std::string BuildSingleExport(uintptr_t address);
+    std::string BuildDiffExport();
+    bool WriteTextFileUTF8(const std::string& path, const std::string& content, bool overwrite, std::string& err);
+
     SapphireHook::FunctionDatabase m_functionDB;
     SapphireHook::SignatureDatabase m_signatureDB;
     bool m_functionDatabaseLoaded = false;
     bool m_signatureDatabaseLoaded = false;
     bool m_useSignatureDatabase = false;
 
-    // Specialized helper classes (delegated functionality)
-    std::shared_ptr<SapphireHook::FunctionScanner> m_functionScanner;
-    std::shared_ptr<SapphireHook::FunctionAnalyzer> m_functionAnalyzer;
-    std::shared_ptr<SapphireHook::AdvancedHookManager> m_hookManager;
+    std::shared_ptr<SapphireHook::FunctionScanner>       m_functionScanner;
+    std::shared_ptr<SapphireHook::FunctionAnalyzer>      m_functionAnalyzer;
+    std::shared_ptr<SapphireHook::AdvancedHookManager>   m_hookManager;
 
-    // Function call tracking
     mutable std::mutex m_callsMutex;
     std::vector<FunctionCall> m_functionCalls;
     std::vector<uintptr_t> m_discoveredFunctions;
     std::map<uintptr_t, std::string> m_detectedFunctionNames;
 
-    // UI state
     bool m_windowOpen;
-    int m_maxEntries;
+    int  m_maxEntries;
     bool m_autoScroll;
     bool m_showAddresses;
     bool m_showTimestamps;
-    int m_displayStartIndex = 0;
-    int m_displayPageSize = 100;
-
-    // Configuration
+    int  m_displayStartIndex = 0;
+    int  m_displayPageSize = 100;
     bool m_useFunctionDatabase;
     bool m_enableRealHooking;
 
-    // ================= Memory scan state (NEW) =================
     struct MemoryScanState {
+        // Phase control
         bool running = false;
-        bool scanPrologues = true;
-        bool scanStrings = true;
         bool cancelled = false;
+        bool scanPrologues = false;
+        bool scanStrings = false;
+
+        // NEW flags / state
+        bool anchorsRebuilt = false;
+        bool prologueCompleted = false;
+        bool stringCompleted = false;
+        bool uiFreeze = false;        // freeze UI updates (virtualized list)
+        bool rowsCacheDirty = false;  // row cache needs rebuild
+
+        uint64_t lastStatusBuildTick = 0; // throttled status text rebuild
+
+        // Async work
         std::future<std::vector<uintptr_t>> prologueFuture;
         std::future<std::vector<SapphireHook::StringScanResult>> stringFuture;
-        std::vector<SapphireHook::StringScanResult> stringHits;
+
+        // Collected results
         std::vector<uintptr_t> prologueFunctions;
+        std::vector<SapphireHook::StringScanResult> stringHits;
+
+        // Timing / status
         std::chrono::steady_clock::time_point startTime{};
         std::string status;
+
+        // Incremental progress
+        std::atomic<size_t> prologueProcessed{0};
+        std::atomic<size_t> prologueTotal{0};
+        std::atomic<size_t> stringProcessed{0};
+        std::atomic<size_t> stringTotal{0};
+
+        // Phase text (debug)
+        std::string lastProloguePhase;
+        std::string lastStringPhase;
+        std::mutex phaseMutex;
+
+        // Row cache for virtualized rendering
+        struct RowCache {
+            uintptr_t addr{};
+            std::string addrText;
+            std::string name;
+            std::string tagsShort;
+        };
+        std::vector<RowCache> rowCache;
+        std::string filterText;
+
+        MemoryScanState() = default;
+        MemoryScanState(const MemoryScanState&) = delete;
+        MemoryScanState& operator=(const MemoryScanState&) = delete;
+
+        MemoryScanState(MemoryScanState&& other) noexcept {
+            *this = std::move(other);
+        }
+
+        MemoryScanState& operator=(MemoryScanState&& other) noexcept {
+            if (this == &other) return *this;
+
+            running           = other.running;
+            cancelled         = other.cancelled;
+            scanPrologues     = other.scanPrologues;
+            scanStrings       = other.scanStrings;
+            anchorsRebuilt    = other.anchorsRebuilt;
+            prologueCompleted = other.prologueCompleted;
+            stringCompleted   = other.stringCompleted;
+            uiFreeze          = other.uiFreeze;
+            rowsCacheDirty    = other.rowsCacheDirty;
+            lastStatusBuildTick = other.lastStatusBuildTick;
+
+            prologueFuture    = std::move(other.prologueFuture);
+            stringFuture      = std::move(other.stringFuture);
+            prologueFunctions = std::move(other.prologueFunctions);
+            stringHits        = std::move(other.stringHits);
+
+            startTime         = other.startTime;
+            status            = std::move(other.status);
+
+            prologueProcessed.store(other.prologueProcessed.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            prologueTotal.store(other.prologueTotal.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            stringProcessed.store(other.stringProcessed.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            stringTotal.store(other.stringTotal.load(std::memory_order_relaxed), std::memory_order_relaxed);
+
+            {
+                std::scoped_lock lk(other.phaseMutex);
+                lastProloguePhase = std::move(other.lastProloguePhase);
+                lastStringPhase   = std::move(other.lastStringPhase);
+            }
+
+            rowCache   = std::move(other.rowCache);
+            filterText = std::move(other.filterText);
+
+            // Reset source
+            other.running = false;
+            other.cancelled = false;
+            other.scanPrologues = false;
+            other.scanStrings = false;
+            other.anchorsRebuilt = false;
+            other.prologueCompleted = false;
+            other.stringCompleted = false;
+            other.uiFreeze = false;
+            other.rowsCacheDirty = false;
+            other.lastStatusBuildTick = 0;
+            other.status.clear();
+            other.prologueFunctions.clear();
+            other.stringHits.clear();
+            other.rowCache.clear();
+            other.filterText.clear();
+            other.prologueProcessed.store(0, std::memory_order_relaxed);
+            other.prologueTotal.store(0, std::memory_order_relaxed);
+            other.stringProcessed.store(0, std::memory_order_relaxed);
+            other.stringTotal.store(0, std::memory_order_relaxed);
+            {
+                std::scoped_lock lk(other.phaseMutex);
+                other.lastProloguePhase.clear();
+                other.lastStringPhase.clear();
+            }
+            return *this;
+        }
+
+        void Reset() { *this = MemoryScanState{}; }
     } m_memScan;
 
-    // Function address -> collected tags (string anchors, sources)
     std::unordered_map<uintptr_t, std::vector<std::string>> m_memScanTags;
-    std::vector<uintptr_t> m_memScanMerged;   // merged & sorted
+    std::vector<uintptr_t> m_memScanMerged;
     bool m_memScanDirty = false;
+
+    uintptr_t    m_selectedFunctionAddress { 0 };
+    std::string  m_selectedFunctionAnalysis;
+    bool         m_showAnalysisPanel { true };
+    bool         m_showDisassembly { true };
+    std::string  m_selectedDisasm;
+
+    bool m_multiSelectMode { false };
+    std::vector<uintptr_t> m_multiSelected;
+    std::string m_multiDiffText;
+    bool m_showMultiDiff { false };
+
+    char m_analysisExportPath[260]{};
+    bool m_exportOverwriteConfirm { false };
+    std::string m_lastAnalysisExportStatus;
 };

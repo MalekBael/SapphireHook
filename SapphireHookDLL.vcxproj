@@ -1,4 +1,6 @@
 <Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+
+  <!-- Project Configurations -->
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
       <Configuration>Debug</Configuration>
@@ -9,6 +11,8 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
+
+  <!-- Globals -->
   <PropertyGroup Label="Globals">
     <ProjectGuid>{386F28A7-F0FC-9A17-E38B-A32BE480F2BD}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
@@ -17,113 +21,189 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <PlatformToolset>v143</PlatformToolset>
   </PropertyGroup>
+
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <!-- Both configs will use /MDd for now -->
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <LanguageStandard>stdcpp20</LanguageStandard>
   </PropertyGroup>
+
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
-    <UseDebugLibraries>false</UseDebugLibraries>
+    <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
     <LanguageStandard>stdcpp20</LanguageStandard>
     <EnableUnitySupport>true</EnableUnitySupport>
   </PropertyGroup>
+
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <!-- Include paths -->
   <PropertyGroup>
-    <IncludePath>$(ProjectDir)src\Core;$(ProjectDir)src\Modules;$(ProjectDir)src\UI;$(ProjectDir)src\Hooking;$(ProjectDir)data;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)src\Core;$(ProjectDir)src\Modules;$(ProjectDir)src\UI;$(ProjectDir)src\Hooking;$(ProjectDir)data;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include;$(ProjectDir)vendor\capstone\include;$(IncludePath)</IncludePath>
   </PropertyGroup>
+
+  <!-- Debug: static capstone + minhook (/MDd) -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\capstone\include;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include</AdditionalIncludeDirectories>
-      <AdditionalOptions>/FS /bigobj /Gy /Gw /sdl- %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include;$(ProjectDir)vendor\capstone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <EnableModules>false</EnableModules>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <Optimization>MinSpace</Optimization>
-      <WholeProgramOptimization>true</WholeProgramOptimization>
-      <FavorSizeOrSpeed>Size</FavorSizeOrSpeed>
-      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary> <!-- /MDd -->
+      <Optimization>Disabled</Optimization>
+      <WholeProgramOptimization>false</WholeProgramOptimization>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
+      <EnableModules>false</EnableModules>
+      <AdditionalOptions>/FS /bigobj /Gy /Gw /sdl- %(AdditionalOptions)</AdditionalOptions>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>libMinHook.x64.lib;capstone.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <IgnoreSpecificDefaultLibraries>LIBCMTD</IgnoreSpecificDefaultLibraries>
-      <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <LinkTimeCodeGeneration>UseLinkTimeCodeGeneration</LinkTimeCodeGeneration>
+      <!-- Link static libs (adjust paths/names if your built static libs differ) -->
+      <AdditionalDependencies>capstone.lib;libMinHook.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>
+        $(ProjectDir)vendor\capstone;
+        $(ProjectDir)vendor\minhook;
+        %(AdditionalLibraryDirectories)
+      </AdditionalLibraryDirectories>
+      <IgnoreSpecificDefaultLibraries></IgnoreSpecificDefaultLibraries>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalOptions>/OPT:REF /OPT:ICF /LTCG</AdditionalOptions>
-      <MergeSections> .rdata=.text</MergeSections>
-      <AdditionalLibraryDirectories>$(ProjectDir)vendor\capstone\lib;$(ProjectDir)vendor\minhook\include\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
+      <AdditionalOptions>/VERBOSE:LIB %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <PostBuildEvent>
-      <Command>@echo off
-echo [BUILD] SapphireHookDLL C++20 build completed (MinHook statically linked)
-
-set "CAP_DLL=$(ProjectDir)vendor\capstone\bin\capstone.dll"
-set "CAP_PDB=$(ProjectDir)vendor\capstone\bin\capstone.pdb"
-set "OUT=$(TargetDir)"
-
-if not exist "%CAP_DLL%" (
-  echo [WARN] Capstone DLL not found: %CAP_DLL%
-  goto :eof
-)
-
-echo [COPY] capstone.dll -&gt; %OUT%
-copy /Y "%CAP_DLL%" "%OUT%" &gt;nul
-if errorlevel 1 (
-  echo [ERROR] Failed to copy capstone.dll
-  goto :eof
-)
-
-if exist "%CAP_PDB%" (
-  echo [COPY] capstone.pdb -&gt; %OUT%
-  copy /Y "%CAP_PDB%" "%OUT%" &gt;nul
-)
-
-echo [DONE] Capstone runtime deployed.</Command>
+      <Command>echo [BUILD] SapphireHookDLL Debug (static Capstone + MinHook) - no dependency DLL copy needed</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
+
+  <!-- Release: same /MDd runtime for now & static libs -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include;$(ProjectDir)vendor\capstone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary> <!-- intentionally /MDd per request -->
       <EnableModules>false</EnableModules>
+      <Optimization>MaxSpeed</Optimization>
+      <WholeProgramOptimization>true</WholeProgramOptimization>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>$(ProjectDir)vendor\minhook\include\lib\libMinHook.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
+      <AdditionalDependencies>capstone.lib;libMinHook.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>
+        $(ProjectDir)vendor\capstone;
+        $(ProjectDir)vendor\minhook;
+        %(AdditionalLibraryDirectories)
+      </AdditionalLibraryDirectories>
+      <IgnoreSpecificDefaultLibraries></IgnoreSpecificDefaultLibraries>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
     </Link>
     <PostBuildEvent>
-      <Command>echo SapphireHookDLL C++20 build completed successfully (MinHook statically linked)</Command>
+      <Command>echo SapphireHookDLL Release (static Capstone + MinHook, /MDd runtime temporary)</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
+
+  <!-- Headers -->
   <ItemGroup>
-    <ClCompile Include="src\Core\CommandInvoker.cpp" />
-    <ClCompile Include="src\Helper\CapstoneWrapper.cpp" />
-    <ClCompile Include="src\Hooking\dynamic_hook_engine.cpp" />
-    <ClCompile Include="src\Core\FunctionAnalyzer.cpp" />
-    <ClCompile Include="src\Modules\FunctionCallMonitor.cpp" />
-    <ClCompile Include="src\Core\FunctionDatabase.cpp" />
-    <ClCompile Include="src\Analysis\FunctionScanner.cpp" />
-    <ClCompile Include="src\Hooking\hook_manager.cpp" />
+    <ClInclude Include="src\Analysis\FunctionScanner.h" />
+    <ClInclude Include="src\Analysis\PatternScanner.h" />
+    <ClInclude Include="src\Analysis\SignatureScanner.h" />
+    <ClInclude Include="src\Core\CommandInvoker.h" />
+    <ClInclude Include="src\Core\FunctionAnalyzer.h" />
+    <ClInclude Include="src\Core\FunctionDatabase.h" />
+    <ClInclude Include="src\Core\PacketInjector.h" />
+    <ClInclude Include="src\Core\ResourceLoader.h" />
+    <ClInclude Include="src\Core\SafeMemory.h" />
+    <ClInclude Include="src\Core\ServiceManager.h" />
+    <ClInclude Include="src\Core\SignatureDatabase.h" />
+    <ClInclude Include="src\Core\SimpleJSON.h" />
     <ClInclude Include="src\Helper\CapstoneWrapper.h" />
+    <ClInclude Include="src\Helper\WindowsApiWrapper.h" />
+    <ClInclude Include="src\Hooking\dynamic_hook_engine.h" />
+    <ClInclude Include="src\Hooking\hook_factory_impl.h" />
+    <ClInclude Include="src\Hooking\hook_manager.h" />
+    <ClInclude Include="src\Hooking\lua_hook.h" />
+    <ClInclude Include="src\Logger\Logger.h" />
+    <ClInclude Include="src\Modules\CommandInterface.h" />
+    <ClInclude Include="src\Modules\DebugCommandsModule.h" />
+    <ClInclude Include="src\Modules\FunctionCallMonitor.h" />
+    <ClInclude Include="src\Modules\GMCommandList.h" />
+    <ClInclude Include="src\Modules\GMCommandsModule.h" />
+    <ClInclude Include="src\Modules\MemoryViewerModule.h" />
+    <ClInclude Include="src\Modules\NetDiagnosticsModule.h" />
     <ClInclude Include="src\Modules\SettingsModule.h" />
     <ClInclude Include="src\Monitor\NetworkMonitor.h" />
+    <ClInclude Include="src\Monitor\NetworkMonitorHelper.h" />
+    <ClInclude Include="src\Monitor\NetworkMonitorTypes.h" />
+    <ClInclude Include="src\Network\OpcodeNames.h" />
+    <ClInclude Include="src\Network\PacketDecoder.h" />
+    <ClInclude Include="src\Network\PacketRegistration.h" />
+    <ClInclude Include="src\Network\PacketRegistration.Macros.h" />
+    <ClInclude Include="src\ProtocolHandlers\Chat\ServerChatDef.h" />
+    <ClInclude Include="src\ProtocolHandlers\CommonTypes.h" />
+    <ClInclude Include="src\ProtocolHandlers\Lobby\ClientLobbyDef.h" />
+    <ClInclude Include="src\ProtocolHandlers\Lobby\ServerLobbyDef.h" />
+    <ClInclude Include="src\ProtocolHandlers\Zone\ClientZoneDef.h" />
+    <ClInclude Include="src\ProtocolHandlers\Zone\ServerZoneDef.h" />
+    <ClInclude Include="src\UI\imgui_overlay.h" />
+    <ClInclude Include="src\UI\UIManager.h" />
+    <ClInclude Include="src\UI\UIModule.h" />
+    <ClInclude Include="vendor\capstone\include\arm.h" />
+    <ClInclude Include="vendor\capstone\include\arm64.h" />
+    <ClInclude Include="vendor\capstone\include\capstone.h" />
+    <ClInclude Include="vendor\capstone\include\mips.h" />
+    <ClInclude Include="vendor\capstone\include\platform.h" />
+    <ClInclude Include="vendor\capstone\include\ppc.h" />
+    <ClInclude Include="vendor\capstone\include\sparc.h" />
+    <ClInclude Include="vendor\capstone\include\systemz.h" />
+    <ClInclude Include="vendor\capstone\include\x86.h" />
+    <ClInclude Include="vendor\capstone\include\xcore.h" />
+    <ClInclude Include="vendor\hex_editor\imgui_hex.h" />
+    <ClInclude Include="vendor\ImGuiFD\ImGuiFD.h" />
+    <ClInclude Include="vendor\ImGuiFD\ImGuiFD_internal.h" />
+    <ClInclude Include="vendor\imgui\backends\imgui_impl_dx11.h" />
+    <ClInclude Include="vendor\imgui\backends\imgui_impl_win32.h" />
+    <ClInclude Include="vendor\imgui\imconfig.h" />
+    <ClInclude Include="vendor\imgui\imgui.h" />
+    <ClInclude Include="vendor\imgui\imgui_internal.h" />
+    <ClInclude Include="vendor\imgui\imstb_rectpack.h" />
+    <ClInclude Include="vendor\imgui\imstb_textedit.h" />
+    <ClInclude Include="vendor\imgui\imstb_truetype.h" />
+    <ClInclude Include="vendor\implot\implot.h" />
+    <ClInclude Include="vendor\implot\implot_internal.h" />
+    <ClInclude Include="vendor\miniz\miniz.h" />
+  </ItemGroup>
+
+  <!-- Sources -->
+  <ItemGroup>
+    <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
+    <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />
+    <ClCompile Include="src\Analysis\FunctionScanner.cpp" />
+    <ClCompile Include="src\Analysis\PatternScanner.cpp" />
+    <ClCompile Include="src\Core\CommandInvoker.cpp" />
+    <ClCompile Include="src\Core\FunctionAnalyzer.cpp" />
+    <ClCompile Include="src\Core\FunctionDatabase.cpp" />
     <ClCompile Include="src\Core\PacketInjector.cpp" />
     <ClCompile Include="src\Core\ResourceLoader.cpp" />
     <ClCompile Include="src\Core\SafeMemory.cpp" />
     <ClCompile Include="src\Core\SignatureDatabase.cpp" />
     <ClCompile Include="src\Core\SimpleJSON.cpp" />
+    <ClCompile Include="src\Entry\dllmain.cpp" />
+    <ClCompile Include="src\Helper\CapstoneWrapper.cpp" />
     <ClCompile Include="src\Helper\WindowsAPIWrapper.cpp" />
-    <ClCompile Include="src\Analysis\PatternScanner.cpp" />
-    <ClCompile Include="src\Modules\DebugCommandsModule.cpp" />
-    <ClCompile Include="src\Modules\GMCommandsModule.cpp" />
+    <ClCompile Include="src\Hooking\dynamic_hook_engine.cpp" />
+    <ClCompile Include="src\Hooking\hook_manager.cpp" />
+    <ClCompile Include="src\Hooking\lua_hook.cpp" />
+    <ClCompile Include="src\Logger\Logger.cpp" />
     <ClCompile Include="src\Modules\CommandInterface.cpp" />
+    <ClCompile Include="src\Modules\DebugCommandsModule.cpp" />
+    <ClCompile Include="src\Modules\FunctionCallMonitor.cpp" />
+    <ClCompile Include="src\Modules\GMCommandsModule.cpp" />
     <ClCompile Include="src\Modules\MemoryViewerModule.cpp" />
     <ClCompile Include="src\Modules\NetDiagnosticsModule.cpp" />
     <ClCompile Include="src\Modules\SettingsModule.cpp" />
@@ -138,137 +218,43 @@ echo [DONE] Capstone runtime deployed.</Command>
     <ClCompile Include="src\Network\PacketRegistration.Zone.cpp" />
     <ClCompile Include="src\UI\imgui_overlay.cpp" />
     <ClCompile Include="src\UI\UIManager.cpp" />
-    <ClCompile Include="src\Hooking\lua_hook.cpp" />
-    <ClCompile Include="src\Entry\dllmain.cpp" />
     <ClCompile Include="vendor\hex_editor\imgui_hex.cpp" />
-    <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
-    <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />
-    <!-- ImGui Core Files -->
+    <ClCompile Include="vendor\imgui\backends\imgui_impl_dx11.cpp" />
+    <ClCompile Include="vendor\imgui\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="vendor\imgui\imgui.cpp" />
+    <ClCompile Include="vendor\imgui\imgui_demo.cpp" />
     <ClCompile Include="vendor\imgui\imgui_draw.cpp" />
     <ClCompile Include="vendor\imgui\imgui_tables.cpp" />
     <ClCompile Include="vendor\imgui\imgui_widgets.cpp" />
-    <ClCompile Include="vendor\imgui\imgui_demo.cpp" />
-    <!-- ImGui Backend Files -->
-    <ClCompile Include="vendor\imgui\backends\imgui_impl_dx11.cpp" />
-    <ClCompile Include="vendor\imgui\backends\imgui_impl_win32.cpp" />
-    <ClCompile Include="src\Logger\Logger.cpp" />
+    <ClCompile Include="vendor\imgui\misc\fonts\binary_to_compressed_c.cpp" />
     <ClCompile Include="vendor\implot\implot.cpp" />
-    <ClCompile Include="vendor\implot\implot_demo.cpp" />
     <ClCompile Include="vendor\implot\implot_items.cpp" />
     <ClCompile Include="vendor\miniz\miniz.c" />
   </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="src\Core\CommandInvoker.h" />
-    <ClInclude Include="src\Hooking\dynamic_hook_engine.h" />
-    <ClInclude Include="src\Core\FunctionAnalyzer.h" />
-    <ClInclude Include="src\Modules\FunctionCallMonitor.h" />
-    <ClInclude Include="src\Core\FunctionDatabase.h" />
-    <ClInclude Include="src\Analysis\FunctionScanner.h" />
-    <ClInclude Include="src\Core\PacketInjector.h" />
-    <ClInclude Include="src\Core\ResourceLoader.h" />
-    <ClInclude Include="src\Core\SafeMemory.h" />
-    <ClInclude Include="src\Core\ServiceManager.h" />
-    <ClInclude Include="src\Core\SignatureDatabase.h" />
-    <ClInclude Include="src\Analysis\PatternScanner.h" />
-    <ClInclude Include="src\Analysis\SignatureScanner.h" />
-    <ClInclude Include="src\Core\SimpleJSON.h" />
-    <ClInclude Include="src\Helper\WindowsApiWrapper.h" />
-    <ClInclude Include="src\Hooking\hook_factory_impl.h" />
-    <ClInclude Include="src\Hooking\hook_manager.h" />
-    <ClInclude Include="src\Modules\DebugCommandsModule.h" />
-    <ClInclude Include="src\Modules\GMCommandList.h" />
-    <ClInclude Include="src\Modules\GMCommandsModule.h" />
-    <ClInclude Include="src\Modules\CommandInterface.h" />
-    <ClInclude Include="src\Modules\MemoryViewerModule.h" />
-    <ClInclude Include="src\Modules\NetDiagnosticsModule.h" />
-    <ClInclude Include="src\Monitor\NetworkMonitorHelper.h" />
-    <ClInclude Include="src\Monitor\NetworkMonitorTypes.h" />
-    <ClInclude Include="src\Network\OpcodeNames.h" />
-    <ClInclude Include="src\Network\PacketDecoder.h" />
-    <ClInclude Include="src\Network\PacketRegistration.h" />
-    <ClInclude Include="src\Network\PacketRegistration.Macros.h" />
-    <ClInclude Include="src\ProtocolHandlers\Lobby\ClientLobbyDef.h" />
-    <ClInclude Include="src\ProtocolHandlers\Zone\ClientZoneDef.h" />
-    <ClInclude Include="src\ProtocolHandlers\CommonTypes.h" />
-    <ClInclude Include="src\ProtocolHandlers\Chat\ServerChatDef.h" />
-    <ClInclude Include="src\ProtocolHandlers\Lobby\ServerLobbyDef.h" />
-    <ClInclude Include="src\ProtocolHandlers\Zone\ServerZoneDef.h" />
-    <ClInclude Include="src\UI\imgui_overlay.h" />
-    <ClInclude Include="src\UI\UIManager.h" />
-    <ClInclude Include="src\UI\UIModule.h" />
-    <ClInclude Include="src\Hooking\lua_hook.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\aarch64.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\alpha.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\arc.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\arm.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\arm64.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\bpf.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\capstone.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\cs_operand.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\evm.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\hppa.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\loongarch.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\m680x.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\m68k.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\mips.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\mos65xx.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\platform.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\ppc.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\riscv.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\sh.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\sparc.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\systemz.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\systemz_compatibility.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\tms320c64x.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\tricore.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\wasm.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\x86.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\xcore.h" />
-    <ClInclude Include="vendor\capstone\include\capstone\xtensa.h" />
-    <ClInclude Include="vendor\hex_editor\imgui_hex.h" />
-    <ClInclude Include="vendor\ImGuiFD\ImGuiFD.h" />
-    <ClInclude Include="vendor\ImGuiFD\ImGuiFD_internal.h" />
-    <!-- ImGui Header Files -->
-    <ClInclude Include="vendor\imgui\imgui.h" />
-    <ClInclude Include="vendor\imgui\imgui_internal.h" />
-    <ClInclude Include="vendor\imgui\imstb_rectpack.h" />
-    <ClInclude Include="vendor\imgui\imstb_textedit.h" />
-    <ClInclude Include="vendor\imgui\imstb_truetype.h" />
-    <ClInclude Include="vendor\imgui\backends\imgui_impl_dx11.h" />
-    <ClInclude Include="vendor\imgui\backends\imgui_impl_win32.h" />
-    <ClInclude Include="src\Logger\Logger.h" />
-    <ClInclude Include="vendor\implot\implot.h" />
-    <ClInclude Include="vendor\implot\implot_internal.h" />
-    <ClInclude Include="vendor\minhook\include\MinHook.h" />
-    <ClInclude Include="vendor\miniz\miniz.h" />
-  </ItemGroup>
+
+  <!-- Non-compilable -->
   <ItemGroup>
     <None Include=".editorconfig" />
-    <None Include="data\data-sig-old.json" />
-    <None Include="data\data-sig.json" />
-    <None Include="data\data.json" />
-    <None Include="data\yml1.bin" />
-    <None Include="inject.bat">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</ExcludedFromBuild>
-    </None>
-    <None Include="injector\run_injector_admin.bat">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </None>
-    <None Include="PseudocodeGenerator.md" />
-    <None Include="vendor\capstone\bin\capstone.dll" />
-    <None Include="vendor\capstone\bin\capstone.pdb" />
-    <None Include="vendor\capstone\bin\cstool.exe" />
-    <None Include="vendor\ImGuiFD\LICENCE" />
-    <None Include="vendor\ImGuiFD\README.md" />
+    <None Include=".gitattributes" />
+    <None Include=".gitignore" />
+    <None Include="vendor\hex_editor\LICENSE" />
     <None Include="vendor\implot\LICENSE" />
-    <None Include="vendor\implot\README.md" />
-    <None Include="vendor\implot\TODO.md" />
     <None Include="vendor\miniz\LICENSE" />
   </ItemGroup>
+
+  <!-- Remove dynamic library references; keep static listing only if you want it visible -->
   <ItemGroup>
-    <Library Include="vendor\capstone\lib\capstone.lib" />
-    <Library Include="vendor\minhook\include\lib\libMinHook.x64.lib" />
+    <Library Include="vendor\capstone\capstone.lib" />
   </ItemGroup>
+
+  <ItemGroup>
+    <Font Include="vendor\imgui\misc\fonts\Cousine-Regular.ttf" />
+    <Font Include="vendor\imgui\misc\fonts\DroidSans.ttf" />
+    <Font Include="vendor\imgui\misc\fonts\Karla-Regular.ttf" />
+    <Font Include="vendor\imgui\misc\fonts\ProggyClean.ttf" />
+    <Font Include="vendor\imgui\misc\fonts\ProggyTiny.ttf" />
+    <Font Include="vendor\imgui\misc\fonts\Roboto-Medium.ttf" />
+  </ItemGroup>
+
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

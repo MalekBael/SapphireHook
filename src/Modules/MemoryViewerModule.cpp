@@ -1,42 +1,28 @@
 #pragma comment(lib, "psapi.lib")  // For GetModuleInformation
 
-// ---- Windows macro hygiene (MUST be before <windows.h>) ----
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-
 #include "MemoryViewerModule.h"
 #include "../Helper/CapstoneWrapper.h"
 
-#include <capstone/capstone.h>
-#include <algorithm>          // std::min / std::max
+#include <../vendor/capstone/include/capstone.h>
+#include <algorithm>
 #include <windows.h>
 #include "../src/Logger/Logger.h"
 #include <sstream>
 #include <iomanip>
 #include <chrono>
 #include <regex>
-#include <psapi.h>            // GetModuleInformation
+#include <psapi.h>
 #include <set>
 #include <unordered_map>
+#include <fstream>
+#include <filesystem>
 
-// Detect leftover macro pollution early (IntelliSense clarity)
-#ifdef min
-#pragma message("Warning: macro 'min' still defined after NOMINMAX; forcing undef.")
-#undef min
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
 #endif
-#ifdef max
-#pragma message("Warning: macro 'max' still defined after NOMINMAX; forcing undef.")
-#undef max
+#ifndef NOMINMAX
+#define NOMINMAX
 #endif
-
-// NOTE: This file previously contained an auto‑generated “SIGNATURES OF REFERENCED TYPES” block
-// with invalid C#/PInvoke/duplicated typedef content. That block has been FULLY REMOVED because
-// it broke C++ parsing (errors E0040 at earlier line numbers). If your tooling re-injects it,
-// configure it to stop or ensure it is inserted only inside a multiline comment.
 
 /* ====================== Capstone Environment Logging ====================== */
 static void LogCapstoneEnvironment() {
@@ -117,7 +103,6 @@ bool CapstoneBackend::Disassemble(uintptr_t start, size_t maxBytes,
         d.target = di.target;
         out.push_back(std::move(d));
         bytesConsumed += di.size;
-        // (Optional early break heuristics kept minimal here)
     }
     return !out.empty();
 }
@@ -186,7 +171,6 @@ void MemoryViewerModule::WorkerLoop() {
             auto startTime = std::chrono::steady_clock::now();
             std::string out;
             bool ok = m_decompBackend->Decompile(item.start, item.size, out);
-
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now() - startTime).count();
 
@@ -205,6 +189,16 @@ void MemoryViewerModule::WorkerLoop() {
                 if (!ok) entry->error = "Decompile failed";
             }
 
+            // Capture timing info if backend supports
+            if (auto* backend = dynamic_cast<PseudoDecompilerBackend*>(m_decompBackend.get())) {
+                const auto& tm = backend->GetLastTimings();
+                entry->tDecodeMs = tm.disasmMs;
+                entry->tIRMs = tm.analyzeMs;
+                entry->tGenMs = tm.genMs;
+                entry->tTotalMs = tm.totalMs;
+            }
+
+            entry->memoryVersion = m_memoryMutationCounter.load();
             m_pseudoProgress = 100;
             entry->ready = true;
         }
@@ -220,25 +214,44 @@ void MemoryViewerModule::QueueDecompile(uintptr_t start, size_t size) {
         slot->codeSize = size;
         slot->buildHash = ComputeImageHash();
         slot->ready = false;
+        slot->memoryVersion = m_memoryMutationCounter.load();
         {
             std::lock_guard<std::mutex> qlk(m_wqMutex);
             m_workQueue.push_back({ WorkItem::Decompile, start, size });
+        }
+    } else {
+        // If stale or error and user requested again, enqueue anew
+        if (slot->memoryVersion < m_memoryMutationCounter.load() || !slot->ready) {
+            slot->ready = false;
+            slot->error.clear();
+            slot->memoryVersion = m_memoryMutationCounter.load();
+            {
+                std::lock_guard<std::mutex> qlk(m_wqMutex);
+                m_workQueue.push_back({ WorkItem::Decompile, start, size });
+            }
         }
     }
 }
 
 /* ====================== Disassembly ====================== */
 bool MemoryViewerModule::BuildDisassembly(uintptr_t address) {
-    uintptr_t start = FindFunctionStartHeuristic(address);
+    uintptr_t target = address ? address : (m_lastFuncStart ? m_lastFuncStart : address);
+    uintptr_t start = FindFunctionStartHeuristic(target);
     size_t size = DetermineFunctionSize(start);
     size = (std::min)(size, static_cast<size_t>(0x2000));
     size_t consumed = 0;
     if (!m_disBackend) return false;
+
+    auto t0 = std::chrono::steady_clock::now();
     if (!m_disBackend->Disassemble(start, size, m_lastDisasm, consumed))
         return false;
+    m_lastDecodeMs = std::chrono::duration<double, std::milli>(
+        std::chrono::steady_clock::now() - t0).count();
+
     m_lastFuncStart = start;
     m_lastFuncSize = consumed;
     m_disasmDirty = false;
+    m_lastDisasmMemoryVersion = m_memoryMutationCounter.load();
     return true;
 }
 
@@ -248,14 +261,58 @@ void MemoryViewerModule::RenderAnalysisToolbar() {
         m_disasmDirty = true;
     }
     ImGui::SameLine();
+    // Conditions requiring decode before pseudocode:
+    bool disasmMissing = m_lastFuncStart == 0 || m_lastFuncSize == 0;
+    bool disasmStale = m_lastDisasmMemoryVersion != m_memoryMutationCounter.load();
+    bool needDecode = disasmMissing || m_disasmDirty || disasmStale;
+
     if (ImGui::Button("Pseudocode")) {
-        if (m_lastFuncStart && m_lastFuncSize) {
+        if (needDecode) {
+            m_pendingPseudoRequest = true;
+            ImGui::OpenPopup("Decode Required");
+        } else if (m_lastFuncStart && m_lastFuncSize) {
             QueueDecompile(m_lastFuncStart, m_lastFuncSize);
         }
     }
     ImGui::SameLine();
     ImGui::TextDisabled("FuncStart: 0x%llX Size: 0x%zX",
         static_cast<unsigned long long>(m_lastFuncStart), m_lastFuncSize);
+
+    ImGui::SameLine();
+    if (disasmStale) {
+        ImGui::TextColored(ImVec4(1, 0.4f, 0.3f, 1.f), "[Disassembly Stale]");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Re-decode")) {
+            BuildDisassembly(m_viewAddress ? m_viewAddress : m_lastFuncStart);
+        }
+    } else if (m_disasmDirty) {
+        ImGui::TextColored(ImVec4(1, 0.8f, 0.2f, 1.f), "[Dirty]");
+    } else if (m_lastDecodeMs > 0) {
+        ImGui::TextDisabled("(Decode %.2f ms)", m_lastDecodeMs);
+    }
+
+    // Modal popup
+    if (ImGui::BeginPopupModal("Decode Required", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("A (re)decode is recommended before generating pseudocode.\n\nReasons:\n%s%s%s",
+            disasmMissing ? "- No disassembly yet.\n" : "",
+            m_disasmDirty ? "- Marked dirty by user.\n" : "",
+            disasmStale ? "- Underlying bytes changed since last decode.\n" : "");
+        ImGui::Separator();
+        if (ImGui::Button("Decode & Generate", ImVec2(160, 0))) {
+            if (BuildDisassembly(m_viewAddress ? m_viewAddress : m_lastFuncStart)) {
+                if (m_lastFuncStart && m_lastFuncSize)
+                    QueueDecompile(m_lastFuncStart, m_lastFuncSize);
+            }
+            m_pendingPseudoRequest = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+            m_pendingPseudoRequest = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
 }
 
 /* ====================== Disassembly Tab ====================== */
@@ -266,7 +323,8 @@ void MemoryViewerModule::RenderDisassemblyTab() {
     RenderAnalysisToolbar();
     ImGui::Separator();
     if (ImGui::BeginTable("disasm_tbl", 5,
-        ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Borders)) {
+        ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY | ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable,
+        ImVec2(0, 0))) {
 
         ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 110.f);
         ImGui::TableSetupColumn("Bytes", ImGuiTableColumnFlags_WidthFixed, 120.f);
@@ -293,8 +351,19 @@ void MemoryViewerModule::RenderDisassemblyTab() {
 
 /* ====================== Pseudocode Tab ====================== */
 void MemoryViewerModule::RenderPseudocodeTab() {
+    if (m_showSideBySide && (m_disasmDirty || m_lastFuncStart == 0))
+        BuildDisassembly(m_viewAddress ? m_viewAddress : m_lastFuncStart);
+
     RenderAnalysisToolbar();
     ImGui::Separator();
+
+    ImGui::Checkbox("Side-by-Side Disassembly", &m_showSideBySide);
+    ImGui::SameLine();
+    bool showTimings = true;
+    ImGui::Checkbox("Show Timings", &showTimings);
+    ImGui::SameLine();
+    ImGui::Checkbox("Selectable View", &m_useSelectablePseudo);
+
     std::shared_ptr<PseudoCacheEntry> entry;
     {
         std::lock_guard<std::mutex> lk(m_pcMutex);
@@ -302,25 +371,220 @@ void MemoryViewerModule::RenderPseudocodeTab() {
         if (it != m_pseudoCache.end())
             entry = it->second;
     }
+
+    uint64_t memVer = m_memoryMutationCounter.load();
+
+    if (entry && entry->ready && entry->memoryVersion < memVer) {
+        ImGui::TextColored(ImVec4(1, 0.5f, 0.3f, 1.f),
+            "Pseudocode stale (memory modified)");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Regenerate")) {
+            if (m_lastDisasmMemoryVersion != memVer || m_disasmDirty)
+                BuildDisassembly(m_viewAddress ? m_viewAddress : m_lastFuncStart);
+            QueueDecompile(m_lastFuncStart, m_lastFuncSize);
+        }
+    }
+
+    // Export button (only meaningful if we have disasm & entry)
+    if (ImGui::Button("Export...")) {
+        if (entry && entry->ready && entry->error.empty()) {
+            std::snprintf(m_exportPath, sizeof(m_exportPath),
+                "pseudo_0x%llX.txt",
+                static_cast<unsigned long long>(m_lastFuncStart));
+            m_lastExportStatus.clear();
+            m_exportOverwriteConfirm = false;
+            ImGui::OpenPopup("Export Pseudocode/Disassembly");
+        } else {
+            ImGui::OpenPopup("Export Unavailable");
+        }
+    }
+    if (ImGui::BeginPopupModal("Export Unavailable", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextWrapped("Pseudocode not ready or has errors. Please generate it first.");
+        if (ImGui::Button("OK", ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+    }
+
+    // Export popup
+    if (ImGui::BeginPopupModal("Export Pseudocode/Disassembly", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Export current function to text file:");
+        ImGui::InputText("Path", m_exportPath, sizeof(m_exportPath));
+        if (!m_lastExportStatus.empty()) {
+            ImGui::TextWrapped("%s", m_lastExportStatus.c_str());
+        }
+        bool fileExists = std::filesystem::exists(m_exportPath);
+        if (fileExists && !m_exportOverwriteConfirm) {
+            ImGui::TextColored(ImVec4(1, 0.6f, 0.2f, 1), "File exists. Press Save again to overwrite.");
+        }
+
+        if (ImGui::Button("Save", ImVec2(120, 0))) {
+            if (!entry) {
+                m_lastExportStatus = "No entry.";
+            } else if (!entry->ready) {
+                m_lastExportStatus = "Not ready.";
+            } else if (!entry->error.empty()) {
+                m_lastExportStatus = "Error present: " + entry->error;
+            } else {
+                if (fileExists && !m_exportOverwriteConfirm) {
+                    m_exportOverwriteConfirm = true;
+                } else {
+                    auto text = BuildExportText(*entry);
+                    std::string err;
+                    if (WriteTextFileUTF8(m_exportPath, text, true, err)) {
+                        m_lastExportStatus = "Saved successfully.";
+                    } else {
+                        m_lastExportStatus = std::string("Save failed: ") + err;
+                    }
+                    m_exportOverwriteConfirm = false;
+                }
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Close", ImVec2(120, 0))) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
     if (!entry) {
         ImGui::TextDisabled("No pseudocode requested.");
         return;
     }
     if (!entry->ready) {
-        ImGui::TextColored(ImVec4(1, 1, 0, 1), "Generating...");
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), "Generating... (%d%%)", m_pseudoProgress.load());
         return;
     }
     if (!entry->error.empty()) {
         ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "Error: %s", entry->error.c_str());
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Retry")) {
+            QueueDecompile(m_lastFuncStart, m_lastFuncSize);
+        }
         return;
     }
-    ImGui::BeginChild("pseudo_scroll");
-    ImGui::PushTextWrapPos();
-    ImGui::TextUnformatted(entry->pseudocode.c_str());
-    ImGui::PopTextWrapPos();
-    ImGui::EndChild();
-    if (ImGui::Button("Copy")) {
-        ImGui::SetClipboardText(entry->pseudocode.c_str());
+
+    if (showTimings) {
+        ImGui::TextDisabled("Timings: Decode %.2f ms | IR %.2f ms | Gen %.2f ms | Total %.2f ms",
+            entry->tDecodeMs, entry->tIRMs, entry->tGenMs, entry->tTotalMs);
+    }
+
+    // Sync selectable buffer
+    if (entry->memoryVersion != m_pseudoDisplayBufferVersion) {
+        m_pseudoDisplayBuffer = entry->pseudocode; // copy
+        m_pseudoDisplayBufferVersion = entry->memoryVersion;
+    }
+
+    if (m_showSideBySide) {
+        float avail = ImGui::GetContentRegionAvail().x;
+        float leftWidth = avail * 0.48f;
+        ImGui::BeginChild("disasm_side", ImVec2(leftWidth, 0), true);
+        ImGui::TextDisabled("Disassembly");
+        ImGui::Separator();
+        if (!m_lastDisasm.empty()) {
+            for (auto& ins : m_lastDisasm) {
+                ImGui::Text("0x%llX  %-8s %-24s",
+                    static_cast<unsigned long long>(ins.address),
+                    ins.mnemonic.c_str(),
+                    ins.operands.c_str());
+            }
+        } else {
+            ImGui::TextDisabled("(No disassembly)");
+        }
+        ImGui::EndChild();
+        ImGui::SameLine();
+        ImGui::BeginChild("pseudo_side", ImVec2(0, 0), true);
+        ImGui::TextDisabled("Pseudocode");
+        ImGui::Separator();
+
+        if (m_useSelectablePseudo) {
+            ImGuiInputTextFlags flags = ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll;
+            ImGui::InputTextMultiline("##pseudo_sel",
+                m_pseudoDisplayBuffer.data(),
+                m_pseudoDisplayBuffer.size() + 1,
+                ImVec2(-FLT_MIN, 0),
+                flags);
+        } else {
+            ImGui::PushTextWrapPos();
+            ImGui::TextUnformatted(entry->pseudocode.c_str());
+            ImGui::PopTextWrapPos();
+        }
+        if (ImGui::Button("Copy")) {
+            ImGui::SetClipboardText(entry->pseudocode.c_str());
+        }
+        ImGui::EndChild();
+    } else {
+        ImGui::BeginChild("pseudo_scroll");
+        if (m_useSelectablePseudo) {
+            ImGuiInputTextFlags flags = ImGuiInputTextFlags_ReadOnly | ImGuiInputTextFlags_NoHorizontalScroll;
+            ImGui::InputTextMultiline("##pseudo_sel_full",
+                m_pseudoDisplayBuffer.data(),
+                m_pseudoDisplayBuffer.size() + 1,
+                ImVec2(-FLT_MIN, -FLT_MIN),
+                flags);
+        } else {
+            ImGui::PushTextWrapPos();
+            ImGui::TextUnformatted(entry->pseudocode.c_str());
+            ImGui::PopTextWrapPos();
+        }
+        ImGui::EndChild();
+        if (ImGui::Button("Copy")) {
+            ImGui::SetClipboardText(entry->pseudocode.c_str());
+        }
+    }
+}
+
+/* ====================== Export Helpers ====================== */
+std::string MemoryViewerModule::BuildExportText(const PseudoCacheEntry& entry) const {
+    std::ostringstream oss;
+    oss << "Function Start: 0x" << std::hex << m_lastFuncStart
+        << "  Size: 0x" << std::hex << m_lastFuncSize << "\n";
+    oss << "Memory Version: " << entry.memoryVersion << "\n";
+    oss << "Timings (ms): Decode=" << std::fixed << std::setprecision(2) << entry.tDecodeMs
+        << " IR=" << entry.tIRMs
+        << " Gen=" << entry.tGenMs
+        << " Total=" << entry.tTotalMs << "\n\n";
+
+    oss << "[Disassembly]\n";
+    oss << "Address, Bytes, Mnemonic, Operands\n";
+    for (const auto& ins : m_lastDisasm) {
+        oss << "0x" << std::hex << ins.address << ", "
+            << ins.bytes << ", "
+            << ins.mnemonic << ", "
+            << ins.operands << "\n";
+    }
+    oss << "\n[Pseudocode]\n";
+    oss << entry.pseudocode;
+    if (entry.pseudocode.back() != '\n')
+        oss << '\n';
+    return oss.str();
+}
+
+bool MemoryViewerModule::WriteTextFileUTF8(const char* path, const std::string& content, bool overwrite, std::string& err) {
+    namespace fs = std::filesystem;
+    try {
+        fs::path p(path);
+        if (p.empty()) {
+            err = "Empty path";
+            return false;
+        }
+        if (fs::exists(p) && !overwrite) {
+            err = "File exists";
+            return false;
+        }
+        std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
+        if (!ofs) {
+            err = "Open failed";
+            return false;
+        }
+        ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
+        if (!ofs) {
+            err = "Write failed";
+            return false;
+        }
+        return true;
+    }
+    catch (const std::exception& ex) {
+        err = ex.what();
+        return false;
     }
 }
 
@@ -329,7 +593,6 @@ void MemoryViewerModule::Initialize() {
     SapphireHook::LogInfo("[MemoryViewer] Initialize");
     EnsureBufferSize(static_cast<size_t>(m_viewSize));
 
-    // Hex editor state (if not already set externally)
     m_hexState.Bytes = reinterpret_cast<void*>(m_viewAddress);
     m_hexState.MaxBytes = m_viewSize;
     m_hexState.UserData = this;
@@ -353,26 +616,34 @@ MemoryViewerModule::~MemoryViewerModule() {
 /* ====================== Pseudo Decompiler Backend ====================== */
 bool PseudoDecompilerBackend::Decompile(uintptr_t start, size_t codeSize,
     std::string& pseudoC) {
-    auto t0 = std::chrono::steady_clock::now();
-    SapphireHook::LogInfo("[PseudoGen] Start 0x" + std::to_string(start) +
-        " size=0x" + std::to_string(codeSize));
+    m_lastTimings = {};
+    auto ts = std::chrono::steady_clock::now();
 
+    auto tDisStart = ts;
     std::vector<DisassembledInstr> instructions;
     if (!DisassembleFunction(start, (std::min)(codeSize, size_t(0x4000)), instructions)) {
         SapphireHook::LogError("[PseudoGen] Disassembly failed");
         pseudoC = "// Disassembly failed at 0x" + std::to_string(start);
         return false;
     }
+    auto tDisEnd = std::chrono::steady_clock::now();
 
+    auto tIRStart = tDisEnd;
     PseudoFunctionIR ir = AnalyzeInstructions(instructions);
     ir.start = start;
     ir.size = codeSize;
+    auto tIREnd = std::chrono::steady_clock::now();
 
+    auto tGenStart = tIREnd;
     pseudoC = GeneratePseudocode(ir);
+    auto tGenEnd = std::chrono::steady_clock::now();
 
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - t0).count();
-    SapphireHook::LogInfo("[PseudoGen] Done in " + std::to_string(ms) +
+    m_lastTimings.disasmMs = std::chrono::duration<double, std::milli>(tDisEnd - tDisStart).count();
+    m_lastTimings.analyzeMs = std::chrono::duration<double, std::milli>(tIREnd - tIRStart).count();
+    m_lastTimings.genMs = std::chrono::duration<double, std::milli>(tGenEnd - tGenStart).count();
+    m_lastTimings.totalMs = std::chrono::duration<double, std::milli>(tGenEnd - tDisStart).count();
+
+    SapphireHook::LogInfo("[PseudoGen] Done in " + std::to_string((int)m_lastTimings.totalMs) +
         "ms instructions=" + std::to_string(instructions.size()));
     return true;
 }
@@ -619,7 +890,6 @@ std::string PseudoDecompilerBackend::ConvertCallToCpp(const std::string& call) {
 
 std::string PseudoDecompilerBackend::NormalizeOperand(const std::string& operand) {
     std::string op = operand;
-    // trim
     while (!op.empty() && (op.front() == ' ' || op.front() == '\t')) op.erase(op.begin());
     while (!op.empty() && (op.back() == ' ' || op.back() == '\t')) op.pop_back();
 
@@ -647,7 +917,7 @@ std::string PseudoDecompilerBackend::GetConditionFromJump(const std::string& mne
         {"je","ZF == 1"},
         {"jne","ZF == 0"},
         {"jg","ZF == 0 && SF == OF"},
-        {"jge","SF == OF"},  // <-- Fixed: was missing closing quote
+        {"jge","SF == OF"},
         {"jl","SF != OF"},
         {"jle","ZF == 1 || SF != OF"},
         {"ja","CF == 0 && ZF == 0"},
@@ -694,6 +964,7 @@ int MemoryViewerModule::StaticWriteCallback(ImGuiHexEditorState* state, int offs
         if (end <= self->m_buffer.size())
             std::memcpy(self->m_buffer.data() + off, buf, static_cast<size_t>(toWrite));
     }
+    self->OnBytesModified(addr, static_cast<size_t>(toWrite));
     return toWrite;
 }
 
@@ -776,6 +1047,19 @@ void MemoryViewerModule::RefreshBuffer() {
     m_hexState.WriteCallback = m_readOnly ? nullptr : &MemoryViewerModule::StaticWriteCallback;
 }
 
+void MemoryViewerModule::OnBytesModified(uintptr_t address, size_t size) {
+    (void)address;
+    (void)size;
+    m_memoryMutationCounter.fetch_add(1);
+    // Mark disassembly dirty only if modified range overlaps last function
+    if (m_lastFuncStart && m_lastFuncSize) {
+        if (address + size >= m_lastFuncStart &&
+            address <= (m_lastFuncStart + m_lastFuncSize)) {
+            m_disasmDirty = true;
+        }
+    }
+}
+
 /* ====================== Function Heuristics ====================== */
 uintptr_t MemoryViewerModule::FindFunctionStartHeuristic(uintptr_t addr) {
     if (!addr) return 0;
@@ -787,13 +1071,10 @@ uintptr_t MemoryViewerModule::FindFunctionStartHeuristic(uintptr_t addr) {
     for (size_t i = 0; i + 4 < buf.size(); ++i) {
         uintptr_t candidate = scanStart + i;
         if (candidate >= addr) break;
-        // push rbp; mov rbp, rsp
         if (buf[i] == 0x55 && buf[i + 1] == 0x48 && buf[i + 2] == 0x89 && buf[i + 3] == 0xE5)
             return candidate;
-        // sub rsp, imm8/imm32
         if (buf[i] == 0x48 && buf[i + 1] == 0x83 && buf[i + 2] == 0xEC)
             return candidate;
-        // mov [rsp+8], rcx (parameter spill)
         if (buf[i] == 0x48 && buf[i + 1] == 0x89 && buf[i + 2] == 0x4C && buf[i + 3] == 0x24)
             return candidate;
     }
@@ -808,7 +1089,7 @@ size_t MemoryViewerModule::DetermineFunctionSize(uintptr_t start) {
         return 0x100;
 
     for (size_t i = 8; i + 4 < buf.size(); ++i) {
-        if (buf[i] == 0xC3) { // ret
+        if (buf[i] == 0xC3) {
             if (i + 1 < buf.size()) {
                 uint8_t next = buf[i + 1];
                 if (next == 0xCC || next == 0x90 || next == 0x00)
@@ -819,7 +1100,7 @@ size_t MemoryViewerModule::DetermineFunctionSize(uintptr_t start) {
                     return i + 1;
             }
         }
-        if (buf[i] == 0xC2 && i + 2 < buf.size()) // ret imm16
+        if (buf[i] == 0xC2 && i + 2 < buf.size())
             return i + 3;
     }
     return kMax;
@@ -865,6 +1146,7 @@ void MemoryViewerModule::RenderWindow() {
         m_viewAddress = addr;
         if (m_viewSize < 0) m_viewSize = 0;
         RefreshBuffer();
+        m_disasmDirty = true;
     }
     ImGui::SameLine();
     if (ImGui::Button("Refresh")) RefreshBuffer();

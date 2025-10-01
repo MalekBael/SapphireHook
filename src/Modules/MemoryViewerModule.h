@@ -26,28 +26,25 @@ struct DisassembledInstr {
     uintptr_t target{};
 };
 
-// Pseudocode IR structures
 struct PseudoVariable {
     enum Kind { Stack, Register, Immediate, Memory };
     Kind kind;
     std::string name;
     int64_t value{};
-    
     PseudoVariable(Kind k = Register, const std::string& n = "", int64_t v = 0)
         : kind(k), name(n), value(v) {}
 };
 
 struct PseudoStatement {
-    enum Type { 
-        Assign,      // reg = value
-        IfCond,      // if (cond) goto label
-        Goto,        // goto label
-        Return,      // return
-        Call,        // call function
-        Label,       // label:
-        Comment      // // comment
+    enum Type {
+        Assign,
+        IfCond,
+        Goto,
+        Return,
+        Call,
+        Label,
+        Comment
     };
-    
     Type type;
     std::string lhs;
     std::string rhs;
@@ -55,7 +52,6 @@ struct PseudoStatement {
     uintptr_t target{};
     std::string label;
     std::string comment;
-    
     PseudoStatement(Type t = Comment) : type(t) {}
 };
 
@@ -71,41 +67,46 @@ class IDisassemblyBackend {
 public:
     virtual ~IDisassemblyBackend() = default;
     virtual bool Disassemble(uintptr_t start, size_t maxBytes,
-                             std::vector<DisassembledInstr>& out,
-                             size_t& bytesConsumed) = 0;
+        std::vector<DisassembledInstr>& out,
+        size_t& bytesConsumed) = 0;
 };
 
 class IDecompilerBackend {
 public:
     virtual ~IDecompilerBackend() = default;
     virtual bool Decompile(uintptr_t start, size_t codeSize,
-                           std::string& pseudoC) = 0;
+        std::string& pseudoC) = 0;
 };
 
-// Capstone-based backend
 class CapstoneBackend : public IDisassemblyBackend {
 public:
     CapstoneBackend();
     ~CapstoneBackend() override;
     bool Disassemble(uintptr_t start, size_t maxBytes,
-                     std::vector<DisassembledInstr>& out,
-                     size_t& bytesConsumed) override;
+        std::vector<DisassembledInstr>& out,
+        size_t& bytesConsumed) override;
 private:
-    void* m_handle{}; // csh
+    void* m_handle{};
 };
 
-// Stub decompiler backend (Snowman removed)
 class PseudoDecompilerBackend : public IDecompilerBackend {
 public:
+    struct Timings {
+        double disasmMs{};
+        double analyzeMs{};
+        double genMs{};
+        double totalMs{};
+    };
     bool Decompile(uintptr_t start, size_t codeSize,
-                   std::string& pseudoC) override;
-
+        std::string& pseudoC) override;
+    const Timings& GetLastTimings() const { return m_lastTimings; }
 private:
+    Timings m_lastTimings{};
     std::string ConvertToCppStyle(const std::string& operand);
     std::string ConvertConditionToCpp(const std::string& condition);
     std::string ConvertCallToCpp(const std::string& call);
-    bool DisassembleFunction(uintptr_t start, size_t maxSize, 
-                             std::vector<DisassembledInstr>& instructions);
+    bool DisassembleFunction(uintptr_t start, size_t maxSize,
+        std::vector<DisassembledInstr>& instructions);
     PseudoFunctionIR AnalyzeInstructions(const std::vector<DisassembledInstr>& instructions);
     std::string GeneratePseudocode(const PseudoFunctionIR& ir);
     std::string NormalizeOperand(const std::string& operand);
@@ -116,9 +117,14 @@ private:
 struct PseudoCacheEntry {
     std::string pseudocode;
     std::string error;
-    std::atomic<bool> ready{false};
+    std::atomic<bool> ready{ false };
     size_t codeSize{};
     uint64_t buildHash{};
+    uint64_t memoryVersion{};
+    double tDecodeMs{};
+    double tIRMs{};
+    double tGenMs{};
+    double tTotalMs{};
 };
 
 class MemoryViewerModule : public SapphireHook::UIModule {
@@ -131,19 +137,16 @@ public:
     ~MemoryViewerModule() override;
 
     void RenderMenu() override {}
-    // Implemented in MemoryViewerModule.cpp
     void RenderWindow() override;
 
     bool IsWindowOpen() const override { return m_windowOpen; }
     void SetWindowOpen(bool open) override { m_windowOpen = open; }
 
-    // Move these to public section
     static bool SafeRead(uintptr_t address, void* outBuf, size_t size);
     static bool SafeWrite(uintptr_t address, const void* inBuf, size_t size);
     static bool SafeStaticRead(uintptr_t addr, void* out, size_t sz);
 
 private:
-    // Hex callbacks
     static int  StaticReadCallback(ImGuiHexEditorState* state, int offset, void* buf, int size);
     static int  StaticWriteCallback(ImGuiHexEditorState* state, int offset, void* buf, int size);
     static bool StaticGetAddressNameCallback(ImGuiHexEditorState* state, int offset, char* buf, int size);
@@ -151,9 +154,9 @@ private:
 
     void EnsureBufferSize(size_t size);
     void RefreshBuffer();
+    void OnBytesModified(uintptr_t address, size_t size);
 
     bool m_windowOpen = false;
-
     uintptr_t m_viewAddress = 0;
     int m_viewSize = 0x400;
     bool m_readOnly = true;
@@ -173,19 +176,18 @@ private:
     ImGuiHexEditorState m_hexState{};
     std::vector<std::uint8_t> m_buffer;
 
-    // Analysis
     std::unique_ptr<IDisassemblyBackend> m_disBackend;
     std::unique_ptr<IDecompilerBackend>  m_decompBackend;
 
     std::vector<DisassembledInstr> m_lastDisasm;
-    uintptr_t m_lastFuncStart{0};
-    size_t    m_lastFuncSize{0};
-    bool      m_disasmDirty{true};
+    uintptr_t m_lastFuncStart{ 0 };
+    size_t    m_lastFuncSize{ 0 };
+    bool      m_disasmDirty{ true };
 
     std::mutex m_pcMutex;
     std::unordered_map<uintptr_t, std::shared_ptr<PseudoCacheEntry>> m_pseudoCache;
 
-    std::atomic<bool> m_workerRun{false};
+    std::atomic<bool> m_workerRun{ false };
     std::thread       m_worker;
     struct WorkItem {
         enum Type { Decompile } type;
@@ -195,11 +197,28 @@ private:
     std::mutex m_wqMutex;
     std::deque<WorkItem> m_workQueue;
 
-    // Pseudocode generation control
-    std::atomic<bool> m_abortDecompile{false};
-    std::atomic<int> m_pseudoProgress{0};
-    size_t m_pseudoMaxBytes{0x4000};
-    int m_pseudoTimeoutMs{5000};
+    std::atomic<bool> m_abortDecompile{ false };
+    std::atomic<int> m_pseudoProgress{ 0 };
+    size_t m_pseudoMaxBytes{ 0x4000 };
+    int m_pseudoTimeoutMs{ 5000 };
+
+    std::atomic<uint64_t> m_memoryMutationCounter{ 0 };
+    uint64_t m_lastDisasmMemoryVersion{ 0 };
+    double   m_lastDecodeMs{ 0.0 };
+
+    bool m_pendingPseudoRequest{ false };
+    bool m_showSideBySide{ false };
+
+    // Selectable pseudocode buffer
+    std::string m_pseudoDisplayBuffer;
+    uint64_t    m_pseudoDisplayBufferVersion{ 0 };
+    bool        m_useSelectablePseudo{ true };
+
+    // Export UI
+    bool  m_exportPopupOpen{ false };
+    char  m_exportPath[260]{};
+    bool  m_exportOverwriteConfirm{ false };
+    std::string m_lastExportStatus;
 
     void InitAnalysisBackends();
     void ShutdownAnalysisBackends();
@@ -215,4 +234,8 @@ private:
     void RenderDisassemblyTab();
     void RenderPseudocodeTab();
     void RenderAnalysisToolbar();
+
+    // Export helpers
+    std::string BuildExportText(const PseudoCacheEntry& entry) const;
+    bool WriteTextFileUTF8(const char* path, const std::string& content, bool overwrite, std::string& err);
 };

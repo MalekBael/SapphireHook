@@ -10,7 +10,7 @@
 #include "../vendor/imgui/imgui.h"
 #include "../../vendor/imgui/backends/imgui_impl_dx11.h"
 #include "../../vendor/imgui/backends/imgui_impl_win32.h"
-#include "../../vendor/minhook/include/MinHook.h"
+#include <../vendor/minhook/Minhook.h>
 #include "../UI/UIManager.h"
 // NEW: ImPlot for charts
 #include "../../vendor/implot/implot.h"

@@ -152,14 +152,14 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
         bool functionFound = (uiManager.GetModule("function_monitor") != nullptr);
 
         LogInfo("=== MODULE REGISTRATION VERIFICATION ===");
-        LogInfo("IPC Commands: " + std::string(ipcFound ? "✓ FOUND" : "✗ MISSING"));
-        LogInfo("Debug Commands: " + std::string(debugFound ? "✓ FOUND" : "✗ MISSING"));
-        LogInfo("Function Monitor: " + std::string(functionFound ? "✓ FOUND" : "✗ MISSING"));
+        LogInfo("IPC Commands: " + std::string(ipcFound ? " FOUND" : "MISSING"));
+        LogInfo("Debug Commands: " + std::string(debugFound ? " FOUND" : " MISSING"));
+        LogInfo("Function Monitor: " + std::string(functionFound ? " FOUND" : " MISSING"));
 
         if (ipcFound && debugFound && functionFound)
-            LogInfo("🎉 ALL UI MODULES REGISTERED SUCCESSFULLY!");
+            LogInfo("ALL UI MODULES REGISTERED SUCCESSFULLY!");
         else
-            LogError("❌ SOME MODULES FAILED TO REGISTER!");
+            LogError("SOME MODULES FAILED TO REGISTER!");
 
         LogInfo("UI modules registration completed");
     } catch (const std::exception& e) {

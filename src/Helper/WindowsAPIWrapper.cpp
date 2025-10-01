@@ -10,7 +10,7 @@
 
 #include <Windows.h>
 #include <Psapi.h>
-#include "../../vendor/minhook/include/MinHook.h"
+#include <../vendor/minhook/Minhook.h>
 #include "WindowsAPIWrapper.h"
 
 #pragma comment(lib, "psapi.lib")

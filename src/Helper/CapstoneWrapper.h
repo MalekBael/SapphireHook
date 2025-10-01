@@ -1,6 +1,6 @@
 #pragma once
 
-#include <capstone/capstone.h>
+#include <../vendor/capstone/include/capstone.h>
 #include <cstdint>
 #include <vector>
 #include <string>
