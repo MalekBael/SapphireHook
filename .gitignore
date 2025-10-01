@@ -16,8 +16,6 @@
 # Mono auto generated files
 mono_crash.*
 
-/notes/
-
 # Build results
 [Dd]ebug/
 [Dd]ebugPublic/
@@ -389,3 +387,16 @@ external/*/bin/
 /copilot-instructions.md
 /copilot-instructions.md
 /PseudocodeGenerator.md
+
+# VS Code C++ configuration
+CppProperties.json
+/notes/cbt.txt
+CppProperties.json
+/notes/hook-log.txt
+/notes/NetworkMonitor.cpp
+/notes/packet-notes.txt
+/notes/packet.txt
+/notes/prompt.txt
+/notes/prompts.txt
+/notes/PseudocodeGenerator.md
+/notes/suspected_opcodes.txt
