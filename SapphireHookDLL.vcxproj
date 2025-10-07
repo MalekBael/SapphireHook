@@ -138,6 +138,9 @@
     <ClInclude Include="src\Network\PacketDecoder.h" />
     <ClInclude Include="src\Network\PacketRegistration.h" />
     <ClInclude Include="src\Network\PacketRegistration.Macros.h" />
+    <ClInclude Include="src\Network\PacketTable.Chat.h" />
+    <ClInclude Include="src\Network\PacketTable.Lobby.h" />
+    <ClInclude Include="src\Network\PacketTable.Zone.h" />
     <ClInclude Include="src\ProtocolHandlers\Chat\ServerChatDef.h" />
     <ClInclude Include="src\ProtocolHandlers\CommonTypes.h" />
     <ClInclude Include="src\ProtocolHandlers\Lobby\ClientLobbyDef.h" />
@@ -174,6 +177,7 @@
   </ItemGroup>
   <!-- Sources -->
   <ItemGroup>
+    <ClCompile Include="src\Network\PacketDecoder.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />
     <ClCompile Include="src\Analysis\FunctionScanner.cpp" />
@@ -228,6 +232,13 @@
     <None Include=".editorconfig" />
     <None Include=".gitattributes" />
     <None Include=".gitignore" />
+    <None Include="docs\BACKLOG.md" />
+    <None Include="docs\MAPPING_GUIDE.md" />
+    <None Include="docs\MIGRATION_PROGRESS.md" />
+    <None Include="docs\PACKET_MIGRATION_GUIDE.md" />
+    <None Include="docs\QUEST_OPCODE_STATUS.md" />
+    <None Include="docs\STRUCT_OPCODE_VERIFICATION.md" />
+    <None Include="packages.config" />
     <None Include="vendor\hex_editor\LICENSE" />
     <None Include="vendor\implot\LICENSE" />
     <None Include="vendor\miniz\LICENSE" />
@@ -237,4 +248,13 @@
     <Library Include="vendor\capstone\capstone.lib" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Import Project="packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets" Condition="Exists('packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets')" />
+  <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
+    <PropertyGroup>
+      <ErrorText>This project references NuGet package(s) that are missing on this computer. Use NuGet Package Restore to download them.  For more information, see http://go.microsoft.com/fwlink/?LinkID=322105. The missing file is {0}.</ErrorText>
+    </PropertyGroup>
+    <Error Condition="!Exists('packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets'))" />
+    <Error Condition="!Exists('packages\native.spdlog-stdfmt.1.12.0\build\native\native.spdlog-stdfmt.targets')" Text="$([System.String]::Format('$(ErrorText)', 'packages\native.spdlog-stdfmt.1.12.0\build\native\native.spdlog-stdfmt.targets'))" />
+  </Target>
+  <Import Project="packages\native.spdlog-stdfmt.1.12.0\build\native\native.spdlog-stdfmt.targets" Condition="Exists('packages\native.spdlog-stdfmt.1.12.0\build\native\native.spdlog-stdfmt.targets')" />
 </Project>

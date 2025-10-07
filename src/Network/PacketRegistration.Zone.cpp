@@ -4,10 +4,11 @@
 #include "../ProtocolHandlers/Zone/ServerZoneDef.h"
 #include "PacketRegistration.h"
 #include "PacketRegistration.Macros.h"
+#include "PacketTable.Zone.h"
 #include <algorithm>
 #include <array>
 #include <cstddef>
-#include <cstring> // for std::memcpy
+#include <cstring>
 #include <iomanip>
 #include <iterator>
 #include <sstream>
@@ -20,37 +21,27 @@
 #endif
 
 #ifdef __INTELLISENSE__
-// IntelliSense-friendly fallbacks: prevent deep macro expansion noise
 #ifdef REGISTER_PACKET
 #undef REGISTER_PACKET
 #endif
 #ifdef FIELD
 #undef FIELD
 #endif
-
-// Make REGISTER_PACKET syntactically valid while exposing 'pkt' for member browsing
 #define REGISTER_PACKET(Channel, Outgoing, Opcode, StructType, ...) \
-        if constexpr (false) { const StructType* pkt = nullptr; (void)pkt; }
-
-    // Suppress FIELD macro bodies
+    if constexpr(false){ const StructType* pkt=nullptr; (void)pkt; }
 #define FIELD(Name, Expr)
 #endif
 
 using namespace PacketDecoding;
 using namespace PacketStructures;
 
-
 namespace {
     std::string ClassifyItemOperation(const PacketStructures::Server::Zone::FFXIVIpcItemOperation* p);
     std::string DumpBytes(const void* data, size_t len, size_t maxShow = 32);
 
-    // Function implementations
     std::string ClassifyItemOperation(const PacketStructures::Server::Zone::FFXIVIpcItemOperation* p) {
         if (!p) return "null";
-
         std::ostringstream os;
-
-        // Classify based on operation type and source/destination data
         switch (p->operationType) {
         case 1: os << "Move"; break;
         case 2: os << "Split"; break;
@@ -59,41 +50,29 @@ namespace {
         case 5: os << "Use"; break;
         default: os << "Op" << p->operationType; break;
         }
-
-        // Add source/destination context
-        if (p->srcStorageId != p->dstStorageId) {
+        if (p->srcStorageId != p->dstStorageId)
             os << "(Storage:" << p->srcStorageId << "→" << p->dstStorageId << ")";
-        }
-
-        if (p->srcStack > 0 || p->dstStack > 0) {
+        if (p->srcStack > 0 || p->dstStack > 0)
             os << "(Stack:" << p->srcStack << "→" << p->dstStack << ")";
-        }
-
         return os.str();
     }
 
     std::string DumpBytes(const void* data, size_t len, size_t maxShow) {
         if (!data || len == 0) return "[]";
-
         std::ostringstream os;
         const uint8_t* bytes = static_cast<const uint8_t*>(data);
         size_t showLen = std::min(len, maxShow);
-
         os << "[" << std::hex << std::uppercase << std::setfill('0');
         for (size_t i = 0; i < showLen; ++i) {
-            if (i > 0) os << " ";
+            if (i) os << ' ';
             os << std::setw(2) << static_cast<unsigned>(bytes[i]);
         }
-        if (len > maxShow) {
-            os << "...+" << std::dec << (len - maxShow) << "more";
-        }
+        if (len > maxShow) os << "...+" << std::dec << (len - maxShow) << "more";
         os << "]";
-
         return os.str();
     }
 }
 
-// Formatting helpers
 namespace PacketDecoding {
     const char* GetActionTypeName(uint8_t type) {
         switch (type) {
@@ -183,668 +162,1736 @@ namespace PacketDecoding {
     }
 }
 
-// ================= REGISTER PACKETS =================
-void PacketDecoding::RegisterZonePackets() {
-    // Don't use blanket "using namespace" to avoid ambiguity
+// ============================================================================
+// Generic Decoder Factory
+// ============================================================================
+namespace {
+    using namespace PacketDecoding;
     namespace ServerZone = PacketStructures::Server::Zone;
     namespace ClientZone = PacketStructures::Client::Zone;
 
-    // ================= REGISTER SERVER PACKETS =================
-    // CORE / SESSION
-    REGISTER_PACKET(1, false, 0x0065, ServerZone::FFXIVIpcSync,
-        FIELD("ClientTimeValue", FieldToString(pkt->clientTimeValue)),
-        FIELD("TransmissionInterval", FieldToString(pkt->transmissionInterval)),
-        FIELD("OriginEntityId", FormatHex(pkt->position.originEntityId)),
-        FIELD("Position", FormatPosition(pkt->position.pos[0], pkt->position.pos[1], pkt->position.pos[2])),
-        FIELD("Direction", FormatAngle(pkt->position.dir))
-    );
-
-    REGISTER_PACKET(1, false, 0x0066, ServerZone::FFXIVIpcLogin,
-        FIELD("ClientTimeValue", FieldToString(pkt->clientTimeValue)),
-        FIELD("LoginTicketId", FormatHex(pkt->loginTicketId)),
-        FIELD("PlayerActorId", FormatHex(pkt->playerActorId))
-    );
-
-    REGISTER_PACKET(1, false, 0x02D6, ServerZone::FFXIVIpcEnableLogout,
-        FIELD("Content", FieldToString(pkt->content))
-    );
-
-    // CHAT / SOCIAL
-    REGISTER_PACKET(1, false, 0x0067, ServerZone::FFXIVIpcChat,
-        FIELD("Type", FieldToString(pkt->type) + " (" + GetChatTypeName(pkt->type) + ")"),
-        FIELD("EntityId", FormatHex(pkt->entityId)),
-        FIELD("CharacterId", FormatHex(pkt->characterId)),
-        FIELD("Speaker", FormatString(pkt->speakerName, 32)),
-        FIELD("Message", FormatString(pkt->message, std::min<size_t>(200, sizeof(pkt->message))))
-    );
-
-    REGISTER_PACKET(1, false, 0x00CC, ServerZone::FFXIVIpcGetCommonlistResult,
-        FIELD("CommunityId", FormatHex(pkt->CommunityID)),
-        FIELD("Index", FieldToString(pkt->Index)),
-        FIELD("NextIndex", FieldToString(pkt->NextIndex)),
-        FIELD("ListType", FieldToString(pkt->ListType)),
-        FIELD("Entry0Name", FormatString(pkt->entries[0].CharacterName, 32))
-    );
-
-    REGISTER_PACKET(1, false, 0x00CD, ServerZone::FFXIVIpcGetCommonlistDetailResult,
-        FIELD("DetailCharacterID", FormatHex(pkt->DetailCharacterID)),
-        FIELD("CommunityID", FormatHex(pkt->CommunityID)),
-        FIELD("SelectClassID", FormatHex(pkt->SelectClassID)),
-        FIELD("SearchComment", FormatString(pkt->SearchComment, 60)),
-        FIELD("FirstClassJobId", FieldToString(pkt->ClassData[0].id))
-    );
-
-    REGISTER_PACKET(1, false, 0x00EB, ServerZone::FFXIVIpcPcSearchResult,
-        FIELD("ResultCount", FieldToString(pkt->ResultCount))
-    );
-
-    REGISTER_PACKET(1, false, 0x00F0, ServerZone::FFXIVIpcLinkshellResult,
-        FIELD("LinkshellID", FormatHex(pkt->LinkshellID)),
-        FIELD("Result", FieldToString(pkt->Result)),
-        FIELD("TargetName", FormatString(pkt->TargetName, 32))
-    );
-
-    REGISTER_PACKET(1, false, 0x00C9, ServerZone::FFXIVIpcInviteResult,
-        FIELD("Result", FieldToString(pkt->Result)),
-        FIELD("AuthType", FieldToString(pkt->AuthType)),
-        FIELD("TargetName", FormatString(pkt->TargetName, 32))
-    );
-
-    REGISTER_PACKET(1, false, 0x00CA, ServerZone::FFXIVIpcInviteReplyResult,
-        FIELD("Result", FieldToString(pkt->Result)),
-        FIELD("Answer", FieldToString(pkt->Answer)),
-        FIELD("InviteCharacter", FormatString(pkt->InviteCharacterName, 32))
-    );
-
-    REGISTER_PACKET(1, false, 0x00CB, ServerZone::FFXIVIpcInviteUpdate,
-        FIELD("InviteCharacterID", FormatHex(pkt->InviteCharacterID)),
-        FIELD("InviteTime", FieldToString(pkt->InviteTime)),
-        FIELD("InviteName", FormatString(pkt->InviteName, 32))
-    );
-
-    REGISTER_PACKET(1, false, 0x00E6, ServerZone::FFXIVIpcFriendlistRemoveResult,
-        FIELD("RemovedCharacterID", FormatHex(pkt->RemovedCharacterID)),
-        FIELD("Result", FieldToString(pkt->Result)),
-        FIELD("RemovedName", FormatString(pkt->RemovedCharacterName, 32))
-    );
-
-    REGISTER_PACKET(1, false, 0x00E1, ServerZone::FFXIVIpcBlacklistAddResult,
-        FIELD("AddedCharacterID", FormatHex(pkt->AddedCharacter.CharacterID)),
-        FIELD("CharacterName", FormatString(pkt->AddedCharacter.CharacterName, 32)),
-        FIELD("Result", FieldToString(pkt->Result))
-    );
-
-    REGISTER_PACKET(1, false, 0x00E2, ServerZone::FFXIVIpcBlacklistRemoveResult,
-        FIELD("RemovedCharacterID", FormatHex(pkt->RemovedCharacter.CharacterID)),
-        FIELD("CharacterName", FormatString(pkt->RemovedCharacter.CharacterName, 32)),
-        FIELD("Result", FieldToString(pkt->Result))
-    );
-
-    REGISTER_PACKET(1, false, 0x00E3, ServerZone::FFXIVIpcGetBlacklistResult,
-        FIELD("Count", FieldToString((int)20)),
-        FIELD("Index", FieldToString(pkt->Index)),
-        FIELD("NextIndex", FieldToString(pkt->NextIndex))
-    );
-
-    REGISTER_PACKET(1, false, 0x00F1, ServerZone::FFXIVIpcGetLinkshellListResult,
-        FIELD("FirstLinkshellID", FormatHex(pkt->LinkshellList[0].LinkshellID))
-    );
-
-    REGISTER_PACKET(1, false, 0x00D2, ServerZone::FFXIVIpcChatChannelResult,
-        FIELD("ChannelID", FormatHex(pkt->ChannelID)),
-        FIELD("CommunityID", FormatHex(pkt->CommunityID)),
-        FIELD("Result", FieldToString(pkt->Result))
-    );
-
-    REGISTER_PACKET(1, false, 0x00D5, ServerZone::FFXIVIpcSetOnlineStatus,
-        FIELD("OnlineStatusFlags", FormatHex(pkt->onlineStatusFlags))
-    );
-
-    // PROFILE
-    REGISTER_PACKET(1, false, 0x00CE, ServerZone::FFXIVIpcSetProfileResult,
-        FIELD("Result", FieldToString(pkt->Result)),
-        FIELD("Region", FieldToString(pkt->Region)),
-        FIELD("Comment", FormatString(pkt->SearchComment, 60))
-    );
-
-    REGISTER_PACKET(1, false, 0x00CF, ServerZone::FFXIVIpcGetProfileResult,
-        FIELD("Region", FieldToString(pkt->Region)),
-        FIELD("Comment", FormatString(pkt->SearchComment, 60))
-    );
-
-    REGISTER_PACKET(1, false, 0x00D0, ServerZone::FFXIVIpcGetSearchCommentResult,
-        FIELD("TargetEntityID", FormatHex(pkt->TargetEntityID)),
-        FIELD("Comment", FormatString(pkt->SearchComment, 60))
-    );
-
-    REGISTER_PACKET(1, false, 0x00D1, ServerZone::FFXIVIpcGetCharacterNameResult,
-        FIELD("CharacterID", FormatHex(pkt->CharacterID)),
-        FIELD("Name", FormatString(pkt->CharacterName, 32))
-    );
-
-    // SYSTEM MESSAGES
-    REGISTER_PACKET(1, false, 0x00D3, ServerZone::FFXIVIpcSendSystemMessage,
-        FIELD("MessageParam", FieldToString(pkt->MessageParam)),
-        FIELD("Message", FormatString(pkt->Message, 120))
-    );
-
-    REGISTER_PACKET(1, false, 0x00D4, ServerZone::FFXIVIpcSendLoginMessage,
-        FIELD("MessageParam", FieldToString(pkt->MessageParam)),
-        FIELD("Message", FormatString(pkt->Message, 120))
-    );
-
-    // ACHIEVEMENT
-    REGISTER_PACKET(1, false, 0x02DD, ServerZone::FFXIVIpcAchievement,
-        FIELD("CompleteMaskFirstByte", FormatHex(pkt->complete[0])),
-        FIELD("History0", FieldToString(pkt->history[0]))
-    );
-
-    // MAIL
-    REGISTER_PACKET(1, false, 0x00FB, ServerZone::FFXIVIpcGetLetterMessageResult,
-        FIELD("FirstSender", FormatHex(pkt->LetterMessage[0].SenderCharacterID)),
-        FIELD("FirstMessage", FormatString(pkt->LetterMessage[0].Message, 40)),
-        FIELD("NextIndex", FieldToString(pkt->NextIndex))
-    );
-
-    REGISTER_PACKET(1, false, 0x00FC, ServerZone::FFXIVIpcGetLetterMessageDetailResult,
-        FIELD("SenderCharacterID", FormatHex(pkt->SenderCharacterID)),
-        FIELD("Message", FormatString(pkt->Message, 80))
-    );
-
-    REGISTER_PACKET(1, false, 0x00FA, ServerZone::FFXIVIpcLetterResult,
-        FIELD("SenderCharacterID", FormatHex(pkt->SenderCharacterID)),
-        FIELD("Result", FieldToString(pkt->Result))
-    );
-
-    REGISTER_PACKET(1, false, 0x00FD, ServerZone::FFXIVIpcGetLetterStatusResult,
-        FIELD("UnreadCount", FieldToString(pkt->UnreadCount)),
-        FIELD("TotalCount", FieldToString(pkt->TotalCount)),
-        FIELD("ItemCount", FieldToString(pkt->ItemCount))
-    );
-
-    // MARKET / ITEM SEARCH
-    REGISTER_PACKET(1, false, 0x0105, ServerZone::FFXIVIpcGetItemSearchListResult,
-        FIELD("FirstCatalogID", FieldToString(pkt->ItemSearchList[0].CatalogID)),
-        FIELD("FirstPrice", FieldToString(pkt->ItemSearchList[0].SellPrice)),
-        FIELD("Index", FieldToString(pkt->Index))
-    );
-
-    REGISTER_PACKET(1, false, 0x0109, ServerZone::FFXIVIpcGetItemHistoryResult,
-        FIELD("CatalogID", FieldToString(pkt->CatalogID)),
-        FIELD("FirstHistoryPrice", FieldToString(pkt->ItemHistoryList[0].SellPrice))
-    );
-
-    REGISTER_PACKET(1, false, 0x010C, ServerZone::FFXIVIpcCatalogSearchResult,
-        FIELD("FirstCatalogID", FieldToString(pkt->CatalogList[0].CatalogID)),
-        FIELD("Result", FieldToString(pkt->Result)),
-        FIELD("Index", FieldToString(pkt->Index))
-    );
-
-    // COMBAT / ACTIONS
-    REGISTER_PACKET(1, false, 0x0141, ServerZone::FFXIVIpcActionIntegrity,
-        FIELD("ResultId", FieldToString(pkt->ResultId)),
-        FIELD("Target", FormatHex(pkt->Target)),
-        FIELD("StatusCount", FieldToString(pkt->StatusCount)),
-        FIELD("FirstStatusId", FormatHex(pkt->Status[0].Id))
-    );
-
-    REGISTER_PACKET(1, false, 0x0142, ServerZone::FFXIVIpcActorControl,
-        FIELD("Category", FieldToString(pkt->category) + " (" + std::string(::LookupActorControlCategoryName(pkt->category)) + ")"),
-        FIELD("Param1", FormatHex(pkt->param1)),
-        FIELD("Param2", FormatHex(pkt->param2)),
-        FIELD("Param3", FormatHex(pkt->param3)),
-        FIELD("Param4", FormatHex(pkt->param4))
-    );
-
-    REGISTER_PACKET(1, false, 0x0143, ServerZone::FFXIVIpcActorControlSelf,
-        FIELD("Category", FieldToString(pkt->category) + " (" + std::string(::LookupActorControlCategoryName(pkt->category)) + ")"),
-        FIELD("Param1", FormatHex(pkt->param1)),
-        FIELD("Param2", FormatHex(pkt->param2)),
-        FIELD("Param3", FormatHex(pkt->param3)),
-        FIELD("Param4", FormatHex(pkt->param4)),
-        FIELD("Param5", FormatHex(pkt->param5)),
-        FIELD("Param6", FormatHex(pkt->param6))
-    );
-
-    REGISTER_PACKET(1, false, 0x0144, ServerZone::FFXIVIpcActorControlTarget,
-        FIELD("Category", FieldToString(pkt->category) + " (" + std::string(::LookupActorControlCategoryName(pkt->category)) + ")"),
-        FIELD("Param1", FormatHex(pkt->param1)),
-        FIELD("Param2", FormatHex(pkt->param2)),
-        FIELD("Param3", FormatHex(pkt->param3)),
-        FIELD("Param4", FormatHex(pkt->param4)),
-        FIELD("TargetId", FormatHex(pkt->targetId))
-    );
-
-    REGISTER_PACKET(1, false, 0x0145, ServerZone::FFXIVIpcResting,
-        FIELD("Hp", FieldToString(pkt->Hp)),
-        FIELD("Mp", FieldToString(pkt->Mp)),
-        FIELD("Tp", FieldToString(pkt->Tp))
-    );
-
-    REGISTER_PACKET(1, false, 0x0146, ServerZone::FFXIVIpcActionResult1,
-        FIELD("Action", FieldToString(pkt->Action)),
-        FIELD("ActionKind", FieldToString(pkt->ActionKind)),
-        FIELD("RequestId", FieldToString(pkt->RequestId)),
-        FIELD("ResultId", FieldToString(pkt->ResultId)),
-        FIELD("Target", FormatHex(pkt->Target)),
-        FIELD("Flag", FormatHex(pkt->Flag))
-    );
-
-    REGISTER_PACKET(1, false, 0x0147, ServerZone::FFXIVIpcActionResult,
-        FIELD("Action", FieldToString(pkt->Action)),
-        FIELD("ActionKind", FieldToString(pkt->ActionKind)),
-        FIELD("RequestId", FieldToString(pkt->RequestId)),
-        FIELD("ResultId", FieldToString(pkt->ResultId)),
-        FIELD("MainTarget", FormatHex(pkt->MainTarget)),
-        FIELD("TargetCount", FieldToString(pkt->TargetCount)),
-        FIELD("CalcResults", SummarizeCalcResults(pkt->CalcResult, 16))
-    );
-
-    REGISTER_PACKET(1, false, 0x0148, ServerZone::FFXIVIpcStatus,
-        FIELD("StatusSummary", SummarizeStatusWork(pkt->effect, 30))
-    );
-
-    REGISTER_PACKET(1, false, 0x0149, ServerZone::FFXIVIpcFreeCompany,
-        FIELD("Crest", FormatHex(pkt->Crest)),
-        FIELD("Tag", FormatString(pkt->Tag, 6))
-    );
-
-    REGISTER_PACKET(1, false, 0x014A, ServerZone::FFXIVIpcRecastGroup,
-        FIELD("FirstRecast", FieldToString(pkt->Recast[0])),
-        FIELD("FirstRecastMax", FieldToString(pkt->RecastMax[0]))
-    );
-
-    // PARTY / ALLIANCE
-    REGISTER_PACKET(1, false, 0x0199, ServerZone::FFXIVIpcUpdateParty,
-        FIELD("PartyID", FormatHex(pkt->PartyID)),
-        FIELD("AllianceFlags", FormatHex(pkt->AllianceFlags)),
-        FIELD("Member0Name", FormatString(pkt->Member[0].Name, 32))
-    );
-
-    REGISTER_PACKET(1, false, 0x14B, ServerZone::FFXIVIpcUpdateAlliance,
-        FIELD("AllianceFlags", FormatHex(pkt->AllianceFlags)),
-        FIELD("AllianceLocalIndex", FieldToString(pkt->AllianceLocalIndex)),
-        FIELD("AllianceMemberCount", FieldToString(pkt->AllianceMemberCount))
-    );
-
-    REGISTER_PACKET(1, false, 0x14C, ServerZone::FFXIVIpcPartyPos,
-        FIELD("Index", FieldToString(pkt->Index)),
-        FIELD("TerritoryType", FieldToString(pkt->TerritoryType)),
-        FIELD("Pos", FormatPosition(pkt->X, pkt->Y, pkt->Z)),
-        FIELD("EntityId", FormatHex(pkt->EntityId))
-    );
-
-    REGISTER_PACKET(1, false, 0x14D, ServerZone::FFXIVIpcAlliancePos,
-        FIELD("AllianceIndex", FieldToString(pkt->AllianceIndex)),
-        FIELD("PartyIndex", FieldToString(pkt->PartyIndex)),
-        FIELD("Pos", FormatPosition(pkt->X, pkt->Y, pkt->Z)),
-        FIELD("EntityId", FormatHex(pkt->EntityId))
-    );
-
-    REGISTER_PACKET(1, false, 0x14F, ServerZone::FFXIVIpcGrandCompany,
-        FIELD("GrandCompany", FieldToString(pkt->GrandCompany)),
-        FIELD("Rank", FieldToString(pkt->GrandCompanyRank))
-    );
-
-    // MOVEMENT / SPAWN
-    REGISTER_PACKET(1, false, 0x0190, ServerZone::FFXIVIpcPlayerSpawn,
-        FIELD("LayoutId", FieldToString(pkt->LayoutId)),
-        FIELD("NameId", FieldToString(pkt->NameId)),
-        FIELD("ObjKind", FieldToString(pkt->ClassJob)),
-        FIELD("ClassJob", FieldToString(pkt->ClassJob)),
-        FIELD("Level", FieldToString(pkt->Lv)),
-        FIELD("HP", FieldToString(pkt->Hp)),
-        FIELD("Pos", FormatPosition(pkt->Pos[0], pkt->Pos[1], pkt->Pos[2]))
-    );
-
-    REGISTER_PACKET(1, false, 0x0191, ServerZone::FFXIVIpcActorFreeSpawn,
-        FIELD("SpawnId", FormatHex(pkt->spawnId)),
-        FIELD("ActorId", FormatHex(pkt->actorId))
-    );
-
-    REGISTER_PACKET(1, false, 0x0192, ServerZone::FFXIVIpcActorMove,
-        FIELD("Dir", FieldToString(pkt->dir)),
-        FIELD("DirBeforeSlip", FieldToString(pkt->dirBeforeSlip)),
-        FIELD("Flag", FormatHex(pkt->flag)),
-        FIELD("Flag2", FormatHex(pkt->flag2)),
-        FIELD("Speed", FieldToString(pkt->speed)),
-        FIELD("Pos", std::string("compressed(") + std::to_string(pkt->pos[0]) + "," + std::to_string(pkt->pos[1]) + "," + std::to_string(pkt->pos[2]) + ") decoded(" + 
-            std::to_string(pkt->pos[0] * 0.001f) + "," + std::to_string(pkt->pos[1] * 0.001f) + "," + std::to_string(pkt->pos[2] * 0.001f) + ")")
-    );
-
-    REGISTER_PACKET(1, false, 0x0193, ServerZone::FFXIVIpcTransfer,
-        FIELD("Dir", FieldToString(pkt->dir)),
-        FIELD("Duration", FieldToString(pkt->duration)),
-        FIELD("Flag", FormatHex(pkt->flag))
-    );
-
-    REGISTER_PACKET(1, false, 0x0194, ServerZone::FFXIVIpcWarp,
-        FIELD("Dir", FieldToString(pkt->Dir)),
-        FIELD("Type", FieldToString(pkt->Type) + " (" + GetWarpTypeName(pkt->Type) + ")"),
-        FIELD("LayerSet", FormatHex(pkt->LayerSet)),
-        FIELD("Pos", FormatPosition(pkt->x, pkt->y, pkt->z))
-    );
-
-    REGISTER_PACKET(1, false, 0x0196, ServerZone::FFXIVIpcActorCast,
-        FIELD("Action", FieldToString(pkt->Action)),
-        FIELD("ActionKind", FieldToString(pkt->ActionKind)),
-        FIELD("ActionKey", FieldToString(pkt->ActionKey)),
-        FIELD("CastTime", FieldToString(pkt->CastTime)),
-        FIELD("Target", FormatHex(pkt->Target))
-    );
-
-    // ZONE / PLAYER STATE
-    // Remove the old simple REGISTER_PACKET for 0x019A InitZone here
-
-    // --- Handle 0x019A based on direction: Client->Server = Move, Server->Client = InitZone ---
-    {
-        // Define the Client->Server Move packet structure
-#pragma pack(push,1)
-        struct FFXIVIpcClientMove {
-            uint8_t dir;
-            uint8_t dirBeforeSlip;
-            uint8_t flag;
-            uint8_t flag2;
-            uint8_t speed;
-            uint8_t __padding1;
-            uint16_t pos[3];  // Compressed position (similar to ActorMove)
-        };
-#pragma pack(pop)
-        static_assert(sizeof(FFXIVIpcClientMove) == 12, "ClientMove must be 12 bytes");
-
-        // Register decoder for CLIENT->SERVER 0x019A (Move)
-        PacketDecoding::PacketDecoderRegistry::Instance().RegisterDecoder(
-            1, true, 0x019A,  // Note: true = outgoing/client->server
-            [](const uint8_t* payload, size_t len, PacketDecoding::RowEmitter emit)
-            {
-                if (len >= sizeof(FFXIVIpcClientMove)) {
-                    auto* p = reinterpret_cast<const FFXIVIpcClientMove*>(payload);
-                    emit("PacketType", "ClientMove");
-                    emit("Dir", PacketDecoding::FieldToString(p->dir));
-                    emit("DirBeforeSlip", PacketDecoding::FieldToString(p->dirBeforeSlip));
-                    emit("Flag", PacketDecoding::FormatHex(p->flag));
-                    emit("Flag2", PacketDecoding::FormatHex(p->flag2));
-                    emit("Speed", PacketDecoding::FieldToString(p->speed));
-                    
-                    // Decode compressed position
-                    float x = p->pos[0] * 0.001f;
-                    float y = p->pos[1] * 0.001f;
-                    float z = p->pos[2] * 0.001f;
-                    emit("Pos_Compressed", std::string("(") + std::to_string(p->pos[0]) + "," + 
-                         std::to_string(p->pos[1]) + "," + std::to_string(p->pos[2]) + ")");
-                    emit("Pos_Decoded", PacketDecoding::FormatPosition(x, y, z));
-                }
-                else {
-                    emit("error", "ClientMove packet too small (expected >= 12 bytes, got " + std::to_string(len) + ")");
-                }
+    template<typename PacketT>
+    DecoderFunc MakeGenericDecoder() {
+        return [](const uint8_t* payload, size_t len, RowEmitter emit) {
+            if (len < sizeof(PacketT)) {
+                std::ostringstream os; os << "Packet too small (have " << len
+                    << ", need " << sizeof(PacketT) << ")";
+                emit("error", os.str());
+                return;
             }
-        );
-
-        // Register decoder for SERVER->CLIENT 0x019A (InitZone) 
-        PacketDecoding::PacketDecoderRegistry::Instance().RegisterDecoder(
-            1, false, 0x019A,  // Note: false = incoming/server->client
-            [](const uint8_t* payload, size_t len, PacketDecoding::RowEmitter emit)
-            {
-                if (len >= sizeof(ServerZone::FFXIVIpcInitZone)) {
-                    auto* p = reinterpret_cast<const ServerZone::FFXIVIpcInitZone*>(payload);
-                    emit("PacketType", "InitZone");
-                    emit("ZoneId",        PacketDecoding::FieldToString(p->ZoneId));
-                    emit("TerritoryType", PacketDecoding::FieldToString(p->TerritoryType));
-                    emit("TerritoryIndex",PacketDecoding::FieldToString(p->TerritoryIndex));
-                    emit("LayerSetId",    PacketDecoding::FormatHex(p->LayerSetId));
-                    emit("LayoutId",      PacketDecoding::FieldToString(p->LayoutId));
-                    emit("WeatherId",     PacketDecoding::FieldToString(p->WeatherId));
-                    emit("Flag",          PacketDecoding::FieldToString(p->Flag));
-                    emit("FestivalEid0",  PacketDecoding::FieldToString(p->FestivalEid0));
-                    emit("FestivalPid0",  PacketDecoding::FieldToString(p->FestivalPid0));
-                    emit("FestivalEid1",  PacketDecoding::FieldToString(p->FestivalEid1));
-                    emit("FestivalPid1",  PacketDecoding::FieldToString(p->FestivalPid1));
-                    emit("Pos", PacketDecoding::FormatPosition(p->Pos[0], p->Pos[1], p->Pos[2]));
-                }
-                else {
-                    std::ostringstream os;
-                    os << "InitZone packet too small (expected >= " << sizeof(ServerZone::FFXIVIpcInitZone) 
-                       << " bytes, got " << len << ")";
-                    emit("error", os.str());
-                    // Helpful raw dump for diagnostics
-                    if (len > 0) {
-                        emit("raw", PacketDecoding::DumpBytesAsHex(std::span(payload, len)));
-                    }
-                }
-            }
-        );
+            emit("PacketType", typeid(PacketT).name());
+            };
     }
 
-    // ================= REGISTER CLIENT PACKETS =================
-    // Now register CLIENT->SERVER packets with proper structures
-    using namespace PacketStructures::Client::Zone;
+    // ================= CATEGORY 1: COMBAT =================
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActorControl>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcActorControl)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorControl*>(p);
+            FieldBuilder(emit)
+                .Field("Category", pkt->category)
+                .Enum("CategoryName", pkt->category, ::LookupActorControlCategoryName)
+                .Hex("Param1", pkt->param1).Hex("Param2", pkt->param2)
+                .Hex("Param3", pkt->param3).Hex("Param4", pkt->param4);
+            };
+    }
 
-    // CLIENT SESSION/PING
-    REGISTER_PACKET(1, true, 0x0065, ClientZone::FFXIVIpcPingHandler,
-        FIELD("ClientTimeValue", FieldToString(pkt->clientTimeValue)),
-        FIELD("Position", FormatPosition(pkt->position.pos[0], pkt->position.pos[1], pkt->position.pos[2])),
-        FIELD("Direction", FormatAngle(pkt->position.dir))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActionResult1>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcActionResult1)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActionResult1*>(p);
+            FieldBuilder(emit)
+                .Field("Action", pkt->Action)
+                .Enum("ActionKind", pkt->ActionKind, GetActionTypeName)
+                .Field("RequestId", pkt->RequestId)
+                .Field("ResultId", pkt->ResultId)
+                .Hex("MainTarget", pkt->MainTarget)
+                .Hex("Target", pkt->Target)
+                .Hex("Flag", pkt->Flag)
+                .Field("LockTime", static_cast<double>(pkt->LockTime))
+                .Field("DamageHP", static_cast<int>(pkt->CalcResult.value))
+                .Hex("BallistaEntityId", pkt->BallistaEntityId);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x0066, ClientZone::FFXIVIpcLoginHandler,
-        FIELD("ClientTimeValue", FieldToString(pkt->clientTimeValue)),
-        FIELD("ContentFinderStatus", FieldToString(pkt->contentFinderStatus)),
-        FIELD("Name", FormatString(pkt->name, 32))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActionResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcActionResult)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActionResult*>(p);
+            FieldBuilder b(emit);
+            b.Field("Action", pkt->Action)
+                .Enum("ActionKind", pkt->ActionKind, GetActionTypeName)
+                .Field("RequestId", pkt->RequestId)
+                .Field("ResultId", pkt->ResultId)
+                .Hex("MainTarget", pkt->MainTarget)
+                .Field("TargetCount", pkt->TargetCount)
+                .Hex("Flag", pkt->Flag)
+                .Field("LockTime", static_cast<double>(pkt->LockTime));
+            int show = std::min<int>(pkt->TargetCount, 3);
+            for (int i = 0; i < show; i++) {
+                std::ostringstream tk, dk; tk << "Target" << i; dk << "Damage" << i;
+                b.Hex(tk.str(), pkt->Target[i])
+                    .Field(dk.str(), static_cast<int>(pkt->CalcResult[i].value));
+            }
+            if (pkt->TargetCount > 3) {
+                std::ostringstream os; os << "... and " << (pkt->TargetCount - 3) << " more targets";
+                b.Field("MoreTargets", os.str());
+            }
+            };
+    }
 
-    // CLIENT CHAT
-    REGISTER_PACKET(1, true, 0x0067, ClientZone::FFXIVIpcChatHandler,
-        FIELD("ClientTimeValue", FieldToString(pkt->clientTimeValue)),
-        FIELD("ChatType", FieldToString(pkt->chatType) + " (" + GetChatTypeName(pkt->chatType) + ")"),
-        FIELD("Message", FormatString(pkt->message, std::min<size_t>(200, sizeof(pkt->message)))),
-        FIELD("Position", FormatPosition(pkt->position.pos[0], pkt->position.pos[1], pkt->position.pos[2]))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcPlayerSpawn>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcPlayerSpawn)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPlayerSpawn*>(p);
+            FieldBuilder b(emit);
+            b.Field("LayoutId", pkt->LayoutId)
+                .Field("NameId", pkt->NameId)
+                .String("Name", reinterpret_cast<const char*>(pkt->Name), 32)
+                .Field("ObjKind", pkt->ObjKind)
+                .Field("ObjType", pkt->ObjType)
+                .Field("ClassJob", pkt->ClassJob)
+                .Field("Level", pkt->Lv)
+                .Field("HP", pkt->Hp).Field("HPMax", pkt->HpMax)
+                .Field("MP", pkt->Mp).Field("MPMax", pkt->MpMax)
+                .Position("Position", pkt->Pos[0], pkt->Pos[1], pkt->Pos[2])
+                .Angle("Direction", static_cast<float>(pkt->Dir) / 65535.f * 6.283185f);
+            if (pkt->GrandCompany > 0)
+                b.Field("GrandCompany", pkt->GrandCompany)
+                .Field("GrandCompanyRank", pkt->GrandCompanyRank);
+            if (pkt->Crest != 0)
+                b.Hex("FCCrest", pkt->Crest)
+                .String("FCTag", reinterpret_cast<const char*>(pkt->FreeCompanyTag), 6);
+            int active = 0;
+            for (int i = 0; i < 30; i++) if (pkt->Status[i].id) active++;
+            if (active) {
+                b.Field("ActiveStatusCount", active);
+                int shown = 0;
+                for (int i = 0; i < 30 && shown < 5; i++) {
+                    if (!pkt->Status[i].id) continue;
+                    std::ostringstream k; k << "Status" << shown;
+                    b.Hex(k.str(), pkt->Status[i].id);
+                    if (const char* n = GetStatusEffectName(pkt->Status[i].id))
+                        b.Field(k.str() + "Name", n);
+                    shown++;
+                }
+            }
+            };
+    }
 
-    // CLIENT ACTIONS
-    REGISTER_PACKET(1, true, 0x0196, ClientZone::FFXIVIpcActionRequest,
-        FIELD("ActionKind", FieldToString(pkt->ActionKind) + " (" + GetActionTypeName(pkt->ActionKind) + ")"),
-        FIELD("ActionKey", FormatHex(pkt->ActionKey)),
-        FIELD("RequestId", FieldToString(pkt->RequestId)),
-        FIELD("Target", FormatHex(pkt->Target)),
-        FIELD("Dir", FormatAngle((uint16_t)pkt->Dir)),
-        FIELD("DirTarget", FormatAngle((uint16_t)pkt->DirTarget))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActorControlSelf>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcActorControlSelf)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorControlSelf*>(p);
+            FieldBuilder(emit)
+                .Field("Category", pkt->category)
+                .Enum("CategoryName", pkt->category, ::LookupActorControlCategoryName)
+                .Hex("Param1", pkt->param1).Hex("Param2", pkt->param2)
+                .Hex("Param3", pkt->param3).Hex("Param4", pkt->param4)
+                .Hex("Param5", pkt->param5).Hex("Param6", pkt->param6);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x0199, ClientZone::FFXIVIpcSelectGroundActionRequest,
-        FIELD("ActionKind", FieldToString(pkt->ActionKind) + " (" + GetActionTypeName(pkt->ActionKind) + ")"),
-        FIELD("ActionKey", FormatHex(pkt->ActionKey)),
-        FIELD("RequestId", FieldToString(pkt->RequestId)),
-        FIELD("Position", FormatPosition(pkt->Pos.x, pkt->Pos.y, pkt->Pos.z)),
-        FIELD("Dir", FormatAngle((uint16_t)pkt->Dir))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActorControlTarget>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcActorControlTarget)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorControlTarget*>(p);
+            FieldBuilder(emit)
+                .Field("Category", pkt->category)
+                .Enum("CategoryName", pkt->category, ::LookupActorControlCategoryName)
+                .Hex("Param1", pkt->param1).Hex("Param2", pkt->param2)
+                .Hex("Param3", pkt->param3).Hex("Param4", pkt->param4)
+                .Hex("TargetId", pkt->targetId);
+            };
+    }
 
-    // CLIENT MOVEMENT - Already handled above for 0x019A
-    // but let's also add the UpdatePosition variants
-    REGISTER_PACKET(1, true, 0x01A0, ClientZone::FFXIVIpcUpdatePosition,
-        FIELD("Dir", FormatAngle(pkt->dir)),
-        FIELD("DirBeforeSlip", FormatAngle(pkt->dirBeforeSlip)),
-        FIELD("Flag", FormatHex(pkt->flag)),
-        FIELD("Flag2", FormatHex(pkt->flag2)),
-        FIELD("Position", FormatPosition(pkt->pos.x, pkt->pos.y, pkt->pos.z))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcResting>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcResting)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcResting*>(p);
+            FieldBuilder(emit)
+                .Field("Hp", pkt->Hp)
+                .Field("Mp", pkt->Mp)
+                .Field("Tp", pkt->Tp)
+                .Field("Gp", pkt->Gp)
+                .Hex("Unknown_3_2", pkt->Unknown_3_2);
+            };
+    }
 
-    // CLIENT EVENTS
-    REGISTER_PACKET(1, true, 0x01C2, ClientZone::FFXIVIpcEventHandlerTalk,
-        FIELD("ActorId", FormatHex(pkt->actorId)),
-        FIELD("EventId", FormatHex(pkt->eventId))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcStatus>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcStatus)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcStatus*>(p);
+            FieldBuilder b(emit);
+            int active = 0;
+            for (int i = 0; i < 30; i++) if (pkt->effect[i].id) active++;
+            b.Field("ActiveStatusCount", active);
+            int shown = 0;
+            for (int i = 0; i < 30 && shown < 10; i++) {
+                if (!pkt->effect[i].id) continue;
+                std::ostringstream pfx; pfx << "Status" << shown;
+                b.Hex(pfx.str() + "Id", pkt->effect[i].id);
+                if (const char* n = GetStatusEffectName(pkt->effect[i].id))
+                    b.Field(pfx.str() + "Name", n);
+                b.Field(pfx.str() + "SystemParam", (int)pkt->effect[i].systemParam)
+                    .Field(pfx.str() + "Time", pkt->effect[i].time)
+                    .Hex(pfx.str() + "Source", pkt->effect[i].source);
+                shown++;
+            }
+            if (shown < active) {
+                std::ostringstream os; os << "... " << (active - shown) << " more effects";
+                b.Field("MoreEffects", os.str());
+            }
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x01C3, ClientZone::FFXIVIpcEventHandlerEmote,
-        FIELD("ActorId", FormatHex(pkt->actorId)),
-        FIELD("EventId", FormatHex(pkt->eventId)),
-        FIELD("EmoteId", FieldToString(pkt->emoteId))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcRecastGroup>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcRecastGroup)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcRecastGroup*>(p);
+            FieldBuilder b(emit);
+            int active = 0;
+            for (int i = 0; i < 80; i++) if (pkt->Recast[i] > 0.0f) active++;
+            b.Field("ActiveRecastGroups", active);
+            int shown = 0;
+            for (int i = 0; i < 80 && shown < 10; i++) {
+                if (pkt->Recast[i] <= 0.0f) continue;
+                std::ostringstream pfx; pfx << "Group" << i;
+                b.Field(pfx.str() + "Recast", pkt->Recast[i])
+                    .Field(pfx.str() + "RecastMax", pkt->RecastMax[i]);
+                shown++;
+            }
+            if (shown < active) {
+                std::ostringstream os; os << "... " << (active - shown) << " more groups";
+                b.Field("MoreGroups", os.str());
+            }
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x01C4, ClientZone::FFXIVIpcEventHandlerWithinRange,
-        FIELD("EventId", FormatHex(pkt->eventId)),
-        FIELD("Param1", FormatHex(pkt->param1)),
-        FIELD("Position", FormatPosition(pkt->position.x, pkt->position.y, pkt->position.z))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActorCast>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcActorCast)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorCast*>(p);
+            float x = pkt->TargetPos[0] * 0.001f, y = pkt->TargetPos[1] * 0.001f, z = pkt->TargetPos[2] * 0.001f;
+            FieldBuilder(emit)
+                .Field("Action", pkt->Action)
+                .Enum("ActionKind", pkt->ActionKind, GetActionTypeName)
+                .Hex("ActionKey", pkt->ActionKey)
+                .Field("CastTime", pkt->CastTime)
+                .Hex("Target", pkt->Target)
+                .Angle("Direction", pkt->Dir)
+                .Hex("BallistaEntityId", pkt->BallistaEntityId)
+                .Position("TargetPos", x, y, z);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x01C5, ClientZone::FFXIVIpcEventHandlerOutsideRange,
-        FIELD("EventId", FormatHex(pkt->eventId)),
-        FIELD("Param1", FormatHex(pkt->param1)),
-        FIELD("Position", FormatPosition(pkt->position.x, pkt->position.y, pkt->position.z))
-    );
+    // ================= CATEGORY 2: MOVEMENT / SPAWN =================
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActorMove>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcActorMove)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorMove*>(p);
+            float x = pkt->pos[0] * 0.001f, y = pkt->pos[1] * 0.001f, z = pkt->pos[2] * 0.001f;
+            FieldBuilder(emit)
+                .Field("Dir", pkt->dir)
+                .Field("DirBeforeSlip", pkt->dirBeforeSlip)
+                .Hex("Flag", pkt->flag)
+                .Hex("Flag2", pkt->flag2)
+                .Field("Speed", pkt->speed)
+                .Position("Position", x, y, z)
+                .Field("PosRaw", std::to_string(pkt->pos[0]) + "," +
+                    std::to_string(pkt->pos[1]) + "," +
+                    std::to_string(pkt->pos[2]));
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x01C6, ClientZone::FFXIVIpcEnterTerritoryHandler,
-        FIELD("EventId", FormatHex(pkt->eventId)),
-        FIELD("Param1", FieldToString(pkt->param1)),
-        FIELD("Param2", FieldToString(pkt->param2))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActorFreeSpawn>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcActorFreeSpawn)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorFreeSpawn*>(p);
+            FieldBuilder(emit).Hex("SpawnId", pkt->spawnId).Hex("ActorId", pkt->actorId);
+            };
+    }
 
-    // CLIENT ITEM OPERATIONS
-    REGISTER_PACKET(1, true, 0x01AE, ClientZone::FFXIVIpcClientInventoryItemOperation,
-        FIELD("ContextId", FormatHex(pkt->ContextId)),
-        FIELD("OperationType", FieldToString(pkt->OperationType)),
-        FIELD("SrcStorage", FieldToString(pkt->SrcStorageId)),
-        FIELD("SrcContainer", FieldToString(pkt->SrcContainerIndex)),
-        FIELD("DstStorage", FieldToString(pkt->DstStorageId)),
-        FIELD("DstContainer", FieldToString(pkt->DstContainerIndex))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcWarp>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcWarp)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcWarp*>(p);
+            FieldBuilder b(emit);
+            b.Field("Dir", pkt->Dir)
+                .Field("Type", pkt->Type)
+                .Enum("TypeName", pkt->Type, GetWarpTypeName)
+                .Field("TypeArg", pkt->TypeArg)
+                .Hex("LayerSet", pkt->LayerSet)
+                .Position("Position", pkt->x, pkt->y, pkt->z);
+            };
+    }
 
-    // Note: FFXIVIpcTradeCommand appears to be server-only
-    // If there's a client trade packet, it might have a different structure or name
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcTransfer>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcTransfer)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcTransfer*>(p);
+            float x = pkt->pos[0] * 0.001f, y = pkt->pos[1] * 0.001f, z = pkt->pos[2] * 0.001f;
+            FieldBuilder(emit)
+                .Field("Dir", pkt->dir)
+                .Field("Duration", static_cast<double>(pkt->duration))
+                .Hex("Flag", pkt->flag)
+                .Position("Position", x, y, z);
+            };
+    }
 
-    // CLIENT GM COMMANDS
-    REGISTER_PACKET(1, true, 0x0197, ClientZone::FFXIVIpcGmCommand,
-        FIELD("Id", FormatHex(pkt->Id)),
-        FIELD("Target", FormatHex(pkt->Target)),
-        FIELD("Arg0", FormatHex(pkt->Arg0)),
-        FIELD("Arg1", FormatHex(pkt->Arg1))
-    );
+    // ================= CATEGORY 3: CORE / SESSION =================
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcSync>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcSync)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcSync*>(p);
+            FieldBuilder(emit)
+                .Field("ClientTimeValue", pkt->clientTimeValue)
+                .Field("TransmissionInterval", pkt->transmissionInterval)
+                .Hex("OriginEntityId", pkt->position.originEntityId)
+                .Position("Position", pkt->position.pos[0], pkt->position.pos[1], pkt->position.pos[2])
+                .Angle("Direction", pkt->position.dir);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x0198, ClientZone::FFXIVIpcGmCommandName,
-        FIELD("Id", FormatHex(pkt->Id)),
-        FIELD("Name", FormatString(pkt->Name, 32)),
-        FIELD("Arg0", FormatHex(pkt->Arg0))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcLogin>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcLogin)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcLogin*>(p);
+            FieldBuilder(emit)
+                .Field("ClientTimeValue", pkt->clientTimeValue)
+                .Hex("LoginTicketId", pkt->loginTicketId)
+                .Hex("PlayerActorId", pkt->playerActorId);
+            };
+    }
 
-    // CLIENT SOCIAL
-    REGISTER_PACKET(1, true, 0x00C9, ClientZone::FFXIVIpcInvite,
-        FIELD("AuthType", FieldToString(pkt->AuthType)),
-        FIELD("TargetName", FormatString(pkt->TargetName, 32))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcChat>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcChat)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcChat*>(p);
+            FieldBuilder(emit)
+                .Field("Type", pkt->type)
+                .Enum("TypeName", pkt->type, GetChatTypeName)
+                .Hex("EntityId", pkt->entityId)
+                .Hex("CharacterId", pkt->characterId)
+                .String("Speaker", pkt->speakerName, 32)
+                .String("Message", pkt->message, std::min<size_t>(200, sizeof(pkt->message)));
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x00CA, ClientZone::FFXIVIpcInviteReply,
-        FIELD("InviteCharacterID", FormatHex(pkt->InviteCharacterID)),
-        FIELD("AuthType", FieldToString(pkt->AuthType)),
-        FIELD("Answer", FieldToString(pkt->Answer))
-    );
+    // ================= CATEGORY 4: PROFILE / SEARCH =================
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcGetProfileResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcGetProfileResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcGetProfileResult*>(p);
+            FieldBuilder(e)
+                .Hex("OnlineStatus", pkt->OnlineStatus)
+                .Hex("SelectClassID", pkt->SelectClassID)
+                .Field("CurrentSelectClassID", (int)pkt->CurrentSelectClassID)
+                .Field("Region", (int)pkt->Region)
+                .String("SearchComment", pkt->SearchComment, std::min<size_t>(100, sizeof(pkt->SearchComment)));
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x00CB, ClientZone::FFXIVIpcGetCommonlist,
-        FIELD("CommunityID", FormatHex(pkt->CommunityID)),
-        FIELD("ListType", FieldToString(pkt->ListType)),
-        FIELD("NextIndex", FieldToString(pkt->NextIndex))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcSetProfileResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcSetProfileResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcSetProfileResult*>(p);
+            FieldBuilder(e)
+                .Hex("OnlineStatus", pkt->OnlineStatus)
+                .Hex("SelectClassID", pkt->SelectClassID)
+                .Field("Result", pkt->Result)
+                .Field("CurrentSelectClassID", (int)pkt->CurrentSelectClassID)
+                .Field("Region", (int)pkt->Region)
+                .String("SearchComment", pkt->SearchComment, std::min<size_t>(100, sizeof(pkt->SearchComment)));
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x00CC, ClientZone::FFXIVIpcGetCommonlistDetail,
-        FIELD("DetailCharacterID", FormatHex(pkt->DetailCharacterID)),
-        FIELD("CommunityID", FormatHex(pkt->CommunityID)),
-        FIELD("ListType", FieldToString(pkt->ListType))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcGetSearchCommentResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcGetSearchCommentResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcGetSearchCommentResult*>(p);
+            FieldBuilder(e)
+                .Hex("TargetEntityID", pkt->TargetEntityID)
+                .String("SearchComment", pkt->SearchComment, std::min<size_t>(100, sizeof(pkt->SearchComment)));
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x00E1, ClientZone::FFXIVIpcBlacklistAdd,
-        FIELD("TargetName", FormatString(pkt->TargetCharacterName, 32))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcGetCharacterNameResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcGetCharacterNameResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcGetCharacterNameResult*>(p);
+            FieldBuilder(e).Hex("CharacterID", pkt->CharacterID).String("CharacterName", pkt->CharacterName, 32);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x00E2, ClientZone::FFXIVIpcBlacklistRemove,
-        FIELD("TargetCharacterID", FormatHex(pkt->TargetCharacterID)),
-        FIELD("TargetName", FormatString(pkt->TargetCharacterName, 32))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcPcSearchResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcPcSearchResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPcSearchResult*>(p);
+            FieldBuilder(e).Field("ResultCount", pkt->ResultCount);
+            };
+    }
 
-    // CLIENT PARTY
-    REGISTER_PACKET(1, true, 0x00DC, ClientZone::FFXIVIpcPcPartyLeave,
-        FIELD("Reserve", FieldToString(pkt->Reserve))
-    );
+    // ================= CATEGORY 5: PARTY =================
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcUpdateParty>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcUpdateParty)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcUpdateParty*>(p);
+            FieldBuilder b(emit);
+            b.Hex("PartyID", pkt->PartyID)
+                .Hex("PartyLeaderContentID", pkt->PartyLeaderContentID)
+                .Field("AllianceLocalIndex", (int)pkt->AllianceLocalIndex)
+                .Field("AllianceMemberCount", (int)pkt->AllianceMemberCount)
+                .Hex("AllianceFlags", pkt->AllianceFlags);
+            for (int i = 0; i < 8; i++) {
+                if (!pkt->Member[i].Valid) continue;
+                std::string pfx = "Member" + std::to_string(i);
+                b.String(pfx + "Name", pkt->Member[i].Name, 32)
+                    .Hex(pfx + "CharaId", pkt->Member[i].CharaId)
+                    .Hex(pfx + "EntityId", pkt->Member[i].EntityId)
+                    .Field(pfx + "ClassJob", (int)pkt->Member[i].ClassJob)
+                    .Field(pfx + "Lv", (int)pkt->Member[i].Lv)
+                    .Field(pfx + "HP", pkt->Member[i].Hp)
+                    .Field(pfx + "HPMax", pkt->Member[i].HpMax)
+                    .Field(pfx + "MP", pkt->Member[i].Mp)
+                    .Field(pfx + "MPMax", pkt->Member[i].MpMax)
+                    .Field(pfx + "TerritoryType", pkt->Member[i].TerritoryType);
+            }
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x00DD, ClientZone::FFXIVIpcPcPartyDisband,
-        FIELD("Reserve", FieldToString(pkt->Reserve))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcPcPartyResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcPcPartyResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPcPartyResult*>(p);
+            FieldBuilder(e).Field("UpPacketNo", pkt->UpPacketNo).Field("Result", pkt->Result);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x00DE, ClientZone::FFXIVIpcPcPartyKick,
-        FIELD("LeaveCharacterName", FormatString(pkt->LeaveCharacterName, 32))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcPcPartyUpdate>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcPcPartyUpdate)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPcPartyUpdate*>(p);
+            const char* name = "Unknown";
+            switch (pkt->UpdateStatus) {
+            case 0: name = "None"; break; case 1: name = "Join"; break; case 2: name = "Leave"; break;
+            case 3: name = "Kick"; break; case 4: name = "LeaderChange"; break; case 5: name = "Disband"; break;
+            }
+            std::ostringstream status; status << name << " (" << (int)pkt->UpdateStatus << ")";
+            FieldBuilder(e)
+                .Hex("ExecuteCharacterID", pkt->ExecuteCharacterID)
+                .Hex("TargetCharacterID", pkt->TargetCharacterID)
+                .Field("UpdateStatus", status.str())
+                .Field("Count", (int)pkt->Count)
+                .Field("ExecuteIdentity", (int)pkt->ExecuteIdentity)
+                .Field("TargetIdentity", (int)pkt->TargetIdentity)
+                .String("ExecuteName", pkt->ExecuteCharacterName, 32)
+                .String("TargetName", pkt->TargetCharacterName, 32);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x00DF, ClientZone::FFXIVIpcPcPartyChangeLeader,
-        FIELD("NextLeaderName", FormatString(pkt->NextLeaderCharacterName, 32))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcPartyPos>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcPartyPos)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPartyPos*>(p);
+            FieldBuilder(e)
+                .Field("Index", (int)pkt->Index)
+                .Field("TerritoryType", pkt->TerritoryType)
+                .Hex("EntityId", pkt->EntityId)
+                .Position("Position", pkt->X, pkt->Y, pkt->Z);
+            };
+    }
 
-    // CLIENT CONFIG
-    REGISTER_PACKET(1, true, 0x0262, ClientZone::FFXIVIpcConfig,
-        FIELD("Flag", FormatHex(pkt->flag))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcAlliancePos>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcAlliancePos)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcAlliancePos*>(p);
+            FieldBuilder(e)
+                .Field("AllianceIndex", (int)pkt->AllianceIndex)
+                .Field("PartyIndex", (int)pkt->PartyIndex)
+                .Field("TerritoryType", pkt->TerritoryType)
+                .Hex("EntityId", pkt->EntityId)
+                .Position("Position", pkt->X, pkt->Y, pkt->Z);
+            };
+    }
 
-    // CLIENT DISCOVERY
-    REGISTER_PACKET(1, true, 0x0194, ClientZone::FFXIVIpcNewDiscovery,
-        FIELD("LayoutId", FormatHex(pkt->LayoutId)),
-        FIELD("Position", FormatPosition(pkt->PositionX, pkt->PositionY, pkt->PositionZ))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcUpdateAlliance>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcUpdateAlliance)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcUpdateAlliance*>(p);
+            FieldBuilder(e)
+                .Hex("AllianceFlags", pkt->AllianceFlags)
+                .Field("AllianceLocalIndex", (int)pkt->AllianceLocalIndex)
+                .Field("AllianceMemberCount", (int)pkt->AllianceMemberCount);
+            };
+    }
 
-    // CLIENT MARKET BOARD
-    REGISTER_PACKET(1, true, 0x1102, ClientZone::FFXIVIpcMarketBoardRequestItemListingInfo,
-        FIELD("CatalogId", FormatHex(pkt->catalogId)),
-        FIELD("RequestId", FormatHex(pkt->requestId))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcPartyRecruitResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcPartyRecruitResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPartyRecruitResult*>(p);
+            FieldBuilder(e)
+                .Hex("TargetCharacterID", pkt->TargetCharacterID)
+                .Hex("Param", pkt->Param)
+                .Field("Type", pkt->Type)
+                .Field("Result", pkt->Result)
+                .Field("Identity", (int)pkt->Identity)
+                .String("TargetName", pkt->TargetName, 32);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x1103, ClientZone::FFXIVIpcMarketBoardRequestItemListings,
-        FIELD("ItemCatalogId", FieldToString(pkt->itemCatalogId))
-    );
+    // ================= CATEGORY 6: SOCIAL / COMMUNICATION =================
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcInviteResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcInviteResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcInviteResult*>(p);
+            const char* auth = "Unknown";
+            switch (pkt->AuthType) {
+            case 0: auth = "None"; break; case 1: auth = "Friend"; break; case 2: auth = "Party"; break;
+            case 3: auth = "FreeCompany"; break; case 4: auth = "Linkshell"; break;
+            }
+            std::ostringstream at; at << auth << " (" << (int)pkt->AuthType << ")";
+            FieldBuilder(e)
+                .Field("Result", pkt->Result)
+                .Field("AuthType", at.str())
+                .Field("Identity", (int)pkt->Identity)
+                .String("TargetName", pkt->TargetName, 32);
+            };
+    }
 
-    // CLIENT HOUSING
-    REGISTER_PACKET(1, true, 0x01B0, ClientZone::FFXIVIpcHousingExteriorChange,
-        FIELD("LandId", FormatHex(pkt->landIdOrIndex.landId)),
-        FIELD("RemoveFlags", FormatHex(pkt->RemoveFlags))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcInviteReplyResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcInviteReplyResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcInviteReplyResult*>(p);
+            const char* auth = "Unknown";
+            switch (pkt->AuthType) {
+            case 0: auth = "None"; break; case 1: auth = "Friend"; break; case 2: auth = "Party"; break;
+            case 3: auth = "FreeCompany"; break; case 4: auth = "Linkshell"; break;
+            }
+            const char* ans = pkt->Answer == 1 ? "Accept" : "Decline";
+            std::ostringstream at, an; at << auth << " (" << (int)pkt->AuthType << ")"; an << ans << " (" << (int)pkt->Answer << ")";
+            FieldBuilder(e)
+                .Field("Result", pkt->Result)
+                .Field("AuthType", at.str())
+                .Field("Answer", an.str())
+                .Field("Identity", (int)pkt->Identity)
+                .String("InviteCharacterName", pkt->InviteCharacterName, 32);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x01B1, ClientZone::FFXIVIpcHousingPlaceYardItem,
-        FIELD("LandId", FormatHex(pkt->landIdOrIndex.landId)),
-        FIELD("StorageId", FieldToString(pkt->StorageId)),
-        FIELD("Position", FormatPosition(pkt->Pos.x, pkt->Pos.y, pkt->Pos.z)),
-        FIELD("Rotation", FormatAngle(pkt->Rotation))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcInviteUpdate>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcInviteUpdate)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcInviteUpdate*>(p);
+            FieldBuilder(e)
+                .Hex("InviteCharacterID", pkt->InviteCharacterID)
+                .Field("InviteTime", pkt->InviteTime)
+                .Field("AuthType", (int)pkt->AuthType)
+                .Field("InviteCount", (int)pkt->InviteCount)
+                .Field("Result", (int)pkt->Result)
+                .Field("Identity", (int)pkt->Identity)
+                .String("InviteName", pkt->InviteName, 32);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x026A, ClientZone::FFXIVIpcHousingHouseName,
-        FIELD("LandId", FormatHex(pkt->landId.landId)),
-        FIELD("HouseName", FormatString(pkt->houseName, 20))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcFriendlistRemoveResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcFriendlistRemoveResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcFriendlistRemoveResult*>(p);
+            FieldBuilder(e)
+                .Hex("RemovedCharacterID", pkt->RemovedCharacterID)
+                .Field("Result", pkt->Result)
+                .Field("Identity", (int)pkt->Identity)
+                .String("RemovedCharacterName", pkt->RemovedCharacterName, 32);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x026B, ClientZone::FFXIVIpcHousingGreeting,
-        FIELD("LandId", FormatHex(pkt->landId.landId)),
-        FIELD("Greeting", FormatString(pkt->greeting, std::min<size_t>(80, sizeof(pkt->greeting))))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcLinkshellResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcLinkshellResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcLinkshellResult*>(p);
+            FieldBuilder(e)
+                .Hex("LinkshellID", pkt->LinkshellID)
+                .Hex("TargetCharacterID", pkt->TargetCharacterID)
+                .Field("UpPacketNo", pkt->UpPacketNo)
+                .Field("Result", pkt->Result)
+                .Field("UpdateStatus", (int)pkt->UpdateStatus)
+                .Field("Identity", (int)pkt->Identity)
+                .String("LinkshellName", pkt->LinkshellName, 32)
+                .String("TargetName", pkt->TargetName, 32);
+            };
+    }
 
-    // CLIENT LINKSHELL
-    REGISTER_PACKET(1, true, 0x00F0, ClientZone::FFXIVIpcLinkshellJoin,
-        FIELD("LinkshellID", FormatHex(pkt->LinkshellID)),
-        FIELD("MemberName", FormatString(pkt->MemberCharacterName, 32))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcBlacklistAddResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcBlacklistAddResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcBlacklistAddResult*>(p);
+            FieldBuilder(e)
+                .Hex("AddedCharacterID", pkt->AddedCharacter.CharacterID)
+                .String("CharacterName", pkt->AddedCharacter.CharacterName, 32)
+                .Field("Result", pkt->Result)
+                .Field("Identity", (int)pkt->Identity);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x00F2, ClientZone::FFXIVIpcLinkshellLeave,
-        FIELD("LinkshellID", FormatHex(pkt->LinkshellID))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcBlacklistRemoveResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcBlacklistRemoveResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcBlacklistRemoveResult*>(p);
+            FieldBuilder(e)
+                .Hex("RemovedCharacterID", pkt->RemovedCharacter.CharacterID)
+                .String("CharacterName", pkt->RemovedCharacter.CharacterName, 32)
+                .Field("Result", pkt->Result)
+                .Field("Identity", (int)pkt->Identity);
+            };
+    }
 
-    // CLIENT CONTENT FINDER
-    REGISTER_PACKET(1, true, 0x01FD, ClientZone::FFXIVIpcFind5Contents,
-        FIELD("AcceptHalfway", FieldToString(pkt->acceptHalfway)),
-        FIELD("Language", FieldToString(pkt->language)),
-        FIELD("Territory0", FieldToString(pkt->territoryTypes[0])),
-        FIELD("Territory1", FieldToString(pkt->territoryTypes[1]))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcGetBlacklistResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcGetBlacklistResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcGetBlacklistResult*>(p);
+            FieldBuilder b(e);
+            b.Field("Index", (int)pkt->Index)
+                .Field("NextIndex", (int)pkt->NextIndex)
+                .Field("RequestKey", (int)pkt->RequestKey);
+            int shown = 0;
+            for (int i = 0; i < 20 && shown < 5; i++) {
+                if (!pkt->Blacklist[i].CharacterID) continue;
+                std::string name(pkt->Blacklist[i].CharacterName, 32);
+                name = name.substr(0, name.find('\0'));
+                b.Hex("Blacklist" + std::to_string(i) + "ID", pkt->Blacklist[i].CharacterID)
+                    .String("Blacklist" + std::to_string(i) + "Name", name.c_str(), 32);
+                shown++;
+            }
+            if (!shown) b.Field("BlacklistEntries", "None");
+            else if (shown < 20) {
+                std::ostringstream os; os << "... " << (20 - shown) << " more entries";
+                b.Field("MoreEntries", os.str());
+            }
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x01FB, ClientZone::FFXIVIpcAcceptContent,
-        FIELD("Accept", FieldToString(pkt->accept)),
-        FIELD("TerritoryType", FieldToString(pkt->territoryType)),
-        FIELD("TerritoryId", FormatHex(pkt->territoryId))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcSetOnlineStatus>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcSetOnlineStatus)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcSetOnlineStatus*>(p);
+            FieldBuilder(e).Hex("OnlineStatusFlags", pkt->onlineStatusFlags);
+            };
+    }
 
-    REGISTER_PACKET(1, true, 0x01FC, ClientZone::FFXIVIpcCancelFindContent,
-        FIELD("Cause", FieldToString(pkt->cause))
-    );
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcGetLinkshellListResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcGetLinkshellListResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcGetLinkshellListResult*>(p);
+            FieldBuilder b(e);
+            int shown = 0;
+            for (int i = 0; i < 8; i++) {
+                if (!pkt->LinkshellList[i].LinkshellID) continue;
+                std::string name(pkt->LinkshellList[i].LinkshellName, 32);
+                name = name.substr(0, name.find('\0'));
+                b.Hex("Linkshell" + std::to_string(i) + "ID", pkt->LinkshellList[i].LinkshellID)
+                    .Hex("Linkshell" + std::to_string(i) + "ChannelID", pkt->LinkshellList[i].ChannelID)
+                    .Field("Linkshell" + std::to_string(i) + "HierarchyID", pkt->LinkshellList[i].HierarchyID)
+                    .String("Linkshell" + std::to_string(i) + "Name", name.c_str(), 32);
+                shown++;
+            }
+            if (!shown) b.Field("Linkshells", "None");
+            };
+    }
 
-}  // End of RegisterZonePackets() function
+    // ================= CATEGORY 7: SYSTEM MESSAGES & MISC (single definitive copy) =================
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcSendSystemMessage>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcSendSystemMessage)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcSendSystemMessage*>(p);
+            FieldBuilder(e).Field("MessageParam", (int)pkt->MessageParam)
+                .String("Message", pkt->Message, std::min<size_t>(200, sizeof(pkt->Message)));
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcSendLoginMessage>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcSendLoginMessage)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcSendLoginMessage*>(p);
+            FieldBuilder(e).Field("MessageParam", (int)pkt->MessageParam)
+                .String("Message", pkt->Message, std::min<size_t>(200, sizeof(pkt->Message)));
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcChatChannelResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcChatChannelResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcChatChannelResult*>(p);
+            FieldBuilder(e)
+                .Hex("ChannelID", pkt->ChannelID)
+                .Hex("CommunityID", pkt->CommunityID)
+                .Hex("TargetCharacterID", pkt->TargetCharacterID)
+                .Field("UpPacketNo", pkt->UpPacketNo)
+                .Field("Result", pkt->Result);
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcFreeCompanyResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcFreeCompanyResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcFreeCompanyResult*>(p);
+            FieldBuilder(e)
+                .Hex("FreeCompanyID", pkt->FreeCompanyID)
+                .Hex("Arg", pkt->Arg)
+                .Field("Type", pkt->Type)
+                .Field("Result", pkt->Result)
+                .Field("UpdateStatus", (int)pkt->UpdateStatus)
+                .Field("Identity", (int)pkt->Identity)
+                .String("FreeCompanyName", pkt->FreeCompanyName, 46)
+                .String("TargetName", pkt->TargetName, 32);
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcGrandCompany>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcGrandCompany)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcGrandCompany*>(p);
+            const char* gc = "Unknown";
+            switch (pkt->GrandCompany) {
+            case 0: gc = "None"; break; case 1: gc = "Maelstrom"; break;
+            case 2: gc = "Order of the Twin Adder"; break; case 3: gc = "Immortal Flames"; break;
+            }
+            std::ostringstream os; os << gc << " (" << (int)pkt->GrandCompany << ")";
+            FieldBuilder(e).Field("GrandCompany", os.str())
+                .Field("GrandCompanyRank", (int)pkt->GrandCompanyRank);
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcGetCommonlistResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcGetCommonlistResult)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcGetCommonlistResult*>(p);
+            const char* lt = "Unknown";
+            switch (pkt->ListType) {
+            case 1: lt = "Friend"; break; case 2: lt = "Linkshell"; break;
+            case 3: lt = "PartyMember"; break; case 4: lt = "FreeCompany"; break;
+            case 5: lt = "Blacklist"; break;
+            }
+            std::ostringstream ls; ls << lt << " (" << (int)pkt->ListType << ")";
+            FieldBuilder b(e);
+            b.Hex("CommunityID", pkt->CommunityID)
+                .Field("NextIndex", pkt->NextIndex)
+                .Field("Index", pkt->Index)
+                .Field("ListType", ls.str())
+                .Field("RequestKey", (int)pkt->RequestKey)
+                .Field("RequestParam", (int)pkt->RequestParam);
+            int shown = 0;
+            for (int i = 0; i < 10 && shown < 5; i++) {
+                if (!pkt->entries[i].CharacterID) continue;
+                std::string name(pkt->entries[i].CharacterName, 32);
+                name = name.substr(0, name.find('\0'));
+                b.Hex("Entry" + std::to_string(shown) + "ID", pkt->entries[i].CharacterID)
+                    .String("Entry" + std::to_string(shown) + "Name", name.c_str(), 32)
+                    .Field("Entry" + std::to_string(shown) + "Level", pkt->entries[i].CurrentLevel);
+                shown++;
+            }
+            if (!shown) b.Field("Entries", "None");
+            };
+    }
+
+    // ================= CATEGORY 8: ITEM / INVENTORY =================
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcNormalItem>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcNormalItem)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcNormalItem*>(p);
+            FieldBuilder b(e);
+            b.Field("ContextId", pkt->contextId)
+                .Field("StorageId", pkt->item.storageId)
+                .Field("ContainerIndex", pkt->item.containerIndex)
+                .Field("CatalogId", pkt->item.catalogId)
+                .Field("Stack", pkt->item.stack);
+            if (pkt->item.signatureId) b.Hex("SignatureId", pkt->item.signatureId);
+            b.Hex("Flags", (uint32_t)pkt->item.flags)
+                .Field("Durability", pkt->item.durability)
+                .Field("Refine", pkt->item.refine)
+                .Field("Stain", (int)pkt->item.stain)
+                .Field("Pattern", pkt->item.pattern);
+            int materia = 0;
+            for (int i = 0; i < 5; i++) {
+                if (!pkt->item.materiaType[i]) continue;
+                b.Field("Materia" + std::to_string(i) + "Type", pkt->item.materiaType[i])
+                    .Field("Materia" + std::to_string(i) + "Grade", (int)pkt->item.materiaGrade[i]);
+                materia++;
+            }
+            if (materia) b.Field("MateriaCount", materia);
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcUpdateItem>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcUpdateItem)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcUpdateItem*>(p);
+            FieldBuilder(e)
+                .Field("ContextId", pkt->contextId)
+                .Field("StorageId", pkt->item.storageId)
+                .Field("ContainerIndex", pkt->item.containerIndex)
+                .Field("CatalogId", pkt->item.catalogId)
+                .Field("Stack", pkt->item.stack)
+                .Field("Durability", pkt->item.durability)
+                .Field("Refine", pkt->item.refine);
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcItemSize>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcItemSize)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcItemSize*>(p);
+            FieldBuilder(e)
+                .Field("ContextId", pkt->contextId)
+                .Field("Size", pkt->size)
+                .Field("StorageId", pkt->storageId);
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcItemOperation>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcItemOperation)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcItemOperation*>(p);
+            const char* op = "Unknown";
+            switch (pkt->operationType) {
+            case 1: op = "Move"; break; case 2: op = "Split"; break; case 3: op = "Combine"; break;
+            case 4: op = "Discard"; break; case 5: op = "Use"; break; case 6: op = "Sort"; break;
+            }
+            std::ostringstream os; os << op << " (" << (int)pkt->operationType << ")";
+            FieldBuilder b(e);
+            b.Field("ContextId", pkt->contextId)
+                .Field("OperationType", os.str());
+            if (pkt->srcEntity) b.Hex("SrcEntity", pkt->srcEntity);
+            b.Field("SrcStorageId", pkt->srcStorageId)
+                .Field("SrcContainerIndex", (int)pkt->srcContainerIndex)
+                .Field("SrcStack", pkt->srcStack)
+                .Field("SrcCatalogId", pkt->srcCatalogId);
+            if (pkt->dstEntity) b.Hex("DstEntity", pkt->dstEntity);
+            b.Field("DstStorageId", pkt->dstStorageId)
+                .Field("DstContainerIndex", (int)pkt->dstContainerIndex)
+                .Field("DstStack", pkt->dstStack)
+                .Field("DstCatalogId", pkt->dstCatalogId);
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcItemOperationBatch>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcItemOperationBatch)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcItemOperationBatch*>(p);
+            const char* op = "Unknown";
+            switch (pkt->operationType) {
+            case 0: op = "None"; break; case 1: op = "Sort"; break; case 2: op = "Consolidate"; break;
+            }
+            const char* err = "None";
+            switch (pkt->errorType) {
+            case 0: err = "None"; break; case 1: err = "InventoryFull"; break; case 2: err = "CannotMove"; break;
+            }
+            std::ostringstream os, es; os << op << " (" << (int)pkt->operationType << ")"; es << err << " (" << (int)pkt->errorType << ")";
+            FieldBuilder(e)
+                .Field("ContextId", pkt->contextId)
+                .Field("OperationId", pkt->operationId)
+                .Field("OperationType", os.str())
+                .Field("ErrorType", es.str())
+                .Field("PacketNum", (int)pkt->packetNum);
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcGilItem>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcGilItem)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcGilItem*>(p);
+            FieldBuilder(e)
+                .Field("ContextId", pkt->contextId)
+                .Field("StorageId", pkt->item.storageId)
+                .Field("ContainerIndex", pkt->item.containerIndex)
+                .Field("Amount", pkt->item.stack)
+                .Field("CatalogId", pkt->item.catalogId)
+                .Field("SubQuality", (int)pkt->item.subquarity);
+            };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcItemStorage>() {
+        return [](const uint8_t* p, size_t l, RowEmitter e) {
+            if (l < sizeof(ServerZone::FFXIVIpcItemStorage)) { e("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcItemStorage*>(p);
+            const char* t = "Unknown";
+            switch (pkt->storage.type) {
+            case 0: t = "Inventory"; break; case 1: t = "Armory"; break; case 2: t = "Retainer"; break;
+            case 3: t = "FreeCompany"; break; case 4: t = "Crystal"; break;
+            }
+            std::ostringstream ts; ts << t << " (" << pkt->storage.type << ")";
+            FieldBuilder(e)
+                .Field("ContextId", pkt->contextId)
+                .Field("StorageId", pkt->storage.storageId)
+                .Field("Type", ts.str())
+                .Field("Index", (int)pkt->storage.index)
+                .Field("ContainerSize", pkt->storage.containerSize);
+            };
+    }
+
+    // ================= NEW: ADDITIONAL DECODERS =================
+    
+    // InitZone (0x019A)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcInitZone>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcInitZone)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcInitZone*>(p);
+            FieldBuilder(emit)
+                .Field("ZoneId", pkt->ZoneId)
+                .Field("TerritoryType", pkt->TerritoryType)
+                .Field("TerritoryIndex", pkt->TerritoryIndex)
+                .Hex("LayerSetId", pkt->LayerSetId)
+                .Hex("LayoutId", pkt->LayoutId)
+                .Field("WeatherId", (int)pkt->WeatherId)
+                .Hex("Flag", pkt->Flag)
+                .Field("FestivalEid0", pkt->FestivalEid0)
+                .Field("FestivalPid0", pkt->FestivalPid0)
+                .Field("FestivalEid1", pkt->FestivalEid1)
+                .Field("FestivalPid1", pkt->FestivalPid1)
+                .Position("Position", pkt->Pos[0], pkt->Pos[1], pkt->Pos[2]);
+        };
+    }
+    
+    // PlayerStatus (0x01A0) - large comprehensive packet
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcPlayerStatus>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcPlayerStatus)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPlayerStatus*>(p);
+            FieldBuilder b(emit);
+            b.Hex("CharaId", pkt->CharaId)
+                .Hex("Crest", pkt->Crest)
+                .Hex("EntityId", pkt->EntityId)
+                .Field("RestPoint", pkt->RestPoint)
+                .Field("ExpansionLevel", (int)pkt->ExpansionLevel)
+                .Field("Race", (int)pkt->Race)
+                .Field("Tribe", (int)pkt->Tribe)
+                .Field("Sex", (int)pkt->Sex)
+                .Field("ClassJob", (int)pkt->ClassJob)
+                .Field("FirstClass", (int)pkt->FirstClass)
+                .Field("GuardianDeity", (int)pkt->GuardianDeity)
+                .Field("BirthMonth", (int)pkt->BirthMonth)
+                .Field("Birthday", (int)pkt->Birthday)
+                .Field("StartTown", (int)pkt->StartTown)
+                .Field("HomePoint", (int)pkt->HomePoint)
+                .Field("GrandCompany", (int)pkt->GrandCompany)
+                .Field("Pet", (int)pkt->Pet)
+                .Field("BuddyRank", (int)pkt->BuddyRank)
+                .String("Name", reinterpret_cast<const char*>(pkt->Name), 32)
+                .String("BuddyName", pkt->BuddyName, 21)
+                .Field("RetainerCount", (int)pkt->RetainerCount);
+            
+            // Show some level/exp data (first few classes)
+            for (int i = 0; i < 5 && i < 23; ++i) {
+                if (pkt->Lv[i] > 0) {
+                    std::ostringstream os;
+                    os << "Class" << i << "Lv";
+                    b.Field(os.str(), pkt->Lv[i]);
+                }
+            }
+        };
+    }
+
+    // BaseParam (0x01A1)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcBaseParam>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcBaseParam)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcBaseParam*>(p);
+            FieldBuilder b(emit);
+            
+            // Show first few parameters (STR, DEX, VIT, etc.)
+            const char* names[] = {"STR", "DEX", "VIT", "INT", "MND", "PIE"};
+            for (int i = 0; i < 6 && i < 50; ++i) {
+                b.Field(names[i], pkt->Param[i]);
+            }
+            
+            b.Field("Param[0-5]", "Main stats shown above");
+        };
+    }
+    
+    // HudParam (0x0140)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHudParam>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHudParam)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHudParam*>(p);
+            FieldBuilder b(emit);
+            b.Field("ClassJob", (int)pkt->ClassJob)
+                .Field("Lv", (int)pkt->Lv)
+                .Field("OrgLv", (int)pkt->OrgLv)
+                .Field("LvSync", (int)pkt->LvSync)
+                .Field("Hp", pkt->Hp)
+                .Field("HpMax", pkt->HpMax)
+                .Field("Mp", pkt->Mp)
+                .Field("MpMax", pkt->MpMax)
+                .Field("Tp", pkt->Tp);
+            
+            // Show active status effects
+            int active = 0;
+            for (int i = 0; i < 30; ++i) if (pkt->effect[i].id) active++;
+            if (active > 0) {
+                b.Field("ActiveStatusCount", active);
+                int shown = 0;
+                for (int i = 0; i < 30 && shown < 5; ++i) {
+                    if (!pkt->effect[i].id) continue;
+                    std::ostringstream os;
+                    os << "Status" << shown;
+                    b.Hex(os.str(), pkt->effect[i].id);
+                    if (const char* name = GetStatusEffectName(pkt->effect[i].id))
+                        b.Field(os.str() + "Name", name);
+                    shown++;
+                }
+            }
+        };
+    }
+
+    // Mount (0x0200)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcMount>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcMount)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcMount*>(p);
+            // Struct currently only exposes a single field: id
+            FieldBuilder(emit)
+                .Field("MountId", pkt->id);
+            };
+    }
+
+    // TitleList (0x028B)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcTitleList>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcTitleList)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcTitleList*>(p);
+            
+            // Count set bits (unlocked titles)
+            int unlocked = 0;
+            for (int i = 0; i < 48; ++i) {
+                uint8_t byte = pkt->TitleFlagsArray[i];
+                for (int bit = 0; bit < 8; ++bit) {
+                    if (byte & (1 << bit)) unlocked++;
+                }
+            }
+            
+            FieldBuilder(emit)
+                .Field("TotalUnlockedTitles", unlocked)
+                .Field("FlagArraySize", 48);
+        };
+    }
+
+    // HateList / HaterList (0x019B / 0x019C)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHateList>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHateList)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHateList*>(p);
+            FieldBuilder b(emit);
+            b.Field("Count", (int)pkt->Count);
+            
+            int shown = std::min<int>(pkt->Count, 5);
+            for (int i = 0; i < shown; ++i) {
+                std::ostringstream id, val;
+                id << "Entry" << i << "Id";
+                val << "Entry" << i << "Value";
+                b.Hex(id.str(), pkt->List[i].Id)
+                    .Field(val.str(), pkt->List[i].Value);
+            }
+            if (pkt->Count > shown) {
+                b.Field("MoreEntries", "...");
+            }
+        };
+    }
+
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHaterList>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHaterList)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHaterList*>(p);
+            FieldBuilder b(emit);
+            b.Field("Count", (int)pkt->Count);
+            
+            int shown = std::min<int>(pkt->Count, 5);
+            for (int i = 0; i < shown; ++i) {
+                std::ostringstream id, rate;
+                id << "Entry" << i << "Id";
+                rate << "Entry" << i << "Rate";
+                b.Hex(id.str(), pkt->List[i].Id)
+                    .Field(rate.str(), (int)pkt->List[i].Rate);
+            }
+            if (pkt->Count > shown) {
+                b.Field("MoreEntries", "...");
+            }
+        };
+    }
+
+    // UpdateFindContent (0x02DB)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcUpdateFindContent>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcUpdateFindContent)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcUpdateFindContent*>(p);
+            FieldBuilder(emit)
+                .Field("kind", pkt->kind)
+                .Field("value1", pkt->value1)
+                .Field("value2", pkt->value2)
+                .Field("value3", pkt->value3)
+                .Field("value4", pkt->value4)
+                .Field("Unknown", pkt->Unknown)
+                .Field("territoryType", pkt->territoryType)
+                .Field("Unknown1", pkt->Unknown1)
+                .Field("Unknown2", pkt->Unknown2)
+                .Field("Unknown3", pkt->Unknown3)
+                .Field("Unknown4", pkt->Unknown4);
+        };
+    }
+
+    // NotifyFindContentStatus (0x02DE)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcNotifyFindContentStatus>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcNotifyFindContentStatus)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcNotifyFindContentStatus*>(p);
+            FieldBuilder(emit)
+                .Field("territoryType", pkt->territoryType)
+                .Field("status", (int)pkt->status)
+                .Field("tankRoleCount", (int)pkt->tankRoleCount)
+                .Field("dpsRoleCount", (int)pkt->dpsRoleCount)
+                .Field("healerRoleCount", (int)pkt->healerRoleCount)
+                .Field("matchingTime", (int)pkt->matchingTime);
+        };
+    }
+
+    // FinishContentMatchToClient (0x0339)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcFinishContentMatchToClient>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcFinishContentMatchToClient)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcFinishContentMatchToClient*>(p);
+            FieldBuilder(emit)
+                .Field("classJob", (int)pkt->classJob)
+                .Field("progress", (int)pkt->progress)
+                .Field("playerNum", (int)pkt->playerNum)
+                .Field("territoryType", pkt->territoryType)
+                .Hex("flags", pkt->flags)
+                .Hex("finishContentMatchFlags", pkt->finishContentMatchFlags)
+                .Field("startTime", std::to_string(pkt->startTime));
+        };
+    }
+
+    // ContentAttainFlags (0x02E3)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcContentAttainFlags>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcContentAttainFlags)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcContentAttainFlags*>(p);
+            FieldBuilder(emit)
+                .Field("raidAttainFlagSize", 28)
+                .Field("dungeonAttainFlagSize", 18)
+                .Field("guildOrderAttainFlagSize", 10)
+                .Field("bossBattleAttainFlagSize", 6)
+                .Field("colosseumAttainFlagSize", 2);
+        };
+    }
+
+    // ContentBonus (0x0311)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcContentBonus>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcContentBonus)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcContentBonus*>(p);
+            FieldBuilder b(emit);
+            
+            for (int i = 0; i < 8; ++i) {
+                std::ostringstream os;
+                os << "bonusRoles[" << i << "]";
+                b.Field(os.str(), (int)pkt->bonusRoles[i]);
+            }
+        };
+    }
+
+    // ResponsePenalties (0x02E1)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcResponsePenalties>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcResponsePenalties)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcResponsePenalties*>(p);
+            FieldBuilder(emit)
+                .Field("penalties[0]", (int)pkt->penalties[0])
+                .Field("penalties[1]", (int)pkt->penalties[1]);
+        };
+    }
+
+    // UpdateContent (0x02E4)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcUpdateContent>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcUpdateContent)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcUpdateContent*>(p);
+            FieldBuilder(emit)
+                .Field("territoryType", pkt->territoryType)
+                .Field("kind", pkt->kind)
+                .Field("value1", pkt->value1)
+                .Field("value2", pkt->value2);
+        };
+    }
+
+    // EnableLogout (0x02D6)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcEnableLogout>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcEnableLogout)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcEnableLogout*>(p);
+            FieldBuilder(emit).Field("content", (int)pkt->content);
+        };
+    }
+
+    // Achievement (0x02DD)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcAchievement>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcAchievement)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcAchievement*>(p);
+            
+            // Count completed achievements
+            int count = 0;
+            for (int i = 0; i < 256; ++i) {
+                if (pkt->complete[i]) count++;
+            }
+            
+            FieldBuilder b(emit);
+            b.Field("CompletedCount", count);
+            
+            // Show recent achievement history
+            for (int i = 0; i < 5; ++i) {
+                std::ostringstream os;
+                os << "history[" << i << "]";
+                b.Field(os.str(), pkt->history[i]);
+            }
+        };
+    }
+    
+    // ================= CATEGORY 10: HOUSING =================
+    
+    // HouseList (0x02EC)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHouseList>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHouseList)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHouseList*>(p);
+            FieldBuilder b(emit);
+            b.Field("LandSetId.landId", pkt->LandSetId.landId)
+             .Field("LandSetId.wardNum", pkt->LandSetId.wardNum)
+             .Field("LandSetId.territoryTypeId", pkt->LandSetId.territoryTypeId)
+             .Field("LandSetId.worldId", pkt->LandSetId.worldId)
+             .Field("Subdivision", pkt->Subdivision);
+            int shown = 0;
+            for (int i = 0; i < 30 && shown < 5; ++i) {
+                if (pkt->Houses[i].housePrice == 0) continue;
+                std::ostringstream pfx; pfx << "House" << shown;
+                b.Field(pfx.str() + "Price", pkt->Houses[i].housePrice)
+                 .String(pfx.str() + "Owner", pkt->Houses[i].estateOwnerName, 32);
+                shown++;
+            }
+            if (!shown) b.Field("Houses", "None");
+        };
+    }
+
+    // House (0x02ED)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHouse>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHouse)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHouse*>(p);
+            FieldBuilder(emit)
+                .Field("Block", pkt->Block)
+                .Field("Price", pkt->House.housePrice)
+                .String("Owner", pkt->House.estateOwnerName, 32);
+        };
+    }
+
+    // YardObjectList (0x02EE)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcYardObjectList>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcYardObjectList)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcYardObjectList*>(p);
+            FieldBuilder(emit)
+                .Field("PacketIndex", (int)pkt->PacketIndex)
+                .Field("PacketEnd", (int)pkt->PacketEnd)
+                .Field("ObjectCount", 400);
+        };
+    }
+
+    // YardObject (0x02F0)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcYardObject>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcYardObject)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcYardObject*>(p);
+            FieldBuilder(emit)
+                .Field("ItemId", pkt->YardObject.itemId)
+                .Field("Rotate", pkt->YardObject.rotate)
+                .Field("X", pkt->YardObject.x)
+                .Field("Y", pkt->YardObject.y)
+                .Field("Z", pkt->YardObject.z);
+        };
+    }
+
+    // Interior (0x02F1)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcInterior>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcInterior)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcInterior*>(p);
+            FieldBuilder(emit)
+                .Field("Window", pkt->Window)
+                .Field("Door", pkt->Door)
+                .Field("FirstInterior", pkt->Interior[0]);
+        };
+    }
+
+    // HousingAuction (0x02F2)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingAuction>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingAuction)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingAuction*>(p);
+            FieldBuilder(emit)
+                .Field("Price", pkt->Price)
+                .Field("Timer", pkt->Timer);
+        };
+    }
+
+    // HousingProfile (0x02F3)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingProfile>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingProfile)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingProfile*>(p);
+            FieldBuilder(emit)
+                .Hex("OwnerId", pkt->OwnerId)
+                .Field("Like", pkt->Like)
+                .Field("Welcome", (int)pkt->Welcome)
+                .Field("Size", (int)pkt->Size)
+                .String("Name", pkt->Name, 23)
+                .String("Greeting", pkt->Greeting, 60)
+                .String("OwnerName", pkt->OwnerName, 31)
+                .String("FCTag", pkt->FCTag, 7);
+        };
+    }
+
+    // HousingHouseName (0x02F4)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingHouseName>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingHouseName)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingHouseName*>(p);
+            FieldBuilder(emit)
+                .Field("LandId.landId", pkt->LandId.landId)
+                .Field("LandId.wardNum", pkt->LandId.wardNum)
+                .String("Name", pkt->Name, 23);
+        };
+    }
+
+    // HousingGreeting (0x02F5)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingGreeting>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingGreeting)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingGreeting*>(p);
+            FieldBuilder(emit)
+                .Field("LandId.landId", pkt->LandId.landId)
+                .Field("LandId.wardNum", pkt->LandId.wardNum)
+                .String("Greeting", reinterpret_cast<const char*>(pkt->Greeting), 60);
+        };
+    }
+
+    // CharaHousingLandData (0x02F6)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcCharaHousingLandData>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcCharaHousingLandData)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcCharaHousingLandData*>(p);
+            FieldBuilder(emit)
+                .Field("Index", (int)pkt->Index)
+                .Field("LandId.landId", pkt->LandData.landIdent.landId)
+                .Field("Size", (int)pkt->LandData.size)
+                .Field("Status", (int)pkt->LandData.status);
+        };
+    }
+
+    // CharaHousing (0x02F7)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcCharaHousing>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcCharaHousing)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcCharaHousing*>(p);
+            FieldBuilder(emit)
+                .Field("FcLands.size", (int)pkt->FcLands.size)
+                .Field("CharaLands.size", (int)pkt->CharaLands.size)
+                .Field("Apartment.size", (int)pkt->apartment.size);
+        };
+    }
+
+    // HousingWelcome (0x02F8)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingWelcome>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingWelcome)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingWelcome*>(p);
+            FieldBuilder(emit)
+                .Field("Welcome", (int)pkt->Welcome)
+                .Field("LandId.landId", pkt->LandId.landId);
+        };
+    }
+
+    // FurnitureListS (0x02F9)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcFurnitureListS>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcFurnitureListS)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcFurnitureListS*>(p);
+            FieldBuilder(emit)
+                .Field("PacketNum", (int)pkt->packetNum)
+                .Field("PacketTotal", (int)pkt->packetTotal)
+                .Field("Count", 100);
+        };
+    }
+
+    // FurnitureListM (0x02FA)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcFurnitureListM>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcFurnitureListM)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcFurnitureListM*>(p);
+            FieldBuilder(emit)
+                .Field("PacketNum", (int)pkt->packetNum)
+                .Field("PacketTotal", (int)pkt->packetTotal)
+                .Field("Count", 150);
+        };
+    }
+
+    // FurnitureListL (0x02FB)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcFurnitureListL>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcFurnitureListL)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcFurnitureListL*>(p);
+            FieldBuilder(emit)
+                .Field("PacketNum", (int)pkt->packetNum)
+                .Field("PacketTotal", (int)pkt->packetTotal)
+                .Field("Count", 200);
+        };
+    }
+
+    // Furniture (0x02FC)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcFurniture>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcFurniture)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcFurniture*>(p);
+            FieldBuilder(emit)
+                .Field("StorageId", pkt->StorageId)
+                .Field("ContainerIndex", (int)pkt->ContainerIndex)
+                .Field("ItemId", pkt->Furniture.itemId)
+                .Field("Rotate", pkt->Furniture.rotate)
+                .Field("X", pkt->Furniture.x)
+                .Field("Y", pkt->Furniture.y)
+                .Field("Z", pkt->Furniture.z);
+        };
+    }
+
+    // HousingProfileList (0x02FE)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingProfileList>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingProfileList)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingProfileList*>(p);
+            FieldBuilder b(emit);
+            b.Field("LandSetId.landId", pkt->LandSetId.landId)
+                .Field("LandSetId.wardNum", pkt->LandSetId.wardNum);
+            int shown = 0;
+            for (int i = 0; i < 30 && shown < 5; ++i) {
+                if (!pkt->ProfileList[i].ownerId) continue;
+                std::ostringstream os; os << "Profile" << shown;
+                b.Hex(os.str() + "OwnerId", pkt->ProfileList[i].ownerId)
+                    .String(os.str() + "Name", pkt->ProfileList[i].name, 32);
+                shown++;
+            }
+            };
+    }
+
+    // HousingObjectTransform (0x02FF)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingObjectTransform>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingObjectTransform)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingObjectTransform*>(p);
+            float x = pkt->Pos[0] * 0.001f, y = pkt->Pos[1] * 0.001f, z = pkt->Pos[2] * 0.001f;
+            FieldBuilder(emit)
+                .Field("Dir", pkt->Dir)
+                .Field("UserData1", (int)pkt->UserData1)
+                .Field("UserData2", (int)pkt->UserData2)
+                .Field("ContainerIndex", (int)pkt->ContainerIndex)
+                .Position("Pos", x, y, z);
+        };
+    }
+
+    // HousingObjectColor (0x0300)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingObjectColor>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingObjectColor)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingObjectColor*>(p);
+            FieldBuilder(emit)
+                .Field("Color", (int)pkt->Color)
+                .Field("StorageId", pkt->StorageId)
+                .Field("ContainerIndex", (int)pkt->ContainerIndex)
+                .Field("UserData", (int)pkt->UserData);
+        };
+    }
+
+    // HousingObjectTransformMulti (0x0301)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingObjectTransformMulti>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingObjectTransformMulti)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingObjectTransformMulti*>(p);
+            FieldBuilder b(emit);
+            b.Field("LandId.landId", pkt->LandId.landId)
+             .Field("LandId.wardNum", pkt->LandId.wardNum);
+            int shown = 0;
+            for (int i = 0; i < 10 && shown < 3; ++i) {
+                std::ostringstream os; os << "Layout" << i;
+                b.Field(os.str() + ".StorageIndex", (int)pkt->LayoutInfos[i].storageIndex)
+                 .Field(os.str() + ".posX", pkt->LayoutInfos[i].posX)
+                 .Field(os.str() + ".posY", pkt->LayoutInfos[i].posY)
+                 .Field(os.str() + ".posZ", pkt->LayoutInfos[i].posZ)
+                 .Field(os.str() + ".rotY", pkt->LayoutInfos[i].rotY);
+                shown++;
+            }
+        };
+    }
+
+    // HousingObjectTransformMultiResult (0x032A)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingObjectTransformMultiResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingObjectTransformMultiResult)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingObjectTransformMultiResult*>(p);
+            FieldBuilder b(emit);
+            b.Field("LandId.landId", pkt->LandId.landId)
+             .Field("LandId.wardNum", pkt->LandId.wardNum)
+             .Field("Result", (int)pkt->Result);
+            std::ostringstream idxs;
+            idxs << "[";
+            bool first = true;
+            for (int i = 0; i < 10; ++i) {
+                if (pkt->FixIndexes[i] == 0) continue;
+                if (!first) idxs << ",";
+                idxs << pkt->FixIndexes[i];
+                first = false;
+            }
+            idxs << "]";
+            b.Field("FixIndexes", idxs.str());
+        };
+    }
+
+    // HousingLogWithHouseName (0x032B)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingLogWithHouseName>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingLogWithHouseName)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingLogWithHouseName*>(p);
+            FieldBuilder(emit)
+                .Field("LogId", pkt->LogId)
+                .String("Name", reinterpret_cast<const char*>(pkt->Name), 23);
+        };
+    }
+
+    // HousingCombinedObjectStatus (0x032D)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingCombinedObjectStatus>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingCombinedObjectStatus)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingCombinedObjectStatus*>(p);
+            FieldBuilder b(emit);
+            b.Field("AddressData", pkt->AddressData);
+            std::ostringstream kind, step, status;
+            for (int i = 0; i < 8; ++i) {
+                if (i) { kind << ","; step << ","; status << ","; }
+                kind << pkt->Kind[i];
+                step << (int)pkt->Step[i];
+                status << (int)pkt->Status[i];
+            }
+            b.Field("Kind", kind.str())
+             .Field("Step", step.str())
+             .Field("Status", status.str());
+        };
+    }
+
+    // HouseBuddyModelData (0x032E)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHouseBuddyModelData>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHouseBuddyModelData)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHouseBuddyModelData*>(p);
+            FieldBuilder b(emit);
+            b.Field("AddressData", pkt->AddressData)
+                .Field("BuddyScale", (int)pkt->BuddyScale)
+                .Field("Stain", (int)pkt->Stain)
+                .Field("Invisibility", (int)pkt->Invisibility)
+                .Field("ModelEquipHead", pkt->ModelEquips[0])
+                .Field("ModelEquipBody", pkt->ModelEquips[1])
+                .Field("ModelEquipLeg", pkt->ModelEquips[2]);
+            };
+    }
+
+    // HousingGetPersonalRoomProfileListResult (0x0307)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingGetPersonalRoomProfileListResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingGetPersonalRoomProfileListResult)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingGetPersonalRoomProfileListResult*>(p);
+            FieldBuilder b(emit);
+            b.Hex("CharacterID", pkt->CharacterID)
+             .Field("TopRoomID", pkt->TopRoomID)
+             .Field("HouseLandID.landId", pkt->HouseLandID.landId);
+            int shown = 0;
+            for (int i = 0; i < 15 && shown < 5; ++i) {
+                if (!pkt->ProfileList[i].ownerId) continue;
+                std::ostringstream os; os << "Profile" << shown;
+                b.Hex(os.str() + "OwnerId", pkt->ProfileList[i].ownerId)
+                 .String(os.str() + "OwnerName", pkt->ProfileList[i].ownerName, 32)
+                 .Field(os.str() + "RoomNumber", (int)pkt->ProfileList[i].roomNumber)
+                 .Field(os.str() + "Occupied", (int)pkt->ProfileList[i].isOccupied);
+                shown++;
+            }
+        };
+    }
+
+    // HousingGetHouseBuddyStableListResult (0x0308)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHousingGetHouseBuddyStableListResult>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHousingGetHouseBuddyStableListResult)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHousingGetHouseBuddyStableListResult*>(p);
+            FieldBuilder b(emit);
+            b.Hex("CharacterID", pkt->CharacterID)
+             .Field("Page", (int)pkt->Page)
+             .Field("IsMyBuddy", (int)pkt->IsMyBuddy)
+             .Field("LandID.landId", pkt->LandID.landId);
+            int shown = 0;
+            for (int i = 0; i < 15 && shown < 5; ++i) {
+                if (!pkt->BuddyList[i].ownerId) continue;
+                std::ostringstream os; os << "Buddy" << shown;
+                b.Hex(os.str() + "OwnerId", pkt->BuddyList[i].ownerId)
+                 .Field(os.str() + "BuddyId", pkt->BuddyList[i].buddyId)
+                 .Field(os.str() + "Stain", (int)pkt->BuddyList[i].stain)
+                 .String(os.str() + "BuddyName", pkt->BuddyList[i].buddyName, 21)
+                 .String(os.str() + "OwnerName", pkt->BuddyList[i].ownerName, 32);
+                shown++;
+            }
+        };
+    }
+
+    // HouseTrainBuddyData (0x0309)
+    template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcHouseTrainBuddyData>() {
+        return [](const uint8_t* p, size_t l, RowEmitter emit) {
+            if (l < sizeof(ServerZone::FFXIVIpcHouseTrainBuddyData)) { emit("error", "Packet too small"); return; }
+            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHouseTrainBuddyData*>(p);
+            FieldBuilder(emit)
+                .Field("OwnerRace", (int)pkt->OwnerRace)
+                .Field("OwnerSex", (int)pkt->OwnerSex)
+                .Field("Stain", (int)pkt->Stain)
+                .Field("EquipHead", (int)pkt->Equips[0])
+                .Field("EquipBody", (int)pkt->Equips[1])
+                .Field("EquipLeg", (int)pkt->Equips[2]);
+        };
+    }
+
+} // end anonymous namespace
+
+// Registration
+void PacketDecoding::RegisterZonePackets() {
+    auto& r = PacketDecoderRegistry::Instance();
+
+    // Category 1
+    r.RegisterDecoder(1, false, 0x0142, MakeGenericDecoder<ServerZone::FFXIVIpcActorControl>());
+    r.RegisterDecoder(1, false, 0x0143, MakeGenericDecoder<ServerZone::FFXIVIpcActorControlSelf>());
+    r.RegisterDecoder(1, false, 0x0144, MakeGenericDecoder<ServerZone::FFXIVIpcActorControlTarget>());
+    r.RegisterDecoder(1, false, 0x0145, MakeGenericDecoder<ServerZone::FFXIVIpcResting>());
+    r.RegisterDecoder(1, false, 0x0146, MakeGenericDecoder<ServerZone::FFXIVIpcActionResult1>());
+    r.RegisterDecoder(1, false, 0x0147, MakeGenericDecoder<ServerZone::FFXIVIpcActionResult>());
+    r.RegisterDecoder(1, false, 0x0148, MakeGenericDecoder<ServerZone::FFXIVIpcStatus>());
+    r.RegisterDecoder(1, false, 0x014A, MakeGenericDecoder<ServerZone::FFXIVIpcRecastGroup>());
+    r.RegisterDecoder(1, false, 0x0196, MakeGenericDecoder<ServerZone::FFXIVIpcActorCast>());
+
+    // Category 2
+    r.RegisterDecoder(1, false, 0x0190, MakeGenericDecoder<ServerZone::FFXIVIpcPlayerSpawn>());
+    r.RegisterDecoder(1, false, 0x0191, MakeGenericDecoder<ServerZone::FFXIVIpcActorFreeSpawn>());
+    r.RegisterDecoder(1, false, 0x0192, MakeGenericDecoder<ServerZone::FFXIVIpcActorMove>());
+    r.RegisterDecoder(1, false, 0x0193, MakeGenericDecoder<ServerZone::FFXIVIpcTransfer>());
+    r.RegisterDecoder(1, false, 0x0194, MakeGenericDecoder<ServerZone::FFXIVIpcWarp>());
+
+    // Category 3
+    r.RegisterDecoder(1, false, 0x0065, MakeGenericDecoder<ServerZone::FFXIVIpcSync>());
+    r.RegisterDecoder(1, false, 0x0066, MakeGenericDecoder<ServerZone::FFXIVIpcLogin>());
+    r.RegisterDecoder(1, false, 0x0067, MakeGenericDecoder<ServerZone::FFXIVIpcChat>());
+
+    // Category 4
+    r.RegisterDecoder(1, false, 0x00CF, MakeGenericDecoder<ServerZone::FFXIVIpcGetProfileResult>());
+    r.RegisterDecoder(1, false, 0x00CE, MakeGenericDecoder<ServerZone::FFXIVIpcSetProfileResult>());
+    r.RegisterDecoder(1, false, 0x00D0, MakeGenericDecoder<ServerZone::FFXIVIpcGetSearchCommentResult>());
+    r.RegisterDecoder(1, false, 0x00D1, MakeGenericDecoder<ServerZone::FFXIVIpcGetCharacterNameResult>());
+    r.RegisterDecoder(1, false, 0x00EB, MakeGenericDecoder<ServerZone::FFXIVIpcPcSearchResult>());
+
+    // Category 5
+    r.RegisterDecoder(1, false, 0x0199, MakeGenericDecoder<ServerZone::FFXIVIpcUpdateParty>());
+    r.RegisterDecoder(1, false, 0x00DC, MakeGenericDecoder<ServerZone::FFXIVIpcPcPartyResult>());
+    r.RegisterDecoder(1, false, 0x00DD, MakeGenericDecoder<ServerZone::FFXIVIpcPcPartyUpdate>());
+    r.RegisterDecoder(1, false, 0x014C, MakeGenericDecoder<ServerZone::FFXIVIpcPartyPos>());
+    r.RegisterDecoder(1, false, 0x014D, MakeGenericDecoder<ServerZone::FFXIVIpcAlliancePos>());
+    r.RegisterDecoder(1, false, 0x014B, MakeGenericDecoder<ServerZone::FFXIVIpcUpdateAlliance>());
+    r.RegisterDecoder(1, false, 0x00D6, MakeGenericDecoder<ServerZone::FFXIVIpcPartyRecruitResult>());
+
+    // Category 6
+    r.RegisterDecoder(1, false, 0x00C9, MakeGenericDecoder<ServerZone::FFXIVIpcInviteResult>());
+    r.RegisterDecoder(1, false, 0x00CA, MakeGenericDecoder<ServerZone::FFXIVIpcInviteReplyResult>());
+    r.RegisterDecoder(1, false, 0x00CB, MakeGenericDecoder<ServerZone::FFXIVIpcInviteUpdate>());
+    r.RegisterDecoder(1, false, 0x00E6, MakeGenericDecoder<ServerZone::FFXIVIpcFriendlistRemoveResult>());
+    r.RegisterDecoder(1, false, 0x00F0, MakeGenericDecoder<ServerZone::FFXIVIpcLinkshellResult>());
+    r.RegisterDecoder(1, false, 0x00E1, MakeGenericDecoder<ServerZone::FFXIVIpcBlacklistAddResult>());
+    r.RegisterDecoder(1, false, 0x00E2, MakeGenericDecoder<ServerZone::FFXIVIpcBlacklistRemoveResult>());
+    r.RegisterDecoder(1, false, 0x00E3, MakeGenericDecoder<ServerZone::FFXIVIpcGetBlacklistResult>());
+    r.RegisterDecoder(1, false, 0x00D5, MakeGenericDecoder<ServerZone::FFXIVIpcSetOnlineStatus>());
+    r.RegisterDecoder(1, false, 0x00F1, MakeGenericDecoder<ServerZone::FFXIVIpcGetLinkshellListResult>());
+
+    // Category 7
+    r.RegisterDecoder(1, false, 0x00D3, MakeGenericDecoder<ServerZone::FFXIVIpcSendSystemMessage>());
+    r.RegisterDecoder(1, false, 0x00D4, MakeGenericDecoder<ServerZone::FFXIVIpcSendLoginMessage>());
+    r.RegisterDecoder(1, false, 0x00D2, MakeGenericDecoder<ServerZone::FFXIVIpcChatChannelResult>());
+    r.RegisterDecoder(1, false, 0x010E, MakeGenericDecoder<ServerZone::FFXIVIpcFreeCompanyResult>());
+    r.RegisterDecoder(1, false, 0x014F, MakeGenericDecoder<ServerZone::FFXIVIpcGrandCompany>());
+    r.RegisterDecoder(1, false, 0x00CC, MakeGenericDecoder<ServerZone::FFXIVIpcGetCommonlistResult>());
+
+    // Category 8 (Content Finder / Duty)
+    r.RegisterDecoder(1, false, 0x02DB, MakeGenericDecoder<ServerZone::FFXIVIpcUpdateFindContent>());
+    r.RegisterDecoder(1, false, 0x02DE, MakeGenericDecoder<ServerZone::FFXIVIpcNotifyFindContentStatus>());
+    r.RegisterDecoder(1, false, 0x0339, MakeGenericDecoder<ServerZone::FFXIVIpcFinishContentMatchToClient>());
+    r.RegisterDecoder(1, false, 0x02E3, MakeGenericDecoder<ServerZone::FFXIVIpcContentAttainFlags>());
+    r.RegisterDecoder(1, false, 0x0311, MakeGenericDecoder<ServerZone::FFXIVIpcContentBonus>());
+    r.RegisterDecoder(1, false, 0x02E1, MakeGenericDecoder<ServerZone::FFXIVIpcResponsePenalties>());
+    r.RegisterDecoder(1, false, 0x02E4, MakeGenericDecoder<ServerZone::FFXIVIpcUpdateContent>());
+
+    // Category 9 (Items)
+    r.RegisterDecoder(1, false, 0x01AF, MakeGenericDecoder<ServerZone::FFXIVIpcNormalItem>());
+    r.RegisterDecoder(1, false, 0x01B6, MakeGenericDecoder<ServerZone::FFXIVIpcUpdateItem>());
+    r.RegisterDecoder(1, false, 0x01B0, MakeGenericDecoder<ServerZone::FFXIVIpcItemSize>());
+    r.RegisterDecoder(1, false, 0x01B2, MakeGenericDecoder<ServerZone::FFXIVIpcItemOperation>());
+    r.RegisterDecoder(1, false, 0x01B1, MakeGenericDecoder<ServerZone::FFXIVIpcItemOperationBatch>());
+    r.RegisterDecoder(1, false, 0x01B3, MakeGenericDecoder<ServerZone::FFXIVIpcGilItem>());
+    r.RegisterDecoder(1, false, 0x01AE, MakeGenericDecoder<ServerZone::FFXIVIpcItemStorage>());
+
+    // Additional decoders (new)
+    r.RegisterDecoder(1, false, 0x019A, MakeGenericDecoder<ServerZone::FFXIVIpcInitZone>());
+    r.RegisterDecoder(1, false, 0x01A0, MakeGenericDecoder<ServerZone::FFXIVIpcPlayerStatus>());
+    r.RegisterDecoder(1, false, 0x01A1, MakeGenericDecoder<ServerZone::FFXIVIpcBaseParam>());
+    r.RegisterDecoder(1, false, 0x0140, MakeGenericDecoder<ServerZone::FFXIVIpcHudParam>());
+    r.RegisterDecoder(1, false, 0x0200, MakeGenericDecoder<ServerZone::FFXIVIpcMount>());
+    r.RegisterDecoder(1, false, 0x028B, MakeGenericDecoder<ServerZone::FFXIVIpcTitleList>());
+    r.RegisterDecoder(1, false, 0x019B, MakeGenericDecoder<ServerZone::FFXIVIpcHateList>());
+    r.RegisterDecoder(1, false, 0x019C, MakeGenericDecoder<ServerZone::FFXIVIpcHaterList>());
+    r.RegisterDecoder(1, false, 0x02D6, MakeGenericDecoder<ServerZone::FFXIVIpcEnableLogout>());
+    r.RegisterDecoder(1, false, 0x02DD, MakeGenericDecoder<ServerZone::FFXIVIpcAchievement>());
+
+    // Category 10 (Housing)
+    r.RegisterDecoder(1, false, 0x02EC, MakeGenericDecoder<ServerZone::FFXIVIpcHouseList>());
+    r.RegisterDecoder(1, false, 0x02ED, MakeGenericDecoder<ServerZone::FFXIVIpcHouse>());
+    r.RegisterDecoder(1, false, 0x02EE, MakeGenericDecoder<ServerZone::FFXIVIpcYardObjectList>());
+    r.RegisterDecoder(1, false, 0x02F0, MakeGenericDecoder<ServerZone::FFXIVIpcYardObject>());
+    r.RegisterDecoder(1, false, 0x02F1, MakeGenericDecoder<ServerZone::FFXIVIpcInterior>());
+    r.RegisterDecoder(1, false, 0x02F2, MakeGenericDecoder<ServerZone::FFXIVIpcHousingAuction>());
+    r.RegisterDecoder(1, false, 0x02F3, MakeGenericDecoder<ServerZone::FFXIVIpcHousingProfile>());
+    r.RegisterDecoder(1, false, 0x02F4, MakeGenericDecoder<ServerZone::FFXIVIpcHousingHouseName>());
+    r.RegisterDecoder(1, false, 0x02F5, MakeGenericDecoder<ServerZone::FFXIVIpcHousingGreeting>());
+    r.RegisterDecoder(1, false, 0x02F6, MakeGenericDecoder<ServerZone::FFXIVIpcCharaHousingLandData>());
+    r.RegisterDecoder(1, false, 0x02F7, MakeGenericDecoder<ServerZone::FFXIVIpcCharaHousing>());
+    r.RegisterDecoder(1, false, 0x02F8, MakeGenericDecoder<ServerZone::FFXIVIpcHousingWelcome>());
+    r.RegisterDecoder(1, false, 0x02F9, MakeGenericDecoder<ServerZone::FFXIVIpcFurnitureListS>());
+    r.RegisterDecoder(1, false, 0x02FA, MakeGenericDecoder<ServerZone::FFXIVIpcFurnitureListM>());
+    r.RegisterDecoder(1, false, 0x02FB, MakeGenericDecoder<ServerZone::FFXIVIpcFurnitureListL>());
+    r.RegisterDecoder(1, false, 0x02FC, MakeGenericDecoder<ServerZone::FFXIVIpcFurniture>());
+    r.RegisterDecoder(1, false, 0x02FE, MakeGenericDecoder<ServerZone::FFXIVIpcHousingProfileList>());
+    r.RegisterDecoder(1, false, 0x02FF, MakeGenericDecoder<ServerZone::FFXIVIpcHousingObjectTransform>());
+    r.RegisterDecoder(1, false, 0x0300, MakeGenericDecoder<ServerZone::FFXIVIpcHousingObjectColor>());
+    r.RegisterDecoder(1, false, 0x0301, MakeGenericDecoder<ServerZone::FFXIVIpcHousingObjectTransformMulti>());
+    r.RegisterDecoder(1, false, 0x0307, MakeGenericDecoder<ServerZone::FFXIVIpcHousingGetPersonalRoomProfileListResult>());
+    r.RegisterDecoder(1, false, 0x0308, MakeGenericDecoder<ServerZone::FFXIVIpcHousingGetHouseBuddyStableListResult>());
+    r.RegisterDecoder(1, false, 0x0309, MakeGenericDecoder<ServerZone::FFXIVIpcHouseTrainBuddyData>());
+
+    // Specifically requested P1 housing packets
+    r.RegisterDecoder(1, false, 0x032A, MakeGenericDecoder<ServerZone::FFXIVIpcHousingObjectTransformMultiResult>());
+    r.RegisterDecoder(1, false, 0x032B, MakeGenericDecoder<ServerZone::FFXIVIpcHousingLogWithHouseName>());
+    r.RegisterDecoder(1, false, 0x032D, MakeGenericDecoder<ServerZone::FFXIVIpcHousingCombinedObjectStatus>());
+    r.RegisterDecoder(1, false, 0x032E, MakeGenericDecoder<ServerZone::FFXIVIpcHouseBuddyModelData>());
+}

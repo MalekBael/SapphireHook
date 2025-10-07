@@ -11,6 +11,7 @@
 #include <array>
 #include <tuple>
 #include <type_traits>
+#include <chrono> // added
 
 #ifdef min
 #undef min
@@ -26,6 +27,148 @@ namespace PacketDecoding {
     using RowEmitter = std::function<void(const char*, const std::string&)>;
     using DecoderFunc = std::function<void(const uint8_t* payload, size_t payloadLen,
         std::function<void(const char*, const std::string&)> rowKV)>;
+
+// ============================================================================
+// NEW: Direction & Packet Descriptor Infrastructure
+// ============================================================================
+
+    enum class Direction : uint8_t {
+        ServerToClient = 0,
+        ClientToServer = 1
+    };
+
+    enum class DecodePolicy : uint8_t {
+        Fixed,          // Fixed size, use struct directly
+        Variable,       // Variable size, needs custom decoder
+        Special         // Special handling (like bidirectional opcodes)
+    };
+
+    struct PacketDescriptor {
+        uint8_t channel;
+        Direction direction;
+        uint16_t opcode;
+        const char* name;
+        size_t structSize;
+        DecodePolicy policy;
+        DecoderFunc customDecoder;  // Only used for Variable/Special policies
+        
+        PacketDescriptor(
+            uint8_t ch,
+            Direction dir, 
+            uint16_t op,
+            const char* n,
+            size_t size,
+            DecodePolicy pol = DecodePolicy::Fixed,
+            DecoderFunc decoder = nullptr)
+            : channel(ch)
+            , direction(dir)
+            , opcode(op)
+            , name(n)
+            , structSize(size)
+            , policy(pol)
+            , customDecoder(std::move(decoder))
+        {}
+    };
+
+    // Helper to create descriptors with automatic size calculation
+    template<typename T>
+    inline PacketDescriptor MakePacket(
+        uint8_t channel,
+        Direction dir,
+        uint16_t opcode,
+        const char* name,
+        DecodePolicy policy = DecodePolicy::Fixed)
+    {
+        return PacketDescriptor(channel, dir, opcode, name, sizeof(T), policy);
+    }
+
+// ============================================================================
+// NEW: Field Builder - Fluent API to replace FIELD macros
+// ============================================================================
+
+    class FieldBuilder {
+    public:
+        explicit FieldBuilder(RowEmitter emit) : m_emit(std::move(emit)) {}
+        
+        FieldBuilder& Field(std::string_view name, std::string value) {
+            m_emit(std::string(name).c_str(), std::move(value));
+            return *this;
+        }
+        
+        FieldBuilder& Field(std::string_view name, uint32_t value) {
+            return Field(name, std::to_string(value));
+        }
+        
+        FieldBuilder& Field(std::string_view name, int32_t value) {
+            return Field(name, std::to_string(value));
+        }
+        
+        FieldBuilder& Field(std::string_view name, uint16_t value) {
+            return Field(name, std::to_string(value));
+        }
+        
+        FieldBuilder& Field(std::string_view name, uint8_t value) {
+            return Field(name, std::to_string(static_cast<unsigned>(value)));
+        }
+        
+        // Add explicit float/double overloads to avoid ambiguity
+        FieldBuilder& Field(std::string_view name, float value) {
+            std::ostringstream os;
+            os << std::fixed << std::setprecision(3) << value;
+            return Field(name, os.str());
+        }
+        
+        FieldBuilder& Field(std::string_view name, double value) {
+            std::ostringstream os;
+            os << std::fixed << std::setprecision(3) << value;
+            return Field(name, os.str());
+        }
+        
+        FieldBuilder& Hex(std::string_view name, uint64_t value) {
+            std::ostringstream os;
+            os << "0x" << std::hex << std::uppercase << value;
+            return Field(name, os.str());
+        }
+        
+        FieldBuilder& Position(std::string_view name, float x, float y, float z) {
+            std::ostringstream os;
+            os << "(" << x << ", " << y << ", " << z << ")";
+            return Field(name, os.str());
+        }
+        
+        FieldBuilder& Angle(std::string_view name, float radians) {
+            float degrees = radians * (180.0f / 3.14159265f);
+            std::ostringstream os;
+            os << std::fixed << std::setprecision(1) << degrees << "°";
+            return Field(name, os.str());
+        }
+        
+        FieldBuilder& AngleDeg(std::string_view name, uint16_t value) {
+            float degrees = value * 360.0f / 65535.0f;
+            std::ostringstream os;
+            os << std::fixed << std::setprecision(1) << degrees << "°";
+            return Field(name, os.str());
+        }
+        
+        FieldBuilder& String(std::string_view name, const char* str, size_t maxLen) {
+            if (!str) return Field(name, "");
+            size_t len = strnlen(str, maxLen);
+            return Field(name, std::string(str, len));
+        }
+        
+        template<typename T>
+        FieldBuilder& Enum(std::string_view name, T value, const char* (*lookupFunc)(T)) {
+            std::ostringstream os;
+            os << static_cast<int>(value);
+            if (auto* str = lookupFunc(value)) {
+                os << " (" << str << ")";
+            }
+            return Field(name, os.str());
+        }
+
+    private:
+        RowEmitter m_emit;
+    };
 
     // Move DumpBytesAsHex BEFORE any use (FieldStringifier / ValueToString)
     inline std::string DumpBytesAsHex(std::span<const uint8_t> bytes, size_t maxLen = 32) {
@@ -639,4 +782,68 @@ namespace PacketDecoding {
         }
         return true;
     }
+
+// ============================================================================
+// JSON export model + PacketDecoder (minimal API used by PacketDecoder.cpp)
+// ============================================================================
+    struct PacketHeaderFFXIV {
+        uint64_t magic0 = 0;
+        uint64_t magic1 = 0;
+        uint32_t size = 0;
+        uint64_t timestamp = 0;
+        uint16_t connType = 0;
+        uint16_t segCount = 0;
+        uint8_t  isCompressed = 0;
+        uint8_t  unknown20 = 0;
+        uint32_t unknown24 = 0;
+    };
+
+    struct SegmentHeaderFFXIV {
+        uint32_t offset = 0;
+        uint32_t size = 0;
+        uint16_t type = 0;
+        uint16_t pad = 0;
+        uint32_t srcId = 0;
+        uint32_t tgtId = 0;
+    };
+
+    struct SegmentData {
+        SegmentHeaderFFXIV header{};
+        // IPC
+        uint16_t opcode = 0;
+        uint16_t serverId = 0;
+        uint32_t timestamp = 0;
+        uint16_t ipcReserved = 0;
+        uint16_t ipcPad = 0;
+        // payload
+        std::vector<uint8_t> data;
+    };
+
+    struct ParsedFFXIVPacket {
+        uint64_t connectionId = 0;
+        bool outgoing = false;
+        std::chrono::steady_clock::time_point captureTime{};
+        PacketHeaderFFXIV header{};
+        std::vector<SegmentData> segments;
+        std::vector<uint8_t> rawData;
+    };
+
+    class PacketDecoder {
+    public:
+        std::string ExportToEnhancedJson(const ParsedFFXIVPacket& packet) const;
+        void SetIncludeRawData(bool enable) { includeRawData_ = enable; }
+
+    private:
+        // helpers implemented in cpp
+        std::string BytesToHex(const std::vector<uint8_t>& data, size_t maxBytes = 0) const;
+        std::string FormatTimestamp(std::chrono::steady_clock::time_point tp) const;
+        const char* GetSegmentTypeName(uint16_t type) const;
+        std::string FormatHex8(uint8_t value) const;
+        std::string FormatHex16(uint16_t value) const;
+        std::string FormatHex32(uint32_t value) const;
+        std::string FormatHex64(uint64_t value) const;
+
+        bool includeRawData_ = false;
+    };
+
 } // namespace PacketDecoding

@@ -201,14 +201,15 @@ UIManager::~UIManager()
 
 UIManager& UIManager::GetInstance()
 {
- if (!s_instance)
- {
-  LogInfo("Creating NEW UIManager singleton instance");
-  s_instance = new UIManager();
-  LogInfo("UIManager singleton created at: " +
-   std::to_string(reinterpret_cast<uintptr_t>(s_instance)));
- }
- return *s_instance;
+    if (!s_instance)
+    {
+        LogInfo("Creating NEW UIManager singleton instance");
+        s_unloadRequested = false; // ensure clean state on new instance
+        s_instance = new UIManager();
+        LogInfo("UIManager singleton created at: " +
+            std::to_string(reinterpret_cast<uintptr_t>(s_instance)));
+    }
+    return *s_instance;
 }
 
 bool UIManager::HasInstance()
@@ -224,13 +225,14 @@ void UIManager::Initialize()
 
 void UIManager::Shutdown()
 {
- LogInfo("UIManager::Shutdown() called");
- if (s_instance)
- {
-  delete s_instance;
-  s_instance = nullptr;
-  LogInfo("UIManager singleton destroyed");
- }
+    LogInfo("UIManager::Shutdown() called");
+    if (s_instance)
+    {
+        delete s_instance;
+        s_instance = nullptr;
+        s_unloadRequested = false; // clear latched unload requests
+        LogInfo("UIManager singleton destroyed");
+    }
 }
 
 void UIManager::Render()
@@ -577,56 +579,56 @@ void UIManager::RenderMainMenu()
 
 		if (ImGui::BeginMenu("Features"))
 		{
-			static int menuRenderCount = 0;
-			menuRenderCount++;
-			if (menuRenderCount <= 3)
-			{
-				LogInfo("Rendering Features menu with " + std::to_string(m_modules.size()) +
-					" modules on instance: " + std::to_string(reinterpret_cast<uintptr_t>(this)));
-			}
+		 static int menuRenderCount = 0;
+		 menuRenderCount++;
+		 if (menuRenderCount <= 3)
+		 {
+			 LogInfo("Rendering Features menu with " + std::to_string(m_modules.size()) +
+				 " modules on instance: " + std::to_string(reinterpret_cast<uintptr_t>(this)));
+		 }
 
-			if (m_modules.empty())
-			{
-				if (menuRenderCount <= 3)
-				{
-					LogError("NO MODULES FOUND FOR RENDERING! Instance: " +
-						std::to_string(reinterpret_cast<uintptr_t>(this)));
-				}
-			}
-			else
-			{
-				for (size_t i = 0; i < m_modules.size(); ++i)
-				{
-					auto& module = m_modules[i];
-					if (module && module->IsEnabled())
-					{
-						if (menuRenderCount <= 3)
-						{
-							LogInfo("Rendering menu for module #" + std::to_string(i + 1) + ": " +
-								std::string(module->GetDisplayName()));
-						}
+		 if (m_modules.empty())
+		 {
+			 if (menuRenderCount <= 3)
+			 {
+				 LogError("NO MODULES FOUND FOR RENDERING! Instance: " +
+					 std::to_string(reinterpret_cast<uintptr_t>(this)));
+			 }
+		 }
+		 else
+		 {
+			 for (size_t i = 0; i < m_modules.size(); ++i)
+			 {
+				 auto& module = m_modules[i];
+				 if (module && module->IsEnabled())
+				 {
+					 if (menuRenderCount <= 3)
+					 {
+						 LogInfo("Rendering menu for module #" + std::to_string(i + 1) + ": " +
+							 std::string(module->GetDisplayName()));
+					 }
 
-						try
-						{
+					 try
+					 {
 						 module->RenderMenu();
-						}
-						catch (...)
-						{
-							LogError("Exception rendering menu for module: " + std::string(module->GetDisplayName()));
-						}
-					}
-					else if (module && !module->IsEnabled() && menuRenderCount <= 3)
-					{
-						LogInfo("Module " + std::string(module->GetDisplayName()) + " is disabled");
-					}
-					else if (!module && menuRenderCount <= 3)
-					{
-						LogError("Null module found at index " + std::to_string(i));
-					}
-				}
-			}
+					 }
+					 catch (...)
+					 {
+						 LogError("Exception rendering menu for module: " + std::string(module->GetDisplayName()));
+					 }
+				 }
+				 else if (module && !module->IsEnabled() && menuRenderCount <= 3)
+				 {
+					 LogInfo("Module " + std::string(module->GetDisplayName()) + " is disabled");
+				 }
+				 else if (!module && menuRenderCount <= 3)
+				 {
+					 LogError("Null module found at index " + std::to_string(i));
+				 }
+			 }
+		 }
 
-			ImGui::EndMenu();
+		 ImGui::EndMenu();
 		}
 
 		if (ImGui::BeginMenu("Tools"))
@@ -672,21 +674,21 @@ void UIManager::RenderMainMenu()
 
 		if (ImGui::BeginMenu("Settings"))
 		{
-			static UIModule* s_settings = nullptr;
-			if (!s_settings)
+		 static UIModule* s_settings = nullptr;
+		 if (!s_settings)
 			 s_settings = GetModule("settings");
 
-			if (s_settings)
-			{
-				bool open = s_settings->IsWindowOpen();
-				if (ImGui::MenuItem("Settings Window", nullptr, open))
+		 if (s_settings)
+		 {
+			 bool open = s_settings->IsWindowOpen();
+			 if (ImGui::MenuItem("Settings Window", nullptr, open))
 				 s_settings->SetWindowOpen(!open);
-			}
-			else
-			{
-				ImGui::MenuItem("Settings Window", nullptr, false, false);
-			}
-			ImGui::EndMenu();
+		 }
+		 else
+		 {
+			 ImGui::MenuItem("Settings Window", nullptr, false, false);
+		 }
+		 ImGui::EndMenu();
 		}
 
 		// System monitoring display on the right side of the menu bar

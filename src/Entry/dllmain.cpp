@@ -12,6 +12,14 @@
 #include "../Modules/FunctionCallMonitor.h"
 
 bool g_SafeToInitialize = false;
+// New: prevent accidental unloads via false-positive hotkey while minimized/not focused
+static bool ShouldAcceptHotkeys()
+{
+    HWND gameWindow = FindWindowW(L"FFXIVGAME", nullptr);
+    if (!gameWindow) return false;
+    if (IsIconic(gameWindow)) return false;                  // minimized => ignore
+    return GetForegroundWindow() == gameWindow;              // only when game has focus
+}
 
 static void RebindConsoleStreams()
 {
@@ -25,6 +33,8 @@ static void RebindConsoleStreams()
     setvbuf(stdout, nullptr, _IONBF, 0);
     setvbuf(stderr, nullptr, _IONBF, 0);
 }
+
+static bool IsGameWindowMinimized();
 
 DWORD WINAPI MainThread(LPVOID lpReserved)
 {
@@ -150,12 +160,46 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
     LogInfo("=== All systems initialized! ===");
     LogInfo("Press INSERT to toggle menu, END to unload");
 
+    // New: allow disabling the END hotkey via environment
+    const bool disableEndHotkey = (std::getenv("SAPPHIREHOOK_DISABLE_END_HOTKEY") != nullptr);
+    // New: robust edge-based hotkey detection
+    static bool s_endWasDown = false;
+
     while (true) {
-        if ((GetAsyncKeyState(VK_END) & 1) ||
-            (UIManager::HasInstance() && UIManager::IsUnloadRequested())) {
-            LogInfo("Unloading requested...");
+        // Robust END detection: only when game is foreground, not minimized, and on down edge
+        bool endPressed = false;
+        if (!disableEndHotkey && ShouldAcceptHotkeys()) {
+            SHORT state = GetAsyncKeyState(VK_END);
+            bool endDown = (state & 0x8000) != 0;      // high bit: currently down
+            endPressed = endDown && !s_endWasDown;     // edge detect
+            s_endWasDown = endDown;
+        } else {
+            s_endWasDown = false; // reset when not accepting hotkeys
+        }
+
+        const bool uiUnload = (UIManager::HasInstance() && UIManager::IsUnloadRequested());
+        const bool minimized = IsGameWindowMinimized();
+
+        if (endPressed) {
+            LogInfo("Unloading requested by hotkey (END)");
             break;
         }
+
+        // Respect UI unload when not minimized; defer if minimized
+        if (uiUnload && !minimized) {
+            LogInfo("Unloading requested by UI");
+            break;
+        }
+
+        static DWORD s_lastWarn = 0;
+        if (uiUnload && minimized) {
+            ULONGLONG now = GetTickCount64();
+            if (now - s_lastWarn > 2000) {
+                SapphireHook::Logger::Instance().Warning("UI unload requested while minimized; deferring until window is restored");
+                s_lastWarn = now;
+            }
+        }
+
         Sleep(100);
     }
 
@@ -204,4 +248,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
         break;
     }
     return TRUE;
+}
+
+static bool IsGameWindowMinimized() {
+    HWND hGame = FindWindowW(L"FFXIVGAME", nullptr);
+    return hGame ? (IsIconic(hGame) != 0) : false;
 }

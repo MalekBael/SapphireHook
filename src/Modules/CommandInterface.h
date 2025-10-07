@@ -2,7 +2,7 @@
 #include <Windows.h>
 #include <string>
 #include <cstdint>
-#include <vector>  // Add this for std::vector
+#include <vector>
 
 class CommandInterface
 {
@@ -40,9 +40,11 @@ public:
 	static bool SendChatMessage(const char* message, uint8_t chatType = 0);
 	static bool SendChatPacket(const char* message, uint8_t chatType = 0);
 
-	// GM Command packet sending
+	// GM Command packet sending (defaults to GM1)
 	static bool SendGMCommand(uint32_t commandId, uint32_t arg0 = 0, uint32_t arg1 = 0, uint32_t arg2 = 0, uint32_t arg3 = 0, uint64_t target = 0);
-	static bool SendGMCommandWithName(uint32_t commandId, uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3, const char* targetName);
+
+	// New: explicit opcode variant for discovery (0x0197 GM1, 0x0198 GM2)
+	static bool SendGMCommandEx(uint16_t ipcOpcode, uint32_t commandId, uint32_t arg0 = 0, uint32_t arg1 = 0, uint32_t arg2 = 0, uint32_t arg3 = 0, uint64_t target = 0);
 
 	// ADD MISSING DECLARATIONS:
 	static bool SendCommandPacket(uint32_t commandId, uint32_t arg0 = 0, uint32_t arg1 = 0, uint32_t arg2 = 0, uint32_t arg3 = 0, uint64_t target = 0);

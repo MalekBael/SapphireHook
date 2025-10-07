@@ -22,6 +22,7 @@
 #include "../Network/PacketRegistration.h"
 #include "NetworkMonitorHelper.h"
 #include "NetworkMonitorTypes.h"
+#include <nlohmann/json.hpp>
 
 using namespace SapphireHook;
 
@@ -33,9 +34,68 @@ PacketCapture& PacketCapture::Instance() {
 
 
 namespace {
-	// Forward declarations for export helpers (definitions are later in this file).
-	static bool ExportToJsonAs(const HookPacket& hp, const std::string& filepath);
-	static bool ExportToPcapAs(const HookPacket& hp, const std::string& filepath);
+    // Forward declarations for export helpers (definitions are later in this file).
+    static bool ExportToJsonAs(const HookPacket& hp, const std::string& filepath);
+    static bool ExportToPcapAs(const HookPacket& hp, const std::string& filepath);
+
+    // PCAP helpers (full definitions placed before ExportToPcapAs)
+    struct PcapFlowInfo {
+        uint8_t clientIp[4] = { 10, 0, 0, 1 };
+        uint8_t serverIp[4] = { 10, 0, 0, 2 };
+        uint16_t clientPort = 55001;
+        uint16_t serverPort = 55002;
+        uint16_t nextIpId = 1;
+    };
+    static std::unordered_map<uint64_t, PcapFlowInfo> g_pcapFlowByConn;
+
+    static PcapFlowInfo& GetFlow(uint64_t connId) {
+        auto it = g_pcapFlowByConn.find(connId);
+        if (it != g_pcapFlowByConn.end()) return it->second;
+        PcapFlowInfo f{};
+        // give each connection a stable, non-privileged port pair
+        uint16_t base = static_cast<uint16_t>(50000 + (connId % 10000));
+        f.clientPort = base | 1; // odd
+        f.serverPort = base | 2; // even
+        auto [ins, _] = g_pcapFlowByConn.emplace(connId, f);
+        return ins->second;
+    }
+
+    // 16-bit ones’ complement sum over big-endian 16-bit words
+    static uint16_t Sum16(const uint8_t* data, size_t len) {
+        uint32_t sum = 0;
+        while (len > 1) {
+            sum += (uint16_t(data[0]) << 8) | uint16_t(data[1]);
+            data += 2; len -= 2;
+        }
+        if (len == 1) sum += uint16_t(data[0]) << 8;
+        while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+        return static_cast<uint16_t>(sum);
+    }
+
+    static uint16_t IpHeaderChecksum(const uint8_t* ipHdr, size_t hdrLen) {
+        uint32_t sum = Sum16(ipHdr, hdrLen);
+        return static_cast<uint16_t>(~sum);
+    }
+
+    static uint16_t UdpChecksumIPv4(const uint8_t srcIp[4],
+                                    const uint8_t dstIp[4],
+                                    const uint8_t* udp,
+                                    size_t udpLen)
+    {
+        // Pseudo-header: src(4) + dst(4) + zero(1) + proto(1) + udpLen(2)
+        uint8_t pseudo[12];
+        pseudo[0] = srcIp[0]; pseudo[1] = srcIp[1]; pseudo[2] = srcIp[2]; pseudo[3] = srcIp[3];
+        pseudo[4] = dstIp[0]; pseudo[5] = dstIp[1]; pseudo[6] = dstIp[2]; pseudo[7] = dstIp[3];
+        pseudo[8] = 0;
+        pseudo[9] = 17;   // UDP
+
+        uint32_t sum = 0;
+        sum += Sum16(pseudo, sizeof(pseudo));
+        sum += Sum16(udp, udpLen);
+        if (udpLen & 1) sum += uint16_t(udp[udpLen - 1]) << 8; // odd byte
+        while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
+        return static_cast<uint16_t>(~sum);
+    }
 }
 
 
@@ -578,7 +638,7 @@ namespace {
 		uint16_t cached = (it != g_connTypeByConnId.end()) ? it->second : 0xFFFF;
 		uint16_t header = P.connType;
 		if (header != 0 && header != 0xFFFF) {
-			if (P.segCount > 0) g_connTypeByConnId[hp.connection_id] = header;
+			if (P.segCount > 0) g_connTypeByConnId[hp.connection_id] = header; // fixed: use the correct map
 			return header;
 		}
 		if (cached != 0xFFFF) return cached;
@@ -1083,10 +1143,7 @@ namespace {
 			os << std::hex << std::setfill('0');
 			int shown = 0;
 			for (size_t i = 0; i < dec.opcodes.size(); ++i) {
-				if (shown >= 12) {
-					os << ", ...";
-					break;
-				}
+				if (shown >= 12) { os << ", ..."; break; }
 				uint16_t op = dec.opcodes[i];
 				if (i > 0) os << ", ";
 				os << "0x" << std::setw(4) << op;
@@ -1754,55 +1811,274 @@ namespace {
 			std::filesystem::path p(filepath);
 			if (p.has_parent_path()) {
 				std::error_code ec;
-				std::filesystem::create_directories(p.parent_path(), ec); // Only create what user explicitly requested
+				std::filesystem::create_directories(p.parent_path(), ec);
 			}
-			std::ofstream f(p, std::ios::binary);
-			if (!f) return false;
-
+			
+			// Parse the packet structure
 			ParsedPacket P = ParsePacket(hp);
+			uint16_t resolvedConn = ResolveConnType(hp, P);
 			SegmentView v = GetSegmentView(hp);
 			std::vector<SegmentInfo> segs;
 			ParseAllSegmentsBuffer(v.data, v.len, segs);
-
-			f << "{\n";
-			f << "  \"outgoing\": " << (hp.outgoing ? "true" : "false") << ",\n";
-			f << "  \"connectionId\": " << hp.connection_id << ",\n";
-			f << "  \"header\": { \"size\": " << P.size
-				<< ", \"connType\": " << P.connType
-				<< ", \"segCount\": " << P.segCount
-				<< ", \"isCompressed\": " << (unsigned)P.isCompressed
-				<< " },\n";
-			f << "  \"segments\": [\n";
+			
+			// Build enhanced JSON using nlohmann
+			nlohmann::json root;
+			
+			// Metadata
+			root["connectionId"] = hp.connection_id;
+			root["direction"] = hp.outgoing ? "SEND" : "RECV";
+			auto tt = std::chrono::system_clock::to_time_t(hp.ts);
+			char tbuf[64]{};
+			std::strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", std::localtime(&tt));
+			root["captureTime"] = tbuf;
+			
+			// Full header
+			nlohmann::json header;
+			header["magic"] = [&]() {
+				std::ostringstream os;
+				os << "0x" << std::hex << std::setw(16) << std::setfill('0') << P.magic0
+				   << " 0x" << std::setw(16) << P.magic1;
+				return os.str();
+			}();
+			header["size"] = P.size;
+			header["timestamp"] = P.timestamp;
+			header["connectionType"] = P.connType;
+			header["connectionTypeName"] = [&]() -> std::string {
+				switch(P.connType) {
+					case 0: return "Zone";
+					case 1: return "Chat";
+					case 2: return "Lobby";
+					default: return "Unknown";
+				}
+			}();
+			header["segmentCount"] = P.segCount;
+			header["isCompressed"] = P.isCompressed != 0;
+			header["unknown20"] = P.unknown20;
+			header["unknown24"] = P.unknown24;
+			root["header"] = header;
+			
+			// Segments with full decoding
+			nlohmann::json segments = nlohmann::json::array();
+			EnsurePacketRegistry();
+			auto& reg = PacketDecoding::PacketDecoderRegistry::Instance();
+			
 			for (size_t i = 0; i < segs.size(); ++i) {
 				const auto& s = segs[i];
-				f << "    { \"offset\": " << s.offset
-					<< ", \"size\": " << s.size
-					<< ", \"type\": " << s.type;
-				if (s.hasIpc) f << ", \"opcode\": " << s.opcode;
-				f << " }" << (i + 1 < segs.size() ? "," : "") << "\n";
+				nlohmann::json seg;
+				
+				seg["index"] = i;
+				seg["offset"] = s.offset;
+				seg["size"] = s.size;
+				seg["type"] = s.type;
+				seg["typeName"] = SegTypeName(s.type);
+				seg["sourceActor"] = [&]() {
+					std::ostringstream os;
+					os << "0x" << std::hex << std::setw(8) << std::setfill('0') << s.source
+					   << " (" << std::dec << s.source << ")";
+					return os.str();
+				}();
+				seg["targetActor"] = [&]() {
+					std::ostringstream os;
+					os << "0x" << std::hex << std::setw(8) << std::setfill('0') << s.target
+					   << " (" << std::dec << s.target << ")";
+					return os.str();
+				}();
+				seg["padding"] = [&]() {
+					std::ostringstream os;
+					os << "0x" << std::hex << std::setw(4) << std::setfill('0') << s.pad;
+					return os.str();
+				}();
+				
+				// Calculate global offset for this segment
+				seg["segmentGlobalOffset"] = 0x28 + s.offset;
+				seg["segmentLocalOffset"] = [&]() {
+					std::ostringstream os;
+					os << "0x" << std::hex << std::setw(4) << std::setfill('0') << s.offset;
+					return os.str();
+				}();
+				
+				if (s.hasIpc) {
+					nlohmann::json ipc;
+					ipc["opcode"] = [&]() {
+						std::ostringstream os;
+						os << "0x" << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << s.opcode;
+						return os.str();
+					}();
+					
+					const char* opcodeName = LookupOpcodeName(s.opcode, hp.outgoing, resolvedConn);
+					ipc["opcodeName"] = (opcodeName && opcodeName[0] != '?') ? opcodeName : "Unknown";
+					ipc["serverId"] = s.serverId;
+					ipc["timestamp"] = s.ipcTimestamp;
+					
+					// Get decoded fields if available - this is the important part showing all decoded payload fields
+					const uint8_t* payloadPtr = v.data + s.offset + 0x20;
+					size_t payloadLen = (s.size > 0x20) ? (s.size - 0x20) : 0;
+					
+					nlohmann::json decodedPayload;
+					bool hasDecoded = false;
+					
+					// Use the packet decoder registry to decode the payload
+					reg.TryDecode(resolvedConn != 0xFFFF ? resolvedConn : 1, 
+								 hp.outgoing, s.opcode, payloadPtr, payloadLen,
+								 [&](const char* key, const std::string& value) {
+									 // Handle nested fields (e.g., "Position.X" becomes Position: {X: value})
+									 std::string keyStr(key);
+									 size_t dotPos = keyStr.find('.');
+									 if (dotPos != std::string::npos) {
+										 std::string parent = keyStr.substr(0, dotPos);
+										 std::string child = keyStr.substr(dotPos + 1);
+										 if (!decodedPayload.contains(parent)) {
+											 decodedPayload[parent] = nlohmann::json::object();
+										 }
+										 decodedPayload[parent][child] = value;
+									 } else {
+										 decodedPayload[key] = value;
+									 }
+									 hasDecoded = true;
+								 });
+					
+					if (hasDecoded) {
+						ipc["decodedPayload"] = decodedPayload;
+					}
+					
+					// Include hex preview of payload
+					if (payloadLen > 0) {
+						std::ostringstream hexStream;
+						hexStream << std::hex << std::uppercase << std::setfill('0');
+						size_t previewLen = std::min<size_t>(payloadLen, 256);
+						for (size_t j = 0; j < previewLen; ++j) {
+							hexStream << std::setw(2) << static_cast<int>(payloadPtr[j]);
+						}
+						if (payloadLen > 256) {
+							hexStream << "... (" << std::dec << payloadLen << " bytes total)";
+						}
+						ipc["payloadHex"] = hexStream.str();
+						ipc["payloadSize"] = payloadLen;
+					}
+					
+					seg["ipc"] = ipc;
+				}
+				
+				segments.push_back(seg);
 			}
-			f << "  ],\n";
-			f << "  \"payloadHex\": \"" << Hex(hp.buf.data(), hp.len) << "\"\n";
-			f << "}\n";
+			root["segments"] = segments;
+			
+			// Summary
+			nlohmann::json summary;
+			summary["totalSize"] = hp.len;
+			summary["segmentCount"] = segs.size();
+			
+			int ipcCount = 0;
+			nlohmann::json opcodeList = nlohmann::json::array();
+			for (const auto& s : segs) {
+				if (s.hasIpc) {
+					ipcCount++;
+					std::ostringstream os;
+					os << "0x" << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << s.opcode;
+					const char* name = LookupOpcodeName(s.opcode, hp.outgoing, resolvedConn);
+					if (name && name[0] != '?') {
+						os << " (" << name << ")";
+					}
+					opcodeList.push_back(os.str());
+				}
+			}
+			summary["ipcSegments"] = ipcCount;
+			summary["opcodes"] = opcodeList;
+			summary["compressed"] = P.isCompressed != 0;
+			summary["inflated"] = v.inflated;
+			root["summary"] = summary;
+			
+			// Full raw data hex (optional - can be large)
+			root["rawPayloadHex"] = Hex(hp.buf.data(), hp.len);
+			
+			// Write formatted JSON
+			std::ofstream f(p, std::ios::binary);
+			if (!f) return false;
+			
+			f << root.dump(2); // Pretty print with 2-space indent
 			return true;
-		}
-		catch (...) {
+			
+		} catch (const std::exception& e) {
+			Logger::Instance().Error("JSON export failed: " + std::string(e.what()));
 			return false;
 		}
 	}
 
 	static bool ExportToPcapAs(const HookPacket& hp, const std::string& filepath) {
+		namespace fs = std::filesystem;
 		try {
-			std::filesystem::path p(filepath);
+			fs::path p(filepath);
 			if (p.has_parent_path()) {
 				std::error_code ec;
-				std::filesystem::create_directories(p.parent_path(), ec);
+				fs::create_directories(p.parent_path(), ec);
 			}
-			auto tp = std::chrono::time_point_cast<std::chrono::microseconds>(hp.ts);
-			uint64_t micros = (uint64_t)tp.time_since_epoch().count();
-			uint32_t ts_sec = (uint32_t)(micros / 1000000ULL);
-			uint32_t ts_usec = (uint32_t)(micros % 1000000ULL);
 
+			// Prepare flow mapping and addressing
+			auto& flow = GetFlow(hp.connection_id);
+
+			// Build frame = Ethernet(14) + IPv4(20) + UDP(8) + payload
+			const std::vector<uint8_t> payload(hp.buf.begin(), hp.buf.begin() + hp.len);
+			const uint16_t udp_payload_len = static_cast<uint16_t>(payload.size());
+			const uint16_t udp_len = static_cast<uint16_t>(8 + udp_payload_len);
+			const uint16_t ip_len = static_cast<uint16_t>(20 + udp_len);
+
+			std::vector<uint8_t> frame;
+			frame.resize(14 + ip_len);
+			uint8_t* eth = frame.data();
+			uint8_t* ip = eth + 14;
+			uint8_t* udp = ip + 20;
+
+			// Ethernet
+			const uint8_t macClient[6] = { 0x02,0x00,0x00,0x00,0x00,0x01 };
+			const uint8_t macServer[6] = { 0x02,0x00,0x00,0x00,0x00,0x02 };
+			const bool clientToServer = hp.outgoing;
+			const uint8_t* srcMac = clientToServer ? macClient : macServer;
+			const uint8_t* dstMac = clientToServer ? macServer : macClient;
+			std::memcpy(eth + 0, dstMac, 6);
+			std::memcpy(eth + 6, srcMac, 6);
+			eth[12] = 0x08; eth[13] = 0x00; // EtherType IPv4
+
+			// IPv4 header
+			std::memset(ip, 0, 20);
+			ip[0] = 0x45; // Version=4, IHL=5 (20 bytes)
+			ip[1] = 0x00;
+			ip[2] = uint8_t(ip_len >> 8);
+			ip[3] = uint8_t(ip_len & 0xFF);
+			uint16_t ipId = flow.nextIpId++;
+			ip[4] = uint8_t(ipId >> 8);
+			ip[5] = uint8_t(ipId & 0xFF);
+			ip[6] = 0x40; // DF flag set
+			ip[7] = 0x00;
+			ip[8] = 64;   // TTL
+			ip[9] = 17;   // UDP
+
+			const uint8_t* srcIp = clientToServer ? flow.clientIp : flow.serverIp;
+			const uint8_t* dstIp = clientToServer ? flow.serverIp : flow.clientIp;
+			std::memcpy(ip + 12, srcIp, 4);
+			std::memcpy(ip + 16, dstIp, 4);
+
+			// IPv4 header checksum
+			uint16_t ipCsum = IpHeaderChecksum(ip, 20);
+			ip[10] = uint8_t(ipCsum >> 8);
+			ip[11] = uint8_t(ipCsum & 0xFF);
+
+			// UDP header
+			uint16_t srcPort = clientToServer ? flow.clientPort : flow.serverPort;
+		uint16_t dstPort = clientToServer ? flow.serverPort : flow.clientPort;
+			udp[0] = uint8_t(srcPort >> 8); udp[1] = uint8_t(srcPort & 0xFF);
+			udp[2] = uint8_t(dstPort >> 8); udp[3] = uint8_t(dstPort & 0xFF);
+			udp[4] = uint8_t(udp_len >> 8); udp[5] = uint8_t(udp_len & 0xFF);
+			udp[6] = 0; udp[7] = 0;
+
+			if (!payload.empty())
+				std::memcpy(udp + 8, payload.data(), payload.size());
+
+			// UDP checksum with IPv4 pseudo-header
+			uint16_t udpCsum = UdpChecksumIPv4(srcIp, dstIp, udp, udp_len);
+			udp[6] = uint8_t(udpCsum >> 8);
+			udp[7] = uint8_t(udpCsum & 0xFF);
+
+			// Open file and write PCAP Global Header (classic pcap, LINKTYPE_ETHERNET)
 			std::ofstream f(p, std::ios::binary);
 			if (!f) return false;
 
@@ -1813,68 +2089,21 @@ namespace {
 				int32_t  thiszone = 0;
 				uint32_t sigfigs = 0;
 				uint32_t snaplen = 0x00040000;
-				uint32_t network = 1;
+				uint32_t network = 1; // LINKTYPE_ETHERNET
 			} gh;
 			f.write(reinterpret_cast<const char*>(&gh), sizeof(gh));
 
-			const std::vector<uint8_t> payload(hp.buf.begin(), hp.buf.begin() + hp.len);
-
-			const uint16_t udp_payload_len = (uint16_t)payload.size();
-			const uint16_t udp_len = 8 + udp_payload_len;
-			const uint16_t ip_len = 20 + udp_len;
-			std::vector<uint8_t> frame;
-			frame.resize(14 + ip_len);
-			uint8_t* eth = frame.data();
-
-			uint8_t dst[6] = { 0x02,0,0,0,0,0x02 };
-			uint8_t src[6] = { 0x02,0,0,0,0,0x01 };
-			if (!hp.outgoing) std::swap_ranges(dst, dst + 6, src);
-			memcpy(eth, dst, 6);
-			memcpy(eth + 6, src, 6);
-			eth[12] = 0x08; eth[13] = 0x00; // IPv4
-
-			auto ip_checksum = [](const uint8_t* buf, size_t len) {
-				uint32_t sum = 0;
-				for (size_t i = 0; i + 1 < len; i += 2)
-					sum += (buf[i] << 8) | buf[i + 1];
-				if (len & 1) sum += (buf[len - 1] << 8);
-				while (sum >> 16) sum = (sum & 0xFFFF) + (sum >> 16);
-				return (uint16_t)(~sum);
-				};
-
-			uint8_t* ip = eth + 14;
-			memset(ip, 0, 20);
-			ip[0] = 0x45;
-			ip[2] = (uint8_t)(ip_len >> 8);
-			ip[3] = (uint8_t)ip_len;
-			ip[6] = 0x40;
-			ip[8] = 64;
-			ip[9] = 17; // UDP
-			uint8_t saddr[4] = { 10,0,0,1 };
-			uint8_t daddr[4] = { 10,0,0,2 };
-			if (!hp.outgoing) std::swap_ranges(saddr, saddr + 4, daddr);
-			memcpy(ip + 12, saddr, 4);
-			memcpy(ip + 16, daddr, 4);
-			uint16_t csum = ip_checksum(ip, 20);
-			ip[10] = (uint8_t)(csum >> 8);
-			ip[11] = (uint8_t)csum;
-
-			uint8_t* udp = ip + 20;
-			uint16_t sport = hp.outgoing ? 55001 : 55002;
-			uint16_t dport = hp.outgoing ? 55002 : 55001;
-			udp[0] = (uint8_t)(sport >> 8); udp[1] = (uint8_t)sport;
-			udp[2] = (uint8_t)(dport >> 8); udp[3] = (uint8_t)dport;
-			udp[4] = (uint8_t)(udp_len >> 8); udp[5] = (uint8_t)udp_len;
-			udp[6] = udp[7] = 0; // no checksum
-			memcpy(udp + 8, payload.data(), payload.size());
-
+			// Per-packet header
+			auto tp = std::chrono::time_point_cast<std::chrono::microseconds>(hp.ts);
+			uint64_t micros = static_cast<uint64_t>(tp.time_since_epoch().count());
+			uint32_t ts_sec = static_cast<uint32_t>(micros / 1000000ULL);
+			uint32_t ts_usec = static_cast<uint32_t>(micros % 1000000ULL);
 			struct PcapPacketHeader {
 				uint32_t ts_sec;
 				uint32_t ts_usec;
 				uint32_t incl_len;
 				uint32_t orig_len;
-			} ph{ ts_sec, ts_usec, (uint32_t)frame.size(), (uint32_t)frame.size() };
-
+			} ph{ ts_sec, ts_usec, static_cast<uint32_t>(frame.size()), static_cast<uint32_t>(frame.size()) };
 			f.write(reinterpret_cast<const char*>(&ph), sizeof(ph));
 			f.write(reinterpret_cast<const char*>(frame.data()), frame.size());
 			return true;

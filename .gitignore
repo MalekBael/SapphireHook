@@ -400,3 +400,12 @@ CppProperties.json
 /notes/prompts.txt
 /notes/PseudocodeGenerator.md
 /notes/suspected_opcodes.txt
+/docs/BACKLOG.md
+/docs/MAPPING_GUIDE.md
+/docs/MIGRATION_PROGRESS.md
+/docs/PACKET_MIGRATION_GUIDE.md
+/docs/QUEST_OPCODE_STATUS.md
+/docs/STRUCT_OPCODE_VERIFICATION.md
+/tools/list_missing_decoders.py
+/tools/unmigrated.txt
+*.txt

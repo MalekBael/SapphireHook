@@ -129,7 +129,6 @@ void GMCommandsModule::RenderWindow()
         ImGui::TextDisabled("GM commands are sent via Packet Injection.");
         ImGui::Separator();
 
-        // Tab bar for different modes
         if (ImGui::BeginTabBar("GMCommandTabs"))
         {
             // Known Commands Tab
@@ -137,7 +136,6 @@ void GMCommandsModule::RenderWindow()
             {
                 DrawHintBox();
 
-                // Combo preview is blank until a selection is made
                 const bool hasItems = !GMCommands::kList.empty();
                 const char* currentPreview =
                     (hasItems && m_selectedIndex >= 0 && m_selectedIndex < (int)GMCommands::kList.size())
@@ -167,13 +165,11 @@ void GMCommandsModule::RenderWindow()
                     ImGui::EndCombo();
                 }
 
-                // If a command is selected, show inline syntax help
                 if (m_selectedIndex >= 0 && m_selectedIndex < (int)GMCommands::kList.size())
                 {
                     const auto& entry = GMCommands::kList[m_selectedIndex];
                     ImGui::Spacing();
                     ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Syntax:");
-                    // Show only the argument portion (prefix implied by selection)
                     ImGui::TextWrapped("%s", (entry.argsHint && entry.argsHint[0] != '\0') ? entry.argsHint : "<no args>");
                     if (entry.description && entry.description[0] != '\0')
                     {
@@ -183,27 +179,27 @@ void GMCommandsModule::RenderWindow()
 
                 ImGui::Separator();
 
-                // Shared args/target block (Command ID is read-only here)
                 DrawArgsSection("##known", true, m_commandId, m_arg0, m_arg1, m_arg2, m_arg3, m_targetId);
 
                 ImGui::Spacing();
 
-                // Disable Send until a command is selected
                 const bool canSend = (m_selectedIndex >= 0 && m_commandId != 0);
                 if (!canSend) ImGui::BeginDisabled(true);
                 if (ImGui::Button("Send", ImVec2(140, 28)))
                 {
-                    const uint32_t cmd = static_cast<uint32_t>(m_commandId);
+                    const auto& entry = GMCommands::kList[m_selectedIndex];
+                    const uint32_t cmd = static_cast<uint32_t>(entry.id);
                     const uint32_t a0  = static_cast<uint32_t>(m_arg0);
                     const uint32_t a1  = static_cast<uint32_t>(m_arg1);
                     const uint32_t a2  = static_cast<uint32_t>(m_arg2);
                     const uint32_t a3  = static_cast<uint32_t>(m_arg3);
                     const uint64_t tgt = static_cast<uint64_t>(m_targetId);
+                    const uint16_t opcode = GMCommands::GetIPCOpcode(entry.level);
 
-                    printf("[GMCommandsModule] SendGMCommand id=%u a0=%u a1=%u a2=%u a3=%u target=%llu\n",
-                           cmd, a0, a1, a2, a3, static_cast<unsigned long long>(tgt));
+                    printf("[GMCommandsModule] SendGMCommandEx level=%d opcode=0x%04X id=%u a0=%u a1=%u a2=%u a3=%u target=%llu\n",
+                           static_cast<int>(entry.level), opcode, cmd, a0, a1, a2, a3, static_cast<unsigned long long>(tgt));
 
-                    if (CommandInterface::SendGMCommand(cmd, a0, a1, a2, a3, tgt))
+                    if (CommandInterface::SendGMCommandEx(opcode, cmd, a0, a1, a2, a3, tgt))
                         printf("[GMCommandsModule] OK\n");
                     else
                         printf("[GMCommandsModule] FAILED\n");
@@ -211,7 +207,7 @@ void GMCommandsModule::RenderWindow()
                 if (!canSend) ImGui::EndDisabled();
 
                 ImGui::Separator();
-                ImGui::TextDisabled("Source: compiled command list in GMCommandList.h (enum + table).");
+                ImGui::TextDisabled("Source: compiled command list in GMCommandList.h (GM1/GM2 split).");
 
                 ImGui::EndTabItem();
             }
@@ -220,18 +216,15 @@ void GMCommandsModule::RenderWindow()
             if (ImGui::BeginTabItem("Discovery Mode"))
             {
                 DrawDiscoveryHintBox();
-
                 ImGui::Spacing();
                 ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.3f, 1.0f), "Raw Command Execution");
                 ImGui::TextDisabled("Enter any command ID to test unknown GM commands");
                 ImGui::Separator();
 
-                // Shared args/target block (Command ID is editable here)
                 DrawArgsSection("##discovery", false, m_discoveryCommandId, m_discoveryArg0, m_discoveryArg1, m_discoveryArg2, m_discoveryArg3, m_discoveryTargetId);
 
                 ImGui::Spacing();
 
-                // Send buttons (factorized capture)
                 auto sendWith = [&](uint16_t opcode, const char* desc)
                 {
                     const uint32_t cmd = static_cast<uint32_t>(m_discoveryCommandId);
@@ -254,7 +247,6 @@ void GMCommandsModule::RenderWindow()
                     sendWith(0x0198, "GM2");
                 }
 
-                // Add the "Send Both" button
                 ImGui::Spacing();
                 if (ImGui::Button("Send Both GM1 & GM2", ImVec2(200, 28)))
                 {
@@ -262,14 +254,13 @@ void GMCommandsModule::RenderWindow()
                     printf("[GMCommandsModule] DISCOVERY: Sending command %u as both GM1 and GM2\n", cmd);
 
                     sendWith(0x0197, "GM1");
-                    Sleep(100); // small spacing
+                    Sleep(100);
                     sendWith(0x0198, "GM2");
                 }
 
                 ImGui::Spacing();
                 ImGui::Separator();
 
-                // Quick reset button and info
                 if (ImGui::Button("Reset Args to 0"))
                 {
                     m_discoveryArg0 = 0;
@@ -298,9 +289,7 @@ void GMCommandsModule::SendGMCommandWithOpcode(uint32_t commandId, uint32_t arg0
     printf("[GMCommandsModule] DISCOVERY Send%s: id=%u a0=%u a1=%u a2=%u a3=%u target=%llu opcode=0x%04X\n",
            opcodeDesc, commandId, arg0, arg1, arg2, arg3, static_cast<unsigned long long>(targetId), opcode);
 
-    // We need to modify CommandInterface::SendGMCommand to accept an opcode parameter
-    // For now, we'll call the existing method but log which opcode we intended
-    if (CommandInterface::SendGMCommand(commandId, arg0, arg1, arg2, arg3, targetId))
+    if (CommandInterface::SendGMCommandEx(opcode, commandId, arg0, arg1, arg2, arg3, targetId))
         printf("[GMCommandsModule] DISCOVERY %s OK\n", opcodeDesc);
     else
         printf("[GMCommandsModule] DISCOVERY %s FAILED\n", opcodeDesc);

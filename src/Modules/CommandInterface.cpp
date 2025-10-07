@@ -5,12 +5,11 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 
-// Winsock2 must be before Windows.h
 #include <winsock2.h>
 #include <ws2tcpip.h>
 
-#include "../Core/PacketInjector.h"
 #include "../Analysis/PatternScanner.h"
+#include "../Core/PacketInjector.h"
 
 #include "../Modules/CommandInterface.h"
 #include <algorithm>
@@ -21,22 +20,14 @@
 #include <sstream>
 #include <string>
 #include <vector>
-
-// Add the missing include at the top with other includes
-#include <tlhelp32.h>   // Add this line for CreateToolhelp32Snapshot, PROCESSENTRY32, etc.
-
-// Windows headers AFTER winsock2
-#include <Windows.h>
+#include <tlhelp32.h>          
 #include <Psapi.h>
-
+#include <Windows.h>
 #pragma comment(lib, "Psapi.lib")
 #pragma comment(lib, "Ws2_32.lib")
-#pragma comment(lib, "User32.lib")  // For FindWindow, SetForegroundWindow
-
-// Link with Psapi.lib
+#pragma comment(lib, "User32.lib")     
 #pragma comment(lib, "Psapi.lib")
 
-// Forward declarations for local helpers
 namespace SapphireHook { uint32_t GetLearnedLocalActorId(); }
 
 namespace {
@@ -44,16 +35,11 @@ namespace {
         float x, y, z;
     };
 
-    // Get player position if available
     static Position3* GetLocalPlayerPosition()
     {
-        // For now, return nullptr since we don't have a way to get player position
-        // This would require finding the player object in memory
-        // In the future, this could be implemented by pattern scanning for player data
         return nullptr;
     }
 
-    // Prefer learned id; fallback to env; last resort 0x200001
     static uint32_t GetLocalEntityId()
     {
         uint32_t learned = SapphireHook::GetLearnedLocalActorId();
@@ -83,7 +69,6 @@ namespace {
     }
 }
 
-// Use the CORRECT Sapphire packet structures
 namespace SapphireHook {
     struct FFXIVARR_PACKET_HEADER
     {
@@ -209,7 +194,6 @@ namespace SapphireHook {
     };
 }
 
-// Static member definitions
 CommandInterface::ChatCommand_t CommandInterface::s_chatCommandFunc = nullptr;
 CommandInterface::SendPacket_t CommandInterface::s_sendPacketFunc = nullptr;
 CommandInterface::SendPacketMethod_t CommandInterface::s_sendPacketMethod = nullptr;
@@ -222,22 +206,19 @@ bool CommandInterface::Initialize()
     bool foundNetwork = FindNetworkFunctions();
     bool foundConnection = FindGameConnection();
 
-    // Hook WSASend to learn sockets
     bool wsaHooked = SapphireHook::PacketInjector::Initialize();
 
     if (wsaHooked)
     {
         std::printf("[CommandInterface] WSASend hook installed successfully\n");
 
-        // DEBUG: Check if we can access the socket variables
         std::printf("[CommandInterface] Initial socket status:\n");
         std::printf("[CommandInterface] - Zone socket: 0x%llx\n",
             static_cast<unsigned long long>(SapphireHook::PacketInjector::s_zoneSocket));
         std::printf("[CommandInterface] - Chat socket: 0x%llx\n",
             static_cast<unsigned long long>(SapphireHook::PacketInjector::s_chatSocket));
 
-        // Wait for some traffic to potentially flow
-        Sleep(2000); // Wait 2 seconds for login traffic
+        Sleep(2000);       
 
         std::printf("[CommandInterface] After 2 seconds:\n");
         std::printf("[CommandInterface] - Zone socket: 0x%llx\n",
@@ -258,27 +239,23 @@ bool CommandInterface::Initialize()
         foundConnection ? "OK" : "FAIL",
         wsaHooked ? "OK" : "FAIL");
 
-    // Consider it successful if we at least have WSASend hooked
     return foundCommands || foundNetwork || foundConnection || wsaHooked;
 }
 
-// Helper for RIP-relative target compute
 static inline uintptr_t RipTarget(uintptr_t instr, int relOffset)
 {
     int32_t disp = *reinterpret_cast<int32_t*>(instr + relOffset);
-    uintptr_t next = instr + relOffset + 4; // address immediately after disp32
+    uintptr_t next = instr + relOffset + 4;     
     return static_cast<uintptr_t>(next + disp);
 }
 
 void CommandInterface::TryResolveNetworkThisFromSend(uintptr_t sendAddr)
 {
-    // Scan first 64 bytes for common RIP-relative loads to a global pointer
     const uint8_t* p = reinterpret_cast<const uint8_t*>(sendAddr);
     bool logged = false;
 
     for (int i = 0; i < 64; ++i)
     {
-        // mov rcx, [rip+rel32]
         if (p[i] == 0x48 && p[i + 1] == 0x8B && p[i + 2] == 0x0D)
         {
             uintptr_t tgt = RipTarget(sendAddr + i, 3);
@@ -296,7 +273,6 @@ void CommandInterface::TryResolveNetworkThisFromSend(uintptr_t sendAddr)
                 if (candidate)
                 {
                     s_gameConnectionPtr = candidate;
-                    // We can reuse the same raw address for a member-call; the function body is the same entry
                     s_sendPacketMethod = reinterpret_cast<SendPacketMethod_t>(sendAddr);
                     std::printf("[CommandInterface] Derived network 'this' (mov rcx,[rip+]) at 0x%llx -> 0x%llx\n",
                         static_cast<unsigned long long>(tgt),
@@ -305,7 +281,6 @@ void CommandInterface::TryResolveNetworkThisFromSend(uintptr_t sendAddr)
                 }
             }
         }
-        // lea rcx, [rip+rel32]
         if (p[i] == 0x48 && p[i + 1] == 0x8D && p[i + 2] == 0x0D)
         {
             uintptr_t tgt = RipTarget(sendAddr + i, 3);
@@ -318,7 +293,6 @@ void CommandInterface::TryResolveNetworkThisFromSend(uintptr_t sendAddr)
                 return;
             }
         }
-        // mov rax, [rip+rel32] then mov rcx, [rax+imm] (two-step global)
         if (p[i] == 0x48 && p[i + 1] == 0x8B && p[i + 2] == 0x05)
         {
             uintptr_t tgt1 = RipTarget(sendAddr + i, 3);
@@ -328,12 +302,10 @@ void CommandInterface::TryResolveNetworkThisFromSend(uintptr_t sendAddr)
 
             if (basePtr)
             {
-                // Look forward a bit for 'mov rcx, [rax+imm]'
                 for (int k = i + 7; k < i + 32 && k + 6 < 64; ++k)
                 {
-                    if (p[k] == 0x48 && p[k + 1] == 0x8B && (p[k + 2] & 0xF8) == 0x48 /* [RAX+disp32] */ && p[k + 3] == 0x88)
+                    if (p[k] == 0x48 && p[k + 1] == 0x8B && (p[k + 2] & 0xF8) == 0x48    && p[k + 3] == 0x88)
                     {
-                        // Heuristic; skip — patterns vary too much. We'll just treat basePtr as candidate.
                         s_gameConnectionPtr = basePtr;
                         s_sendPacketMethod = reinterpret_cast<SendPacketMethod_t>(sendAddr);
                         std::printf("[CommandInterface] Derived network 'this' (mov rax,[rip+]) base=0x%llx\n",
@@ -341,7 +313,6 @@ void CommandInterface::TryResolveNetworkThisFromSend(uintptr_t sendAddr)
                         return;
                     }
                 }
-                // Even if we didn't see the second mov, basePtr is still a plausible singleton.
                 s_gameConnectionPtr = basePtr;
                 s_sendPacketMethod = reinterpret_cast<SendPacketMethod_t>(sendAddr);
                 std::printf("[CommandInterface] Derived network 'this' (mov rax,[rip+]) base=0x%llx\n",
@@ -355,7 +326,6 @@ void CommandInterface::TryResolveNetworkThisFromSend(uintptr_t sendAddr)
         std::printf("[CommandInterface] Could not derive network 'this' from send function prologue\n");
 }
 
-// ADD THE DebugSocketLearning FUNCTION HERE - BEFORE SendRawPacket()
 static void DebugSocketLearning()
 {
     std::printf("[CommandInterface] === SOCKET LEARNING DEBUG ===\n");
@@ -366,7 +336,6 @@ static void DebugSocketLearning()
         static_cast<unsigned long long>(SapphireHook::PacketInjector::s_chatSocket),
         (SapphireHook::PacketInjector::s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET)) ? "INVALID" : "VALID");
 
-    // Check if INVALID_SOCKET value is what we expect
     std::printf("[CommandInterface] INVALID_SOCKET value: 0x%llx\n",
         static_cast<unsigned long long>(static_cast<std::uintptr_t>(INVALID_SOCKET)));
 }
@@ -384,10 +353,8 @@ bool CommandInterface::SendRawPacket(const std::vector<uint8_t>& buffer)
     }
     std::printf("\n");
 
-    // Debug socket learning status
     DebugSocketLearning();
 
-    // Path 1: free function
     if (s_sendPacketFunc)
     {
         bool ok = s_sendPacketFunc(const_cast<uint8_t*>(buffer.data()), buffer.size());
@@ -395,7 +362,6 @@ bool CommandInterface::SendRawPacket(const std::vector<uint8_t>& buffer)
         if (ok) return true;
     }
 
-    // Path 2: member function with derived 'this'
     if (s_sendPacketMethod && s_gameConnectionPtr)
     {
         bool ok = false;
@@ -413,7 +379,6 @@ bool CommandInterface::SendRawPacket(const std::vector<uint8_t>& buffer)
         if (ok) return true;
     }
 
-    // Path 3: WSASend injector fallback - ALWAYS try this
     std::printf("[CommandInterface] Trying PacketInjector::Send...\n");
     if (SapphireHook::PacketInjector::Send(buffer.data(), buffer.size()))
     {
@@ -468,7 +433,6 @@ bool CommandInterface::TryParseAsGMCommand(const char* command)
         c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     }
 
-    // FIX: properly closed character literal and condition
     if (!cmdStr.empty() && cmdStr[0] == '!')
         cmdStr = cmdStr.substr(1);
 
@@ -536,19 +500,16 @@ bool CommandInterface::SendDebugCommand(const char* command)
 {
     std::printf("[CommandInterface] Attempting to send debug command: %s\n", command ? command : "");
 
-    // Normalize chat string
     std::string cmd = command ? command : "";
     auto beginsWith = [](const std::string& s, char c) { return !s.empty() && s[0] == c; };
     const std::string chatCommand = (beginsWith(cmd, '!') || beginsWith(cmd, '/')) ? cmd : "!" + cmd;
 
-    // Try chat path (in-process or packet)
     if (SendChatMessage(chatCommand.c_str(), 0))
     {
         std::printf("[CommandInterface] Sent command via chat path: %s\n", chatCommand.c_str());
         return true;
     }
 
-    // As a last resort, try GM parse (only for known-good commands)
     if (TryParseAsGMCommand(command))
     {
         std::printf("[CommandInterface] Sent command via GM command parsing: %s\n", command);
@@ -559,24 +520,20 @@ bool CommandInterface::SendDebugCommand(const char* command)
     return false;
 }
 
-// Build numeric ClientTrigger (0x0191) with job id when applicable; set source_actor
 bool CommandInterface::SendDebugCommandPacket(const char* command)
 {
     if (!command || !*command) return false;
     std::printf("[CommandInterface] SendDebugCommandPacket: %s\n", command);
 
-    // normalize and tokenize
     std::string cmd = command;
     if (!cmd.empty() && (cmd[0] == '!' || cmd[0] == '/')) cmd.erase(0, 1);
     std::vector<std::string> parts;
     { std::stringstream ss(cmd); std::string t; while (ss >> t) parts.push_back(t); }
 
-    // Map to Id/Args - DO NOT parse the numeric parameter
     uint32_t id = 0, a0 = 0, a1 = 0, a2 = 0, a3 = 0;
     if (parts.size() >= 3 && parts[0] == "set" && (parts[1] == "classjob" || parts[1] == "job"))
     {
-        id = 0x01BE; // matches your logs
-        // DO NOT set a0 to the job ID - it should remain 0
+        id = 0x01BE;    
         a0 = 0;
     }
 
@@ -584,7 +541,6 @@ bool CommandInterface::SendDebugCommandPacket(const char* command)
     const uint64_t ts = GetTickCount64();
     const uint32_t actorId = GetLocalEntityId();
 
-    // Header
     packet.header.timestamp = ts;
     packet.header.connectionType = 1;
     packet.header.count = 1;
@@ -595,18 +551,15 @@ bool CommandInterface::SendDebugCommandPacket(const char* command)
 
     packet.header.size = total;
 
-    // Segment header with actor id
     packet.segmentHeader.size = segSize;
     packet.segmentHeader.source_actor = actorId;
     packet.segmentHeader.target_actor = 0;
     packet.segmentHeader.type = 3;
 
-    // IPC header (0x0191)
     packet.ipcHeader.reserved = 0x14;
     packet.ipcHeader.type = 0x0191;
     packet.ipcHeader.timestamp = static_cast<uint32_t>(ts);
 
-    // Payload
     packet.data.Id = id;
     packet.data.Arg0 = a0; packet.data.Arg1 = a1; packet.data.Arg2 = a2; packet.data.Arg3 = a3;
     packet.data.Target = 0;
@@ -626,7 +579,6 @@ bool CommandInterface::SendChatMessage(const char* message, uint8_t chatType)
         return false;
     }
 
-    // If an in-process chat function is resolved, use it first.
     if (s_chatCommandFunc)
     {
         try
@@ -641,24 +593,19 @@ bool CommandInterface::SendChatMessage(const char* message, uint8_t chatType)
         }
     }
 
-    // For debug commands starting with '!', we need to send BOTH packets like manual typing
     if (message && message[0] == '!')
     {
         std::printf("[CommandInterface] Debug command detected, sending ChatHandler then 0x0191\n");
 
-        // First, send the chat message via ChatHandler
-        // Use Say channel (0x0A) for commands - this is what the server monitors
-        if (!SendChatPacket(message, static_cast<uint8_t>(10))) // ChatType::Say = 10
+        if (!SendChatPacket(message, static_cast<uint8_t>(10)))    
         {
             std::printf("[CommandInterface] Failed to send ChatHandler packet\n");
             return false;
         }
 
-        // Give the server time to process the chat message
         Sleep(50);
 
-        // Then send the ClientTrigger packet (0x0191)
-        std::string command = message + 1; // skip '!'
+        std::string command = message + 1;   
         if (!SendDebugCommandPacket(command.c_str()))
         {
             std::printf("[CommandInterface] Failed to send Command packet\n");
@@ -669,7 +616,6 @@ bool CommandInterface::SendChatMessage(const char* message, uint8_t chatType)
         return true;
     }
 
-    // Regular chat message - just send ChatHandler
     return SendChatPacket(message, chatType);
 }
 
@@ -683,7 +629,6 @@ bool CommandInterface::SendChatPacket(const char* message, uint8_t chatType)
 
     std::printf("[CommandInterface] Attempting to send chat packet: %s (type: %u)\n", message, chatType);
 
-    // Build the chat packet
     struct FFXIVIpcChatHandler
     {
         uint32_t clientTimeValue;
@@ -700,25 +645,22 @@ bool CommandInterface::SendChatPacket(const char* message, uint8_t chatType)
     chatPacket.chatType = static_cast<uint16_t>(chatType);
     strncpy_s(chatPacket.message, sizeof(chatPacket.message), message, _TRUNCATE);
 
-    // Get player position if available
     auto pos = GetLocalPlayerPosition();
     if (pos)
     {
         chatPacket.pos[0] = pos->x;
         chatPacket.pos[1] = pos->y;
         chatPacket.pos[2] = pos->z;
-        chatPacket.dir = 0.0f; // We don't have direction data yet
+        chatPacket.dir = 0.0f;       
     }
     else
     {
-        // Default position and direction
         chatPacket.pos[0] = 0.0f;
         chatPacket.pos[1] = 0.0f;
         chatPacket.pos[2] = 0.0f;
         chatPacket.dir = 0.0f;
     }
 
-    // Build complete packet with headers
     const size_t chatDataSize = sizeof(FFXIVIpcChatHandler);
     const size_t ipcSize = sizeof(SapphireHook::FFXIVARR_IPC_HEADER) + chatDataSize;
     const size_t segmentSize = sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER) + ipcSize;
@@ -730,7 +672,6 @@ bool CommandInterface::SendChatPacket(const char* message, uint8_t chatType)
     auto* ipc = reinterpret_cast<SapphireHook::FFXIVARR_IPC_HEADER*>(buffer.data() + sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER));
     auto* data = buffer.data() + sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER) + sizeof(SapphireHook::FFXIVARR_IPC_HEADER);
 
-    // Fill headers
     header->timestamp = GetTickCount64();
     header->size = static_cast<uint32_t>(totalSize);
     header->connectionType = 0;
@@ -742,105 +683,43 @@ bool CommandInterface::SendChatPacket(const char* message, uint8_t chatType)
     segment->type = 3;
 
     ipc->reserved = 0x14;
-    ipc->type = 0x0067; // ChatHandler
+    ipc->type = 0x0067;  
     ipc->timestamp = static_cast<uint32_t>(GetTickCount64());
 
-    // Copy chat data
     memcpy(data, &chatPacket, chatDataSize);
 
     return SendRawPacket(buffer);
 }
 
-bool CommandInterface::SendGMCommandWithName(uint32_t commandId, uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3, const char* targetName)
-{
-    // If you have a name->ID resolver, use it here to fill 'target'. For now, ignore and send target=0.
-    (void)targetName;
-    return SendGMCommand(commandId, arg0, arg1, arg2, arg3, 0);
-}
-
-// Optional: keep as a stub unless you use it.
-bool CommandInterface::SimulateCommandInput(const char* command)
-{
-    std::printf("[CommandInterface] SimulateCommandInput not implemented. Command: %s\n", command ? command : "");
-    return false;
-}
-
-// =====================
-// Missing implementations
-// =====================
-
-bool CommandInterface::FindCommandFunctions()
-{
-    // If you have a signature for the in-process chat function, resolve it here and assign s_chatCommandFunc.
-    // For now, log and return true so Initialize() can proceed.
-    std::printf("[CommandInterface] Command function search - focusing on packet structure\n");
-    return true;
-}
-
-bool CommandInterface::FindNetworkFunctions()
-{
-    size_t moduleSize = 0;
-    uintptr_t moduleBase = GetModuleBaseAddress(nullptr, moduleSize);
-    if (!moduleBase)
-    {
-        std::printf("[CommandInterface] Failed to get module base address\n");
-        return false;
-    }
-
-    std::printf("[CommandInterface] Scanning for network functions in module at 0x%llx (size: 0x%llx)...\n",
-        static_cast<unsigned long long>(moduleBase),
-        static_cast<unsigned long long>(moduleSize));
-
-    // WSASend is already hooked via PacketInjector, so we don't need internal patterns
-    std::printf("[CommandInterface] Skipping unreliable pattern scanning - using WSASend hook instead\n");
-
-    // Try to find WSASend directly in the IAT for reference
-    auto wsaSendAddr = GetProcAddress(GetModuleHandleA("ws2_32.dll"), "WSASend");
-    if (wsaSendAddr)
-    {
-        std::printf("[CommandInterface] WSASend found at: 0x%llx\n",
-            static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(wsaSendAddr)));
-    }
-
-    std::printf("[CommandInterface] Network function search completed - relying on WSASend injection\n");
-    return true; // Return true since PacketInjector provides network functionality
-}
-
-bool CommandInterface::FindGameConnection()
-{
-    // If you can pattern scan a network singleton, do it here and set s_gameConnectionPtr.
-    std::printf("[CommandInterface] Game connection search - focusing on packet structure\n");
-    return true;
-}
-
 bool CommandInterface::SendGMCommand(uint32_t commandId, uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3, uint64_t target)
 {
-    std::printf("[CommandInterface] Sending GM Command: ID=0x%X, Args=(%u,%u,%u,%u), Target=0x%llX\n",
-        commandId, arg0, arg1, arg2, arg3, static_cast<unsigned long long>(target));
+    return SendGMCommandEx(0x0197   , commandId, arg0, arg1, arg2, arg3, target);
+}
+
+bool CommandInterface::SendGMCommandEx(uint16_t ipcOpcode, uint32_t commandId, uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3, uint64_t target)
+{
+    std::printf("[CommandInterface] Sending GM Command (EX): OPCODE=0x%X ID=0x%X, Args=(%u,%u,%u,%u), Target=0x%llX\n",
+        ipcOpcode, commandId, arg0, arg1, arg2, arg3, static_cast<unsigned long long>(target));
 
     SapphireHook::CompleteGMPacket packet = {};
-    uint64_t timestamp = GetTickCount64();
+    const uint64_t timestamp = GetTickCount64();
 
-    // Fill headers
     packet.header.timestamp = timestamp;
-    packet.header.connectionType = 1; // Zone
+    packet.header.connectionType = 1;  
     packet.header.count = 1;
 
-    uint32_t dataSize = sizeof(SapphireHook::FFXIVARR_IPC_HEADER) + sizeof(SapphireHook::GmCommandPacket);
-    uint32_t segmentSize = sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER) + dataSize;
-    uint32_t totalSize = sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + segmentSize;
+    const uint32_t dataSize = sizeof(SapphireHook::FFXIVARR_IPC_HEADER) + sizeof(SapphireHook::GmCommandPacket);
+    const uint32_t segmentSize = sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER) + dataSize;
+    const uint32_t totalSize = sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + segmentSize;
 
     packet.header.size = totalSize;
     packet.segmentHeader.size = segmentSize;
-
-    // NEW: set source_actor as the local entity id (helps server identify sender)
     packet.segmentHeader.source_actor = GetLocalEntityId();
-
     packet.segmentHeader.target_actor = static_cast<uint32_t>(target);
-    packet.segmentHeader.type = 3; // IPC
+    packet.segmentHeader.type = 3;  
 
     packet.ipcHeader.reserved = 0x14;
-    packet.ipcHeader.type = 0x0197; // GMCommand from ClientIpcs.h
+    packet.ipcHeader.type = ipcOpcode;     
     packet.ipcHeader.timestamp = static_cast<uint32_t>(timestamp);
 
     packet.gmData.Id = commandId;
@@ -853,4 +732,30 @@ bool CommandInterface::SendGMCommand(uint32_t commandId, uint32_t arg0, uint32_t
     std::vector<uint8_t> buffer(sizeof(packet));
     std::memcpy(buffer.data(), &packet, sizeof(packet));
     return SendRawPacket(buffer);
+}
+
+bool CommandInterface::FindCommandFunctions()
+{
+    // Intentionally not resolved yet; rely on packet injection path.
+    s_chatCommandFunc = nullptr;
+    std::printf("[CommandInterface] FindCommandFunctions: not implemented; using packet path only\n");
+    return false;
+}
+
+bool CommandInterface::FindNetworkFunctions()
+{
+    // Not resolved; leave pointers null and let WSASend injector handle sending.
+    s_sendPacketFunc = nullptr;
+    s_sendPacketMethod = nullptr;
+    std::printf("[CommandInterface] FindNetworkFunctions: not implemented; using WSASend injector\n");
+    return false;
+}
+
+bool CommandInterface::FindGameConnection()
+{
+    // Not resolved; TryResolveNetworkThisFromSend will attempt derivation if available.
+    s_gameConnection = nullptr;
+    s_gameConnectionPtr = 0;
+    std::printf("[CommandInterface] FindGameConnection: not implemented; no game connection singleton\n");
+    return false;
 }
