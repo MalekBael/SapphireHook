@@ -10,6 +10,7 @@
 #include <memory>
 #include <future>
 #include <unordered_map>
+#include <unordered_set>  // <-- add this
 
 #include "FunctionDatabase.h"
 #include "SignatureDatabase.h"
@@ -144,15 +145,21 @@ public:
     static __declspec(noinline) void __stdcall FunctionHookCallback(uintptr_t returnAddress, uintptr_t functionAddress);
 
     void StartMemoryScan(const std::vector<std::string>& targetStrings,
-                         bool scanPrologues,
-                         bool scanStrings);
+        bool scanPrologues,
+        bool scanStrings);
     void UpdateMemoryScanAsync();
+
+    // Live call tracing
+    void StartLiveCallTrace();
+    void StopLiveCallTrace();
+    bool IsLiveTracing() const { return m_liveTracing; }
+    void RenderLiveTraceWindow();
 
 private:
     void RebuildAnchorStringMatches();
     void SelectFunctionForAnalysis(uintptr_t address);
     std::string GenerateFunctionAnalysis(uintptr_t address,
-                                         const std::vector<std::string>* tags = nullptr);
+        const std::vector<std::string>* tags = nullptr);
     std::string GetPrologueBytes(uintptr_t address, size_t maxLen = 16);
     bool DisassembleSnippet(uintptr_t address, std::string& out, int maxInstr = 12, size_t maxBytes = 96);
     void BuildMultiDiff();
@@ -187,45 +194,35 @@ private:
     bool m_enableRealHooking;
 
     struct MemoryScanState {
-        // Phase control
         bool running = false;
         bool cancelled = false;
         bool scanPrologues = false;
         bool scanStrings = false;
-
-        // NEW flags / state
         bool anchorsRebuilt = false;
         bool prologueCompleted = false;
         bool stringCompleted = false;
-        bool uiFreeze = false;        // freeze UI updates (virtualized list)
-        bool rowsCacheDirty = false;  // row cache needs rebuild
+        bool uiFreeze = false;
+        bool rowsCacheDirty = false;
+        uint64_t lastStatusBuildTick = 0;
 
-        uint64_t lastStatusBuildTick = 0; // throttled status text rebuild
-
-        // Async work
         std::future<std::vector<uintptr_t>> prologueFuture;
         std::future<std::vector<SapphireHook::StringScanResult>> stringFuture;
 
-        // Collected results
         std::vector<uintptr_t> prologueFunctions;
         std::vector<SapphireHook::StringScanResult> stringHits;
 
-        // Timing / status
         std::chrono::steady_clock::time_point startTime{};
         std::string status;
 
-        // Incremental progress
-        std::atomic<size_t> prologueProcessed{0};
-        std::atomic<size_t> prologueTotal{0};
-        std::atomic<size_t> stringProcessed{0};
-        std::atomic<size_t> stringTotal{0};
+        std::atomic<size_t> prologueProcessed{ 0 };
+        std::atomic<size_t> prologueTotal{ 0 };
+        std::atomic<size_t> stringProcessed{ 0 };
+        std::atomic<size_t> stringTotal{ 0 };
 
-        // Phase text (debug)
         std::string lastProloguePhase;
         std::string lastStringPhase;
         std::mutex phaseMutex;
 
-        // Row cache for virtualized rendering
         struct RowCache {
             uintptr_t addr{};
             std::string addrText;
@@ -246,24 +243,24 @@ private:
         MemoryScanState& operator=(MemoryScanState&& other) noexcept {
             if (this == &other) return *this;
 
-            running           = other.running;
-            cancelled         = other.cancelled;
-            scanPrologues     = other.scanPrologues;
-            scanStrings       = other.scanStrings;
-            anchorsRebuilt    = other.anchorsRebuilt;
+            running = other.running;
+            cancelled = other.cancelled;
+            scanPrologues = other.scanPrologues;
+            scanStrings = other.scanStrings;
+            anchorsRebuilt = other.anchorsRebuilt;
             prologueCompleted = other.prologueCompleted;
-            stringCompleted   = other.stringCompleted;
-            uiFreeze          = other.uiFreeze;
-            rowsCacheDirty    = other.rowsCacheDirty;
+            stringCompleted = other.stringCompleted;
+            uiFreeze = other.uiFreeze;
+            rowsCacheDirty = other.rowsCacheDirty;
             lastStatusBuildTick = other.lastStatusBuildTick;
 
-            prologueFuture    = std::move(other.prologueFuture);
-            stringFuture      = std::move(other.stringFuture);
+            prologueFuture = std::move(other.prologueFuture);
+            stringFuture = std::move(other.stringFuture);
             prologueFunctions = std::move(other.prologueFunctions);
-            stringHits        = std::move(other.stringHits);
+            stringHits = std::move(other.stringHits);
 
-            startTime         = other.startTime;
-            status            = std::move(other.status);
+            startTime = other.startTime;
+            status = std::move(other.status);
 
             prologueProcessed.store(other.prologueProcessed.load(std::memory_order_relaxed), std::memory_order_relaxed);
             prologueTotal.store(other.prologueTotal.load(std::memory_order_relaxed), std::memory_order_relaxed);
@@ -273,13 +270,12 @@ private:
             {
                 std::scoped_lock lk(other.phaseMutex);
                 lastProloguePhase = std::move(other.lastProloguePhase);
-                lastStringPhase   = std::move(other.lastStringPhase);
+                lastStringPhase = std::move(other.lastStringPhase);
             }
 
-            rowCache   = std::move(other.rowCache);
+            rowCache = std::move(other.rowCache);
             filterText = std::move(other.filterText);
 
-            // Reset source
             other.running = false;
             other.cancelled = false;
             other.scanPrologues = false;
@@ -314,18 +310,46 @@ private:
     std::vector<uintptr_t> m_memScanMerged;
     bool m_memScanDirty = false;
 
-    uintptr_t    m_selectedFunctionAddress { 0 };
+    uintptr_t    m_selectedFunctionAddress{ 0 };
     std::string  m_selectedFunctionAnalysis;
-    bool         m_showAnalysisPanel { true };
-    bool         m_showDisassembly { true };
+    bool         m_showAnalysisPanel{ true };
+    bool         m_showDisassembly{ true };
     std::string  m_selectedDisasm;
 
-    bool m_multiSelectMode { false };
+    bool m_multiSelectMode{ false };
     std::vector<uintptr_t> m_multiSelected;
     std::string m_multiDiffText;
-    bool m_showMultiDiff { false };
+    bool m_showMultiDiff{ false };
 
     char m_analysisExportPath[260]{};
-    bool m_exportOverwriteConfirm { false };
+    bool m_exportOverwriteConfirm{ false };
     std::string m_lastAnalysisExportStatus;
+
+    // Live tracing state
+    bool m_liveTracing = false;
+    bool m_pauseTrace = false;
+    std::atomic<bool> m_traceThreadRunning{ false };
+    std::thread m_traceThread;
+
+    std::unordered_set<uintptr_t> m_hookedFromTrace;
+
+    struct LiveCall {
+        uintptr_t address;
+        std::chrono::steady_clock::time_point timestamp;
+    };
+    std::vector<LiveCall> m_liveCallBuffer;
+    size_t m_liveCallBufferSize = 10000;
+    std::atomic<size_t> m_liveCallIndex{ 0 };
+    mutable std::mutex m_liveCallMutex;
+
+    std::atomic<uint64_t> m_totalTracedCalls{ 0 };
+    std::chrono::steady_clock::time_point m_traceStartTime;
+    char m_traceFilter[256] = {};
+
+    void TraceThreadWorker();
+    void ProcessStackTrace();
+    std::vector<uintptr_t> CaptureCallStack();
+    void RenderLiveCallList();
+    void RenderTraceStatistics();
+    float GetTracedCallsPerSecond() const;
 };

@@ -2306,7 +2306,7 @@ std::string FunctionCallMonitor::GenerateFunctionAnalysis(uintptr_t address,
 
     std::string nearby = ScanForNearbyStrings(address, 512);
     if (!nearby.empty() && nearby != "NULL_ADDRESS" && nearby != "SCANNER_NOT_AVAILABLE") {
-        oss << "Nearby Strings (trunc): " << nearby.substr(0, (std::min<size_t>)(nearby.size(), 200)) << "\n";
+        oss << "Nearby Strings (trunc): " + nearby.substr(0, (std::min<size_t>)(nearby.size(), 200)) + "\n";
     }
 
     if (tags && !tags->empty()) {
@@ -2797,8 +2797,8 @@ void FunctionCallMonitor::RenderMemoryScanTab()
         ImGuiListClipper clipper;
         clipper.Begin((int)displayedCount);
         while (clipper.Step()) {
-            for (int listIdx = clipper.DisplayStart; listIdx < clipper.DisplayEnd; ++listIdx) {
-                const auto& rc = m_memScan.rowCache[visibleIdx[listIdx]];
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i) {
+                const auto& rc = m_memScan.rowCache[visibleIdx[i]];
                 ImGui::TableNextRow();
 
                 ImGui::TableNextColumn();
@@ -3241,4 +3241,367 @@ void FunctionCallMonitor::UpdateMemoryScanAsync()
         LogInfo("Memory scan finished; merged functions=" +
                 std::to_string(m_memScanMerged.size()));
     }
+}
+
+void FunctionCallMonitor::StartLiveCallTrace() {
+    if (m_liveTracing) return;
+    
+    m_liveTracing = true;
+    m_traceStartTime = std::chrono::steady_clock::now();
+    m_totalTracedCalls = 0;
+    m_liveCallIndex = 0;
+    m_liveCallBuffer.resize(m_liveCallBufferSize);
+    
+    // Start trace thread that samples the call stack
+    m_traceThreadRunning = true;
+    m_traceThread = std::thread([this]() { TraceThreadWorker(); });
+}
+
+void FunctionCallMonitor::StopLiveCallTrace() {
+    if (!m_liveTracing) return;
+    
+    m_liveTracing = false;
+    m_traceThreadRunning = false;
+    
+    if (m_traceThread.joinable()) {
+        m_traceThread.join();
+    }
+}
+
+void FunctionCallMonitor::TraceThreadWorker() {
+    // Use ETW or stack walking to capture function calls
+    while (m_traceThreadRunning) {
+        ProcessStackTrace();
+        std::this_thread::sleep_for(std::chrono::microseconds(100)); // Sample at 10kHz
+    }
+}
+
+void FunctionCallMonitor::ProcessStackTrace() {
+    // Skip processing if paused
+    if (m_pauseTrace) return;
+
+    // Capture current call stack
+    auto callStack = CaptureCallStack();
+
+    std::lock_guard<std::mutex> lock(m_liveCallMutex);
+
+    for (uintptr_t addr : callStack) {
+        // Only track executable addresses in game module
+        if (!IsExecutableMemory(addr)) continue;
+
+        // Check if this address was recently added (deduplication)
+        bool isDuplicate = false;
+        if (m_liveCallIndex > 0) {
+            size_t lastIdx = (m_liveCallIndex - 1) % m_liveCallBufferSize;
+            if (m_liveCallBuffer[lastIdx].address == addr) {
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - m_liveCallBuffer[lastIdx].timestamp).count();
+                // Skip if same function called within 10ms
+                if (elapsed < 10) {
+                    isDuplicate = true;
+                }
+            }
+        }
+
+        if (!isDuplicate) {
+            size_t idx = m_liveCallIndex % m_liveCallBufferSize;
+            m_liveCallBuffer[idx] = {
+                addr,
+                std::chrono::steady_clock::now()
+            };
+
+            m_liveCallIndex++;
+            m_totalTracedCalls++;
+        }
+    }
+}
+
+
+std::vector<uintptr_t> FunctionCallMonitor::CaptureCallStack() {
+    std::vector<uintptr_t> callStack;
+    
+    // Method 1: Use RtlCaptureStackBackTrace for fast stack walking
+    void* backtrace[64];
+    USHORT frames = RtlCaptureStackBackTrace(0, 64, backtrace, nullptr);
+    
+    for (USHORT i = 0; i < frames; i++) {
+        uintptr_t addr = reinterpret_cast<uintptr_t>(backtrace[i]);
+        
+        // Filter to game module addresses only
+        if (addr >= 0x140000000 && addr < 0x150000000) { // Adjust range for your game
+            callStack.push_back(addr);
+        }
+    }
+    
+    return callStack;
+}
+
+void FunctionCallMonitor::RenderLiveTraceWindow() {
+    if (!m_windowOpen) return;
+
+    ImGui::SetNextWindowSize(ImVec2(700, 900), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Live Function Trace", &m_windowOpen)) {
+        ImGui::End();
+        return;
+    }
+
+    // Control bar
+    if (ImGui::Button(m_liveTracing ? "Stop Trace" : "Start Trace")) {
+        if (m_liveTracing) {
+            StopLiveCallTrace();
+        }
+        else {
+            StartLiveCallTrace();
+        }
+    }
+
+    ImGui::SameLine();
+    if (ImGui::Button(m_pauseTrace ? "Resume" : "Pause")) {
+        m_pauseTrace = !m_pauseTrace;
+    }
+
+    ImGui::SameLine();
+    ImGui::Text("Calls/sec: %.0f", GetTracedCallsPerSecond());
+
+    ImGui::SameLine();
+    ImGui::Text("Total: %llu", m_totalTracedCalls.load());
+
+    ImGui::SameLine();
+    if (ImGui::Button("Clear")) {
+        std::lock_guard<std::mutex> lock(m_liveCallMutex);
+        m_liveCallIndex = 0;
+        m_totalTracedCalls = 0;
+        m_liveCallBuffer.clear();
+        m_liveCallBuffer.resize(m_liveCallBufferSize);
+    }
+
+    ImGui::Separator();
+
+    ImGui::SetNextItemWidth(200);
+    ImGui::InputText("Filter", m_traceFilter, sizeof(m_traceFilter));
+
+    ImGui::SameLine();
+    ImGui::Checkbox("Auto-scroll", &m_autoScroll);
+
+    ImGui::Separator();
+
+    // Status indicator
+    if (m_pauseTrace) {
+        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "PAUSED - Display frozen");
+    }
+    else if (m_liveTracing) {
+        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "LIVE - Capturing calls");
+    }
+    else {
+        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "STOPPED");
+    }
+
+    ImGui::Separator();
+
+    // Main trace display
+    RenderLiveCallList();
+
+    ImGui::End();
+}
+
+void FunctionCallMonitor::RenderLiveCallList() {
+    std::lock_guard<std::mutex> lock(m_liveCallMutex);
+
+    // Get visible range
+    size_t totalCalls = std::min(m_liveCallIndex.load(), m_liveCallBufferSize);
+    if (totalCalls == 0) {
+        ImGui::Text("No function calls captured yet...");
+        return;
+    }
+
+    // Track hooked addresses for visual feedback
+    static std::unordered_set<uintptr_t> hookedAddresses;
+
+    if (ImGui::BeginTable("LiveTraceTable", 4,
+        ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg |
+        ImGuiTableFlags_Borders | ImGuiTableFlags_Resizable)) {
+
+        ImGui::TableSetupColumn("Time", ImGuiTableColumnFlags_WidthFixed, 60);
+        ImGui::TableSetupColumn("Function", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Status", ImGuiTableColumnFlags_WidthFixed, 60);
+        ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_WidthFixed, 120);
+        ImGui::TableHeadersRow();
+
+        // Build filtered list
+        std::vector<size_t> displayIndices;
+        for (size_t i = 0; i < totalCalls; i++) {
+            size_t idx = (m_liveCallIndex - 1 - i) % m_liveCallBufferSize;
+            const auto& call = m_liveCallBuffer[idx];
+
+            // Apply filter
+            if (m_traceFilter[0] != '\0') {
+                char addrStr[32];
+                snprintf(addrStr, sizeof(addrStr), "sub_%llX", call.address);
+                if (strstr(addrStr, m_traceFilter) == nullptr) {
+                    continue;
+                }
+            }
+
+            displayIndices.push_back(idx);
+        }
+
+        // Use clipper for virtualization
+        ImGuiListClipper clipper;
+        clipper.Begin(displayIndices.size());
+
+        while (clipper.Step()) {
+            for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; i++) {
+                const auto& call = m_liveCallBuffer[displayIndices[i]];
+
+                ImGui::TableNextRow();
+
+                // Time column
+                ImGui::TableNextColumn();
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - call.timestamp).count();
+                ImGui::Text("%lldms", elapsed);
+
+                // Function name column
+                ImGui::TableNextColumn();
+                char addrStr[32];
+                snprintf(addrStr, sizeof(addrStr), "sub_%llX", call.address);
+
+                // Check if we have a better name from database
+                std::string funcName = ResolveFunctionName(call.address);
+                if (funcName.find("sub_") != 0) {
+                    ImGui::Text("%s", funcName.c_str());
+                    if (ImGui::IsItemHovered()) {
+                        ImGui::SetTooltip("0x%llX", call.address);
+                    }
+                }
+                else {
+                    ImGui::Text("%s", addrStr);
+                }
+
+                // Status column
+                ImGui::TableNextColumn();
+                bool isHooked = hookedAddresses.find(call.address) != hookedAddresses.end();
+                if (isHooked) {
+                    ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Hooked");
+                }
+                else {
+                    ImGui::TextDisabled("---");
+                }
+
+                // Actions column
+                ImGui::TableNextColumn();
+                ImGui::PushID((int)(call.address ^ i));
+
+                if (!isHooked) {
+                    if (ImGui::SmallButton("Hook")) {
+                        std::string name = ResolveFunctionName(call.address);
+                        if (CreateSafeLoggingHook(call.address, name, "LiveTrace")) {
+                            hookedAddresses.insert(call.address);
+                            LogInfo("Hooked function from live trace: " + name);
+                        }
+                    }
+                }
+                else {
+                    ImGui::BeginDisabled();
+                    ImGui::SmallButton("Hooked");
+                    ImGui::EndDisabled();
+                }
+
+                ImGui::SameLine();
+                if (ImGui::SmallButton("Analyze")) {
+                    SelectFunctionForAnalysis(call.address);
+                    // Open analysis window if you have one
+                    m_showAnalysisPanel = true;
+                }
+
+                ImGui::PopID();
+            }
+        }
+
+        // Auto-scroll to bottom if enabled and not paused
+        if (m_autoScroll && !m_pauseTrace) {
+            ImGui::SetScrollHereY(1.0f);
+        }
+
+        ImGui::EndTable();
+    }
+
+    // Statistics footer
+    ImGui::Separator();
+    RenderTraceStatistics();
+}
+
+void FunctionCallMonitor::RenderTraceStatistics() {
+    std::lock_guard<std::mutex> lock(m_liveCallMutex);
+
+    // Count unique addresses and frequencies
+    std::unordered_map<uintptr_t, size_t> frequency;
+    size_t totalCalls = std::min(m_liveCallIndex.load(), m_liveCallBufferSize);
+
+    for (size_t i = 0; i < totalCalls; i++) {
+        frequency[m_liveCallBuffer[i].address]++;
+    }
+
+    // Sort by frequency
+    std::vector<std::pair<uintptr_t, size_t>> sorted(frequency.begin(), frequency.end());
+    std::sort(sorted.begin(), sorted.end(),
+        [](const auto& a, const auto& b) { return a.second > b.second; });
+
+    // Display statistics
+    ImGui::Text("Statistics:");
+    ImGui::Text("  Unique Functions: %zu", frequency.size());
+    ImGui::Text("  Buffer Usage: %zu / %zu", totalCalls, m_liveCallBufferSize);
+
+    if (ImGui::CollapsingHeader("Top Called Functions")) {
+        if (ImGui::BeginTable("TopFunctions", 3,
+            ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+
+            ImGui::TableSetupColumn("Function", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Calls", ImGuiTableColumnFlags_WidthFixed, 60);
+            ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, 60);
+            ImGui::TableHeadersRow();
+
+            int shown = 0;
+            for (const auto& [addr, count] : sorted) {
+                if (shown++ >= 10) break; // Show top 10
+
+                ImGui::TableNextRow();
+
+                ImGui::TableNextColumn();
+                std::string name = ResolveFunctionName(addr);
+                ImGui::Text("%s", name.c_str());
+                if (ImGui::IsItemHovered()) {
+                    ImGui::SetTooltip("0x%llX", addr);
+                }
+
+                ImGui::TableNextColumn();
+                ImGui::Text("%zu", count);
+
+                ImGui::TableNextColumn();
+                ImGui::PushID((int)addr);
+                if (ImGui::SmallButton("Hook")) {
+                    CreateSafeLoggingHook(addr, name, "TopFunction");
+                }
+                ImGui::PopID();
+            }
+
+            ImGui::EndTable();
+        }
+    }
+}
+
+float FunctionCallMonitor::GetTracedCallsPerSecond() const {
+    if (!m_liveTracing) return 0.0f;
+    
+    auto now = std::chrono::steady_clock::now();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        now - m_traceStartTime).count();
+    
+    if (elapsed > 0) {
+        return (float)m_totalTracedCalls.load() / (elapsed / 1000.0f);
+    }
+    
+    return 0.0f;
 }
