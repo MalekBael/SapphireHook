@@ -37,12 +37,12 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <!-- Include paths -->
   <PropertyGroup>
-    <IncludePath>$(ProjectDir)src\Core;$(ProjectDir)src\Modules;$(ProjectDir)src\UI;$(ProjectDir)src\Hooking;$(ProjectDir)data;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include;$(ProjectDir)vendor\capstone\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)src\Core;$(ProjectDir)src\Modules;$(ProjectDir)src\UI;$(ProjectDir)src\Hooking;$(ProjectDir)data;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook;$(ProjectDir)vendor\capstone\include;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <!-- Debug: static capstone + minhook (/MDd) -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include;$(ProjectDir)vendor\capstone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook;$(ProjectDir)vendor\capstone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -56,12 +56,8 @@
     </ClCompile>
     <Link>
       <!-- Link static libs (adjust paths/names if your built static libs differ) -->
-      <AdditionalDependencies>capstone.lib;libMinHook.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>
-        $(ProjectDir)vendor\capstone;
-        $(ProjectDir)vendor\minhook;
-        %(AdditionalLibraryDirectories)
-      </AdditionalLibraryDirectories>
+      <AdditionalDependencies>capstone.lib;libMinHook.x64.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)vendor\capstone;$(ProjectDir)vendor\minhook;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>
       </IgnoreSpecificDefaultLibraries>
       <OptimizeReferences>true</OptimizeReferences>
@@ -76,10 +72,9 @@
   <!-- Release: same /MDd runtime for now & static libs -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook\include;$(ProjectDir)vendor\capstone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook;$(ProjectDir)vendor\capstone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <!-- intentionally /MDd per request -->
       <EnableModules>false</EnableModules>
       <Optimization>MaxSpeed</Optimization>
       <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -88,12 +83,10 @@
     <Link>
       <AdditionalDependencies>capstone.lib;libMinHook.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>
-        $(ProjectDir)vendor\capstone;
-        $(ProjectDir)vendor\minhook;
-        %(AdditionalLibraryDirectories)
-      </AdditionalLibraryDirectories>
-      <IgnoreSpecificDefaultLibraries>
-      </IgnoreSpecificDefaultLibraries>
+				$(ProjectDir)vendor\capstone;
+				$(ProjectDir)vendor\minhook;
+				%(AdditionalLibraryDirectories)
+			</AdditionalLibraryDirectories>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
@@ -163,7 +156,10 @@
     <ClInclude Include="vendor\hex_editor\imgui_hex.h" />
     <ClInclude Include="vendor\ImGuiFD\ImGuiFD.h" />
     <ClInclude Include="vendor\ImGuiFD\ImGuiFD_internal.h" />
+    <ClInclude Include="vendor\imgui\backends\imgui_impl_dx10.h" />
     <ClInclude Include="vendor\imgui\backends\imgui_impl_dx11.h" />
+    <ClInclude Include="vendor\imgui\backends\imgui_impl_dx12.h" />
+    <ClInclude Include="vendor\imgui\backends\imgui_impl_dx9.h" />
     <ClInclude Include="vendor\imgui\backends\imgui_impl_win32.h" />
     <ClInclude Include="vendor\imgui\imconfig.h" />
     <ClInclude Include="vendor\imgui\imgui.h" />
@@ -171,8 +167,11 @@
     <ClInclude Include="vendor\imgui\imstb_rectpack.h" />
     <ClInclude Include="vendor\imgui\imstb_textedit.h" />
     <ClInclude Include="vendor\imgui\imstb_truetype.h" />
+    <ClInclude Include="vendor\imgui\misc\cpp\imgui_stdlib.h" />
+    <ClInclude Include="vendor\imgui\misc\single_file\imgui_single_file.h" />
     <ClInclude Include="vendor\implot\implot.h" />
     <ClInclude Include="vendor\implot\implot_internal.h" />
+    <ClInclude Include="vendor\minhook\MinHook.h" />
     <ClInclude Include="vendor\miniz\miniz.h" />
   </ItemGroup>
   <!-- Sources -->
@@ -216,13 +215,18 @@
     <ClCompile Include="src\UI\imgui_overlay.cpp" />
     <ClCompile Include="src\UI\UIManager.cpp" />
     <ClCompile Include="vendor\hex_editor\imgui_hex.cpp" />
+    <ClCompile Include="vendor\imgui\backends\imgui_impl_dx10.cpp" />
     <ClCompile Include="vendor\imgui\backends\imgui_impl_dx11.cpp" />
+    <ClCompile Include="vendor\imgui\backends\imgui_impl_dx12.cpp" />
+    <ClCompile Include="vendor\imgui\backends\imgui_impl_dx9.cpp" />
     <ClCompile Include="vendor\imgui\backends\imgui_impl_win32.cpp" />
     <ClCompile Include="vendor\imgui\imgui.cpp" />
     <ClCompile Include="vendor\imgui\imgui_demo.cpp" />
     <ClCompile Include="vendor\imgui\imgui_draw.cpp" />
     <ClCompile Include="vendor\imgui\imgui_tables.cpp" />
     <ClCompile Include="vendor\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="vendor\imgui\misc\cpp\imgui_stdlib.cpp" />
+    <ClCompile Include="vendor\imgui\misc\fonts\binary_to_compressed_c.cpp" />
     <ClCompile Include="vendor\implot\implot.cpp" />
     <ClCompile Include="vendor\implot\implot_items.cpp" />
     <ClCompile Include="vendor\miniz\miniz.c" />
@@ -241,11 +245,20 @@
     <None Include="packages.config" />
     <None Include="vendor\hex_editor\LICENSE" />
     <None Include="vendor\implot\LICENSE" />
+    <None Include="vendor\minhook\MinHook.x64.dll" />
     <None Include="vendor\miniz\LICENSE" />
   </ItemGroup>
   <!-- Remove dynamic library references; keep static listing only if you want it visible -->
   <ItemGroup>
     <Library Include="vendor\capstone\capstone.lib" />
+  </ItemGroup>
+  <ItemGroup>
+    <Font Include="vendor\imgui\misc\fonts\Cousine-Regular.ttf" />
+    <Font Include="vendor\imgui\misc\fonts\DroidSans.ttf" />
+    <Font Include="vendor\imgui\misc\fonts\Karla-Regular.ttf" />
+    <Font Include="vendor\imgui\misc\fonts\ProggyClean.ttf" />
+    <Font Include="vendor\imgui\misc\fonts\ProggyTiny.ttf" />
+    <Font Include="vendor\imgui\misc\fonts\Roboto-Medium.ttf" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets" Condition="Exists('packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets')" />

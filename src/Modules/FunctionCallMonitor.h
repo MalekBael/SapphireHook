@@ -10,6 +10,8 @@
 #include <memory>
 #include <future>
 #include <unordered_map>
+#include <unordered_set>   
+#include <cstdint>         
 
 #include "FunctionDatabase.h"
 #include "SignatureDatabase.h"
@@ -37,7 +39,7 @@ public:
     static FunctionCallMonitor* s_instance;
 
     FunctionCallMonitor();
-    ~FunctionCallMonitor() = default;
+    ~FunctionCallMonitor(); // changed from = default
 
     const char* GetName() const override { return "function_monitor"; }
     const char* GetDisplayName() const override { return "Function Call Monitor"; }
@@ -144,15 +146,33 @@ public:
     static __declspec(noinline) void __stdcall FunctionHookCallback(uintptr_t returnAddress, uintptr_t functionAddress);
 
     void StartMemoryScan(const std::vector<std::string>& targetStrings,
-                         bool scanPrologues,
-                         bool scanStrings);
+        bool scanPrologues,
+        bool scanStrings);
     void UpdateMemoryScanAsync();
 
+    // Live trace methods
+    void RenderLiveCallTrace();
+    void StartLiveCapture();
+    void StopLiveCapture();
+    void ClearLiveTrace();
+    static void LiveTraceCallback(uintptr_t address, uintptr_t returnAddress);
+
+    // Expose this so the global detour can log calls safely.
+    void RecordRealFunctionCall(uintptr_t address, uintptr_t returnAddr);
+
 private:
+
+    // Add these new members for sampling-based monitoring
+    std::thread m_samplingThread;
+    std::atomic<bool> m_samplingActive{ false };
+
+    // New methods for stack sampling
+    void WalkCallStack(uintptr_t stackPointer, std::vector<uintptr_t>& addresses, size_t maxFrames);
+    void SampleActiveModuleFunctions();
     void RebuildAnchorStringMatches();
     void SelectFunctionForAnalysis(uintptr_t address);
     std::string GenerateFunctionAnalysis(uintptr_t address,
-                                         const std::vector<std::string>* tags = nullptr);
+        const std::vector<std::string>* tags = nullptr);
     std::string GetPrologueBytes(uintptr_t address, size_t maxLen = 16);
     bool DisassembleSnippet(uintptr_t address, std::string& out, int maxInstr = 12, size_t maxBytes = 96);
     void BuildMultiDiff();
@@ -215,10 +235,10 @@ private:
         std::string status;
 
         // Incremental progress
-        std::atomic<size_t> prologueProcessed{0};
-        std::atomic<size_t> prologueTotal{0};
-        std::atomic<size_t> stringProcessed{0};
-        std::atomic<size_t> stringTotal{0};
+        std::atomic<size_t> prologueProcessed{ 0 };
+        std::atomic<size_t> prologueTotal{ 0 };
+        std::atomic<size_t> stringProcessed{ 0 };
+        std::atomic<size_t> stringTotal{ 0 };
 
         // Phase text (debug)
         std::string lastProloguePhase;
@@ -246,24 +266,24 @@ private:
         MemoryScanState& operator=(MemoryScanState&& other) noexcept {
             if (this == &other) return *this;
 
-            running           = other.running;
-            cancelled         = other.cancelled;
-            scanPrologues     = other.scanPrologues;
-            scanStrings       = other.scanStrings;
-            anchorsRebuilt    = other.anchorsRebuilt;
+            running = other.running;
+            cancelled = other.cancelled;
+            scanPrologues = other.scanPrologues;
+            scanStrings = other.scanStrings;
+            anchorsRebuilt = other.anchorsRebuilt;
             prologueCompleted = other.prologueCompleted;
-            stringCompleted   = other.stringCompleted;
-            uiFreeze          = other.uiFreeze;
-            rowsCacheDirty    = other.rowsCacheDirty;
+            stringCompleted = other.stringCompleted;
+            uiFreeze = other.uiFreeze;
+            rowsCacheDirty = other.rowsCacheDirty;
             lastStatusBuildTick = other.lastStatusBuildTick;
 
-            prologueFuture    = std::move(other.prologueFuture);
-            stringFuture      = std::move(other.stringFuture);
+            prologueFuture = std::move(other.prologueFuture);
+            stringFuture = std::move(other.stringFuture);
             prologueFunctions = std::move(other.prologueFunctions);
-            stringHits        = std::move(other.stringHits);
+            stringHits = std::move(other.stringHits);
 
-            startTime         = other.startTime;
-            status            = std::move(other.status);
+            startTime = other.startTime;
+            status = std::move(other.status);
 
             prologueProcessed.store(other.prologueProcessed.load(std::memory_order_relaxed), std::memory_order_relaxed);
             prologueTotal.store(other.prologueTotal.load(std::memory_order_relaxed), std::memory_order_relaxed);
@@ -273,10 +293,10 @@ private:
             {
                 std::scoped_lock lk(other.phaseMutex);
                 lastProloguePhase = std::move(other.lastProloguePhase);
-                lastStringPhase   = std::move(other.lastStringPhase);
+                lastStringPhase = std::move(other.lastStringPhase);
             }
 
-            rowCache   = std::move(other.rowCache);
+            rowCache = std::move(other.rowCache);
             filterText = std::move(other.filterText);
 
             // Reset source
@@ -314,18 +334,60 @@ private:
     std::vector<uintptr_t> m_memScanMerged;
     bool m_memScanDirty = false;
 
-    uintptr_t    m_selectedFunctionAddress { 0 };
+    uintptr_t    m_selectedFunctionAddress{ 0 };
     std::string  m_selectedFunctionAnalysis;
-    bool         m_showAnalysisPanel { true };
-    bool         m_showDisassembly { true };
+    bool         m_showAnalysisPanel{ true };
+    bool         m_showDisassembly{ true };
     std::string  m_selectedDisasm;
 
-    bool m_multiSelectMode { false };
+    bool m_multiSelectMode{ false };
     std::vector<uintptr_t> m_multiSelected;
     std::string m_multiDiffText;
-    bool m_showMultiDiff { false };
+    bool m_showMultiDiff{ false };
 
     char m_analysisExportPath[260]{};
-    bool m_exportOverwriteConfirm { false };
+    bool m_exportOverwriteConfirm{ false };
     std::string m_lastAnalysisExportStatus;
+
+    // Live trace structures
+    struct LiveTraceEntry
+    {
+        uintptr_t address;
+        uintptr_t callerAddress;
+        std::string functionName;
+        std::chrono::steady_clock::time_point timestamp;
+        uint32_t threadId;   // was DWORD; use std types to avoid <Windows.h> in header
+        int callCount;
+    };
+
+
+    struct LiveTraceState
+    {
+        bool capturing = false;
+        bool autoScroll = true;
+        int captureRateMs = 16;
+        size_t maxEntries = 1000;
+
+        std::vector<LiveTraceEntry> entries;
+        std::unordered_set<uintptr_t> uniqueFunctions; // requires <unordered_set>
+        size_t totalCalls = 0;
+        float callsPerSecond = 0.0f;
+
+        std::chrono::steady_clock::time_point startTime;
+        std::chrono::steady_clock::time_point lastUpdateTime;
+
+        std::mutex mutex;
+    } m_liveTrace;
+
+    // Live trace helper methods
+    void InstallLiveTraceHook(uintptr_t address);
+    void RemoveLiveTraceHooks();
+    void HookCommonAPIsForTrace();
+    void StartSimulationMode();
+
+    // MinHook support (keep these private)
+    std::unordered_map<uintptr_t, void*> m_activeHooks;
+    bool m_hooksInitialized = false;
+    bool InstallSimpleHook(uintptr_t address, const std::string& name);
+    void RemoveAllHooks();
 };

@@ -409,3 +409,6 @@ CppProperties.json
 /tools/list_missing_decoders.py
 /tools/unmigrated.txt
 *.txt
+/tools/Find-StalePragmas.ps1
+/tools/Scan-MsbuildLibs.ps1
+/tools

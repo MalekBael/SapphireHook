@@ -1,8 +1,87 @@
 #include "SimpleJSON.h"
 #include <sstream>
 #include <algorithm>
+#include <cctype>
 
 namespace SapphireHook {
+
+    // Helpers
+    static inline void SkipWS(const std::string& s, size_t& i)
+    {
+        while (i < s.size() && (s[i] == ' ' || s[i] == '\t' || s[i] == '\n' || s[i] == '\r')) ++i;
+    }
+
+    // NOTE: returns the raw JSON string content (with backslash escapes preserved).
+    static bool ParseJSONString(const std::string& s, size_t& i, std::string& out)
+    {
+        SkipWS(s, i);
+        if (i >= s.size() || s[i] != '"') return false;
+        ++i; // skip opening "
+        std::string raw;
+        bool esc = false;
+        while (i < s.size())
+        {
+            char c = s[i++];
+            if (esc)
+            {
+                raw.push_back(c);
+                esc = false;
+                continue;
+            }
+            if (c == '\\')
+            {
+                raw.push_back('\\'); // keep escape marker; unescape in SimpleJSON::Parse
+                esc = true;
+                continue;
+            }
+            if (c == '"')
+            {
+                out = raw; // do not unescape here
+                return true;
+            }
+            raw.push_back(c);
+        }
+        return false; // unterminated string
+    }
+
+    // Extracts a balanced {...} block starting at s[i] == '{', returns substring [i, end)
+    static bool ExtractBalancedObject(const std::string& s, size_t& i, std::string& objOut)
+    {
+        SkipWS(s, i);
+        if (i >= s.size() || s[i] != '{') return false;
+
+        size_t start = i;
+        int depth = 0;
+        bool inStr = false;
+        bool esc = false;
+
+        while (i < s.size())
+        {
+            char c = s[i++];
+            if (inStr)
+            {
+                if (esc) { esc = false; continue; }
+                if (c == '\\') { esc = true; continue; }
+                if (c == '"') { inStr = false; }
+                continue;
+            }
+            else
+            {
+                if (c == '"') { inStr = true; continue; }
+                if (c == '{') { ++depth; continue; }
+                if (c == '}')
+                {
+                    --depth;
+                    if (depth == 0)
+                    {
+                        objOut = s.substr(start, i - start);
+                        return true;
+                    }
+                }
+            }
+        }
+        return false; // unbalanced braces
+    }
 
     std::string SimpleJSON::Trim(const std::string& str)
     {
@@ -58,120 +137,67 @@ namespace SapphireHook {
     SimpleJSON::JSONObject SimpleJSON::Parse(const std::string& jsonString)
     {
         JSONObject result;
-        std::string content = Trim(jsonString);
+        std::string s = Trim(jsonString);
+        size_t i = 0;
 
-        if (content.empty() || content[0] != '{')
+        if (s.empty() || s[i] != '{') return result;
+        ++i; // skip '{'
+
+        while (true)
         {
-            return result;
-        }
+            SkipWS(s, i);
+            if (i >= s.size()) break;
+            if (s[i] == '}') { ++i; break; }
 
-        // Simple state machine for parsing
-        size_t pos = 1; // Skip opening brace
-        std::string currentKey;
-        std::string currentValue;
-        bool inString = false;
-        bool inKey = true;
-        bool escapeNext = false;
-        int braceLevel = 0;
+            // Key
+            std::string keyRaw;
+            if (!ParseJSONString(s, i, keyRaw)) break;
+            std::string key = Unescape(keyRaw);
 
-        while (pos < content.length() && content[pos] != '}')
-        {
-            char c = content[pos];
+            SkipWS(s, i);
+            if (i >= s.size() || s[i] != ':') break;
+            ++i; // skip ':'
 
-            if (escapeNext)
+            SkipWS(s, i);
+            if (i >= s.size()) break;
+
+            // Value: string or object (we only need these two for our use-cases)
+            if (s[i] == '"')
             {
-                if (inKey) currentKey += c;
-                else currentValue += c;
-                escapeNext = false;
-                pos++;
-                continue;
+                std::string valRaw;
+                if (!ParseJSONString(s, i, valRaw)) break;
+                std::string val = Unescape(valRaw);
+                result.data[key] = std::move(val);
             }
-
-            if (c == '\\')
+            else if (s[i] == '{')
             {
-                escapeNext = true;
-                pos++;
-                continue;
-            }
+                std::string objText;
+                if (!ExtractBalancedObject(s, i, objText)) break;
 
-            if (c == '"')
-            {
-                inString = !inString;
-                pos++;
-                continue;
-            }
-
-            if (!inString)
-            {
-                if (c == ':' && inKey)
+                // Parse nested object
+                auto nestedObj = Parse(objText);
+                std::map<std::string, std::string> nestedMap;
+                for (const auto& pair : nestedObj.data)
                 {
-                    inKey = false;
-                    currentKey = Trim(currentKey);
-                    pos++;
-                    continue;
+                    if (std::holds_alternative<std::string>(pair.second))
+                        nestedMap[pair.first] = std::get<std::string>(pair.second);
                 }
-
-                if (c == '{')
-                {
-                    braceLevel++;
-                }
-                else if (c == '}')
-                {
-                    braceLevel--;
-                }
-
-                if ((c == ',' || pos == content.length() - 1) && braceLevel == 0)
-                {
-                    currentValue = Trim(currentValue);
-
-                    if (!currentKey.empty())
-                    {
-                        if (currentValue.front() == '{' && currentValue.back() == '}')
-                        {
-                            // Parse nested object
-                            auto nestedObj = Parse(currentValue);
-                            std::map<std::string, std::string> nestedMap;
-                            for (const auto& pair : nestedObj.data)
-                            {
-                                if (std::holds_alternative<std::string>(pair.second))
-                                {
-                                    nestedMap[pair.first] = std::get<std::string>(pair.second);
-                                }
-                            }
-                            result.data[currentKey] = nestedMap;
-                        }
-                        else
-                        {
-                            // Remove quotes if present
-                            if (currentValue.length() >= 2 &&
-                                currentValue.front() == '"' && currentValue.back() == '"')
-                            {
-                                currentValue = currentValue.substr(1, currentValue.length() - 2);
-                            }
-                            result.data[currentKey] = Unescape(currentValue);
-                        }
-                    }
-
-                    currentKey.clear();
-                    currentValue.clear();
-                    inKey = true;
-                    pos++;
-                    continue;
-                }
-
-                if (c != ' ' && c != '\t' && c != '\n' && c != '\r')
-                {
-                    if (inKey) currentKey += c;
-                    else currentValue += c;
-                }
+                result.data[key] = std::move(nestedMap);
             }
             else
             {
-                if (inKey) currentKey += c;
-                else currentValue += c;
+                // Fallback: read until ',' or '}' and store as string (e.g., numbers/bools)
+                size_t start = i;
+                while (i < s.size() && s[i] != ',' && s[i] != '}') ++i;
+                std::string raw = Trim(s.substr(start, i - start));
+                result.data[key] = raw;
             }
 
-            pos++;
+            SkipWS(s, i);
+            if (i < s.size() && s[i] == ',') { ++i; continue; }
+
+            SkipWS(s, i);
+            if (i < s.size() && s[i] == '}') { ++i; break; }
         }
 
         return result;

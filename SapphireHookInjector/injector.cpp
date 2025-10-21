@@ -1,6 +1,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <filesystem>
 #include <atomic>
 #include <Windows.h>
 #include <TlHelp32.h>
@@ -349,6 +350,14 @@ int main(int argc, char** argv) {
     EnableCancelHandler();
     bool dbg = EnableSeDebugPrivilege();
     if (!dbg) Log(LogLevel::Warn, "SeDebugPrivilege not granted (continuing)");
+
+    // Set SAPPHIRE_INJECTOR_PATH based on the injector's actual exe location
+    wchar_t exePathW[MAX_PATH] = {0};
+    DWORD got = GetModuleFileNameW(nullptr, exePathW, MAX_PATH);
+    fs::path injectorDir = got ? fs::path(exePathW).parent_path() : fs::current_path();
+    std::string pathEnv = std::string("SAPPHIRE_INJECTOR_PATH=") + injectorDir.string();
+    _putenv(pathEnv.c_str());
+    Log(LogLevel::Info, "SAPPHIRE_INJECTOR_PATH=" + injectorDir.string());
 
     Args args = ParseArgs(argc, argv);
     LoadConfig(args);

@@ -1,5 +1,5 @@
 #include "../Hooking/hook_manager.h"
-#include <../vendor/minhook/Minhook.h>
+#include <MinHook.h>
 #include "../Analysis/PatternScanner.h"
 #include "../Logger/Logger.h"
 #include "../Core/SafeMemory.h"

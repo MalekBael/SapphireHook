@@ -40,7 +40,7 @@
 #include "../Hooking/hook_manager.h"
 
 #include "PacketInjector.h"
-#include <../vendor/minhook/Minhook.h>
+#include <MinHook.h>
 #include "../Monitor/NetworkMonitor.h"
 
 #pragma comment(lib, "Ws2_32.lib")
