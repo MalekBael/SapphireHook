@@ -176,6 +176,7 @@
   </ItemGroup>
   <!-- Sources -->
   <ItemGroup>
+    <ClCompile Include="src\DllMain.cpp" />
     <ClCompile Include="src\Network\PacketDecoder.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />

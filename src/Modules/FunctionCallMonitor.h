@@ -38,6 +38,10 @@ class FunctionCallMonitor : public SapphireHook::UIModule {
 public:
     static FunctionCallMonitor* s_instance;
 
+    // Convenience accessor for global callbacks (VEH/MinHook)
+    static FunctionCallMonitor * GetInstance() { return s_instance; }
+    // Toggle real hooking mode (UI calls this)
+    void SetRealHookingEnabled(bool enabled);
     FunctionCallMonitor();
     ~FunctionCallMonitor(); // changed from = default
 

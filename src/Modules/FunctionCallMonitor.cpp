@@ -305,6 +305,27 @@ namespace SapphireHook {
     thread_local uintptr_t AdvancedHookManager::s_pendingRepatch = 0;
 } // namespace SapphireHook
 
+static std::mutex g_minHookMutex;
+static bool g_minHookInitialized = false;
+
+template<typename... Args>
+static void GenericHookTrampoline(Args... /*args*/) {
+    void* returnAddr = _ReturnAddress();
+    uintptr_t calledFrom = reinterpret_cast<uintptr_t>(returnAddr);
+
+    // Get the current hook address from thread-local storage
+    static thread_local uintptr_t s_currentHookAddr = 0;
+
+    if (FunctionCallMonitor::GetInstance()) {
+        std::string name = FunctionCallMonitor::GetInstance()->ResolveFunctionName(s_currentHookAddr);
+        FunctionCallMonitor::GetInstance()->AddFunctionCall(name, s_currentHookAddr, "MinHook");
+
+        LogDebug("MinHook intercepted: " + name +
+            " at 0x" + std::to_string(s_currentHookAddr) +
+            " called from 0x" + std::to_string(calledFrom));
+    }
+}
+
 static std::string GetExecutableDirectory()
 {
     wchar_t wpath[MAX_PATH] = { 0 };
@@ -403,6 +424,89 @@ static std::set<uintptr_t> g_attemptedHooks;
 static uintptr_t g_moduleBase = 0;
 static size_t g_moduleSize = 0;
 static std::map<uintptr_t, void*> g_originalFunctions;
+
+// --- MinHook per-hook detour infrastructure (x64 generic) ---
+
+#include <bitset>
+
+static constexpr int kMaxMHDetours = 64;
+
+struct MHCtx {
+    uintptr_t    target{};
+    std::string  name;
+    std::string  context;
+    void* original{};
+};
+
+static MHCtx g_mhCtx[kMaxMHDetours];
+static std::bitset<kMaxMHDetours> g_mhUsed;
+static std::unordered_map<uintptr_t, int> g_addr2idx;
+
+using DetourFn = uintptr_t(__fastcall*)(void*, void*, void*, void*);
+
+template<int Idx>
+static uintptr_t __fastcall MH_Detour(void* rcx, void* rdx, void* r8, void* r9)
+{
+    auto& ctx = g_mhCtx[Idx];
+
+    if (FunctionCallMonitor::s_instance) {
+        FunctionCallMonitor::s_instance->AddFunctionCall(ctx.name, ctx.target, "MinHook");
+    }
+
+    using OrigFn = uintptr_t(__fastcall*)(void*, void*, void*, void*);
+    auto orig = reinterpret_cast<OrigFn>(ctx.original);
+    if (orig) {
+        return orig(rcx, rdx, r8, r9);
+    }
+    return 0;
+}
+
+#define MH_DETOUR(N) &MH_Detour<N>
+static DetourFn g_mhDetourTable[kMaxMHDetours] = {
+    MH_DETOUR(0),  MH_DETOUR(1),  MH_DETOUR(2),  MH_DETOUR(3),
+    MH_DETOUR(4),  MH_DETOUR(5),  MH_DETOUR(6),  MH_DETOUR(7),
+    MH_DETOUR(8),  MH_DETOUR(9),  MH_DETOUR(10), MH_DETOUR(11),
+    MH_DETOUR(12), MH_DETOUR(13), MH_DETOUR(14), MH_DETOUR(15),
+    MH_DETOUR(16), MH_DETOUR(17), MH_DETOUR(18), MH_DETOUR(19),
+    MH_DETOUR(20), MH_DETOUR(21), MH_DETOUR(22), MH_DETOUR(23),
+    MH_DETOUR(24), MH_DETOUR(25), MH_DETOUR(26), MH_DETOUR(27),
+    MH_DETOUR(28), MH_DETOUR(29), MH_DETOUR(30), MH_DETOUR(31),
+    MH_DETOUR(32), MH_DETOUR(33), MH_DETOUR(34), MH_DETOUR(35),
+    MH_DETOUR(36), MH_DETOUR(37), MH_DETOUR(38), MH_DETOUR(39),
+    MH_DETOUR(40), MH_DETOUR(41), MH_DETOUR(42), MH_DETOUR(43),
+    MH_DETOUR(44), MH_DETOUR(45), MH_DETOUR(46), MH_DETOUR(47),
+    MH_DETOUR(48), MH_DETOUR(49), MH_DETOUR(50), MH_DETOUR(51),
+    MH_DETOUR(52), MH_DETOUR(53), MH_DETOUR(54), MH_DETOUR(55),
+    MH_DETOUR(56), MH_DETOUR(57), MH_DETOUR(58), MH_DETOUR(59),
+    MH_DETOUR(60), MH_DETOUR(61), MH_DETOUR(62), MH_DETOUR(63),
+};
+
+static int ReserveMHSlot(uintptr_t target, const std::string& name, const std::string& ctx)
+{
+    for (int i = 0; i < kMaxMHDetours; ++i) {
+        if (!g_mhUsed.test(i)) {
+            g_mhUsed.set(i);
+            g_mhCtx[i].target = target;
+            g_mhCtx[i].name = name;
+            g_mhCtx[i].context = ctx;
+            g_mhCtx[i].original = nullptr;
+            g_addr2idx[target] = i;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void ReleaseMHSlot(uintptr_t target)
+{
+    auto it = g_addr2idx.find(target);
+    if (it != g_addr2idx.end()) {
+        const int i = it->second;
+        g_mhUsed.reset(i);
+        g_mhCtx[i] = MHCtx{};
+        g_addr2idx.erase(it);
+    }
+}
 
 static inline uintptr_t RelocateIfIDA(uintptr_t addr)
 {
@@ -693,6 +797,15 @@ void FunctionCallMonitor::RenderFunctionDatabaseBrowser()
     ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.8f, 1.0f), "Function Database Browser");
     ImGui::Separator();
 
+    // Use the instance field directly (avoid static init with member)
+    bool useRealHooks = m_enableRealHooking;
+    if (ImGui::Checkbox("Use Real Hooks (MinHook)", &useRealHooks)) {
+        SetRealHookingEnabled(useRealHooks);
+    }
+    ImGui::SameLine();
+    ImGui::TextColored(useRealHooks ? ImVec4(1.0f, 0.0f, 0.0f, 1.0f) : ImVec4(0.0f, 1.0f, 0.0f, 1.0f),
+        useRealHooks ? "[REAL HOOKS ACTIVE]" : "[SAFE MODE]");
+
     if (m_functionDatabaseLoaded)
     {
         ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "Database Status: LOADED (%zu functions)",
@@ -745,7 +858,6 @@ void FunctionCallMonitor::RenderFunctionDatabaseBrowser()
         ImGuiTableFlags_Resizable | ImGuiTableFlags_Sortable |
         ImGuiTableFlags_ScrollY | ImGuiTableFlags_Borders))
     {
-
         ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 160.0f);
         ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthFixed, 140.0f);
@@ -801,7 +913,12 @@ void FunctionCallMonitor::RenderFunctionDatabaseBrowser()
             ImGui::PushID(static_cast<int>(address));
             if (ImGui::SmallButton("Hook"))
             {
-                CreateSafeLoggingHook(relocated, funcInfo.name, "DatabaseBrowser");
+                if (useRealHooks) {
+                    CreateRealLoggingHook(relocated, funcInfo.name, "DatabaseBrowser");
+                }
+                else {
+                    CreateSafeLoggingHook(relocated, funcInfo.name, "DatabaseBrowser");
+                }
             }
             ImGui::SameLine();
             if (ImGui::SmallButton("Debug"))
@@ -981,11 +1098,13 @@ void FunctionCallMonitor::RenderCombinedDatabaseView()
 
                 ImGui::TableNextColumn();
                 ImGui::PushID(static_cast<int>(address));
-                if (ImGui::SmallButton("Hook")) {
+                if (ImGui::SmallButton("Hook"))
+                {
                     CreateSafeLoggingHook(address, name, "CombinedView");
                 }
                 ImGui::SameLine();
-                if (ImGui::SmallButton("Analyze")) {
+                if (ImGui::SmallButton("Analyze"))
+                {
                     ValidateAndDebugAddress(address, name);
                 }
                 ImGui::PopID();
@@ -1468,6 +1587,21 @@ void FunctionCallMonitor::Initialize()
 
     LoadDatabasesWithErrorHandling();
 
+    // Initialize MinHook
+    {
+        std::lock_guard<std::mutex> lock(g_minHookMutex);
+        if (!g_minHookInitialized) {
+            MH_STATUS status = MH_Initialize();
+            if (status == MH_OK || status == MH_ERROR_ALREADY_INITIALIZED) {
+                g_minHookInitialized = true;
+                LogInfo("MinHook initialized during startup");
+            }
+            else {
+                LogError("Failed to initialize MinHook: " + std::to_string(status));
+            }
+        }
+    }
+
     if (m_functionScanner && m_functionAnalyzer && m_hookManager) {
         auto funcDb = std::make_shared<SapphireHook::FunctionDatabase>();
         auto sigDb = std::make_shared<SapphireHook::SignatureDatabase>();
@@ -1480,6 +1614,9 @@ void FunctionCallMonitor::Initialize()
 
         m_hookManager->SetupFunctionHooks();
     }
+
+    // Enable real hooking by default for actual interception
+    m_enableRealHooking = true;
 }
 
 void FunctionCallMonitor::LoadDatabasesWithErrorHandling()
@@ -1769,51 +1906,76 @@ bool FunctionCallMonitor::CreateRealLoggingHook(uintptr_t address, const std::st
 {
     const uintptr_t target = RelocateIfIDA(address);
     std::stringstream ss; ss << std::hex << std::uppercase << target;
-    LogInfo("Creating REAL logging hook for " + name + " at 0x" + ss.str());
+    LogInfo("Creating REAL MinHook for " + name + " at 0x" + ss.str());
 
-    if (g_attemptedHooks.find(target) != g_attemptedHooks.end())
-    {
+    if (g_attemptedHooks.find(target) != g_attemptedHooks.end()) {
         LogWarning("Address already hooked, skipping");
         return false;
     }
 
-    if (!IsSafeAddress(target))
-    {
+    if (!IsSafeAddress(target)) {
         LogError("Address failed safety checks, aborting real hook");
         return false;
     }
 
     bool looksLikeFunction = false;
-    if (!AnalyzeFunctionCode(target, &looksLikeFunction))
-    {
+    if (!AnalyzeFunctionCode(target, &looksLikeFunction)) {
         LogError("Exception while analyzing function");
         return false;
     }
-
-    if (!looksLikeFunction)
-    {
+    if (!looksLikeFunction) {
         LogWarning("Address 0x" + std::to_string(address) + " may not be a function start");
     }
 
+    // Ensure MinHook is initialized once
+    {
+        std::lock_guard<std::mutex> lock(g_minHookMutex);
+        if (!g_minHookInitialized) {
+            MH_STATUS init = MH_Initialize();
+            if (init != MH_OK && init != MH_ERROR_ALREADY_INITIALIZED) {
+                LogError("Failed to initialize MinHook: " + std::to_string(init));
+                return false;
+            }
+            g_minHookInitialized = true;
+        }
+    }
+
+    // Reserve a unique detour slot for this hook
+    const int slot = ReserveMHSlot(target, name, context);
+    if (slot < 0) {
+        LogError("No free MinHook detour slots available");
+        return false;
+    }
+
+    void* pOriginal = nullptr;
+    MH_STATUS status = MH_CreateHook(reinterpret_cast<LPVOID>(target),
+        reinterpret_cast<LPVOID>(g_mhDetourTable[slot]),
+        &pOriginal);
+    if (status != MH_OK) {
+        LogError("Failed to create MinHook at 0x" + std::to_string(target) + ": " + std::to_string(status));
+        ReleaseMHSlot(target);
+        return false;
+    }
+
+    status = MH_EnableHook(reinterpret_cast<LPVOID>(target));
+    if (status != MH_OK) {
+        LogError("Failed to enable MinHook at 0x" + std::to_string(target) + ": " + std::to_string(status));
+        MH_RemoveHook(reinterpret_cast<LPVOID>(target));
+        ReleaseMHSlot(target);
+        return false;
+    }
+
+    // Store hook bookkeeping
     g_attemptedHooks.insert(target);
-
-    if (!m_hookManager) {
-        LogError("Hook manager unavailable");
-        return false;
-    }
-
-    // Use the bool return value
-    SapphireHook::AdvancedHookManager::HookConfig cfg{ context };
-    bool ok = m_hookManager->HookFunctionByAddress(target, name, cfg);
-    if (!ok) {
-        LogError("Failed to install real hook at 0x" + std::to_string(target));
-        return false;
-    }
+    g_hookMap[target] = HookInfo(name, context, pOriginal, target);
+    g_originalFunctions[target] = pOriginal;
+    g_mhCtx[slot].original = pOriginal;
 
     if (std::find(m_discoveredFunctions.begin(), m_discoveredFunctions.end(), target) == m_discoveredFunctions.end())
         m_discoveredFunctions.push_back(target);
 
-    LogInfo("Real hook armed (INT3) for " + name);
+    LogInfo("MinHook successfully installed for " + name + " at 0x" + std::to_string(target));
+    AddFunctionCall(name, target, "MinHookCreated"); // clear label; this is a created event
     return true;
 }
 
@@ -1988,6 +2150,9 @@ void FunctionCallMonitor::DiscoverFunctionsFromSignatures() {
 
     LogInfo("FunctionCallMonitor: Discovering functions from signatures...");
 
+// Add this log line to diagnose if DiscoverFunctionsFromSignatures is called
+    LogInfo("DiscoverFunctionsFromSignatures: Start");
+
     size_t previousCount = m_discoveredFunctions.size();
 
     m_functionAnalyzer->DiscoverFunctionsFromSignatures();
@@ -2007,7 +2172,13 @@ void FunctionCallMonitor::DiscoverFunctionsFromSignatures() {
             LogInfo("Discovered " + std::to_string(newCount - previousCount) +
                 " new functions from signatures");
         }
+        else {
+            LogInfo("No new functions discovered from signatures");
+        }
     }
+
+    // Add this log line to indicate completion
+    LogInfo("DiscoverFunctionsFromSignatures: Complete");
 }
 
 void FunctionCallMonitor::InitializeWithTypeInformation() {
@@ -2175,9 +2346,48 @@ void FunctionCallMonitor::HookRandomFunctions(int count) {
 }
 
 void FunctionCallMonitor::UnhookAllFunctions() {
+    // First unhook MinHook hooks
+    {
+        std::lock_guard<std::mutex> lock(g_minHookMutex);
+
+        for (const auto& [addr, hookInfo] : g_hookMap) {
+            MH_STATUS status = MH_DisableHook(reinterpret_cast<LPVOID>(addr));
+            if (status == MH_OK) {
+                MH_RemoveHook(reinterpret_cast<LPVOID>(addr));
+                LogInfo("Removed MinHook at 0x" + std::to_string(addr));
+            }
+            ReleaseMHSlot(addr);
+        }
+
+        g_hookMap.clear();
+        g_originalFunctions.clear();
+        g_attemptedHooks.clear();
+
+        // NEW: fully uninitialize MinHook when no hooks remain
+        if (g_minHookInitialized) {
+            const MH_STATUS st = MH_Uninitialize();
+            if (st == MH_OK || st == MH_ERROR_NOT_INITIALIZED) {
+                g_minHookInitialized = false;
+                LogInfo("MinHook uninitialized");
+            }
+            else {
+                LogWarning("MinHook uninitialize returned: " + std::to_string(st));
+            }
+        }
+    }
+
+    // Then unhook VEH/INT3 hooks if any
     if (m_hookManager) {
         m_hookManager->UnhookAllFunctions();
     }
+
+    LogInfo("All hooks cleared");
+}
+
+// Add a function to toggle between safe and real hooks
+void FunctionCallMonitor::SetRealHookingEnabled(bool enabled) {
+    m_enableRealHooking = enabled;
+    LogInfo("Real hooking " + std::string(enabled ? "ENABLED" : "DISABLED"));
 }
 
 void FunctionCallMonitor::ScanAllFunctions() {

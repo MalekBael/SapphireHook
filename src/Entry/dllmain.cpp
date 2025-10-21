@@ -3,6 +3,9 @@
 #include <thread>
 #include <cstdio>
 #include <filesystem>
+#include <atomic>
+#include <MinHook.h>
+
 #include "../Hooking/hook_manager.h"
 #include "../UI/imgui_overlay.h"
 #include "../Hooking/lua_hook.h"
@@ -11,7 +14,15 @@
 #include "../UI/UIManager.h"
 #include "../Modules/FunctionCallMonitor.h"
 
+using SapphireHook::LogInfo;
+using SapphireHook::LogWarning;
+using SapphireHook::LogError;
+
+static HMODULE g_hModule = nullptr;
+static std::atomic<bool> g_unloadStarted{ false };
+
 bool g_SafeToInitialize = false;
+
 // New: prevent accidental unloads via false-positive hotkey while minimized/not focused
 static bool ShouldAcceptHotkeys()
 {
@@ -35,6 +46,81 @@ static void RebindConsoleStreams()
 }
 
 static bool IsGameWindowMinimized();
+
+// Centralized, idempotent cleanup (safe to call multiple times)
+static void PerformSafeUnload()
+{
+    // Ensure we only run once even if called by hotkey and export
+    bool expected = false;
+    if (!g_unloadStarted.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        return;
+    }
+
+    try {
+        LogInfo("=== Starting Safe DLL Unload ===");
+
+        if (SapphireHook::UIManager::HasInstance()) {
+            auto& ui = SapphireHook::UIManager::GetInstance();
+
+            // Stop and unhook the function monitor first (removes MinHook/VEH)
+            auto* functionMonitor =
+                dynamic_cast<FunctionCallMonitor*>(ui.GetModule("function_monitor"));
+            if (functionMonitor) {
+                functionMonitor->StopScan();
+                functionMonitor->UnhookAllFunctions();
+                LogInfo("Function monitor safely stopped");
+            }
+
+            // Close all module windows
+            auto& modules = ui.GetModules();
+            for (auto& module : modules)
+                if (module) module->SetWindowOpen(false);
+            LogInfo("All module windows closed");
+        }
+
+        // Tear down overlay next
+        CleanupOverlay();
+        LogInfo("Overlay cleanup completed");
+
+        // Shutdown UI manager
+        SapphireHook::UIManager::Shutdown();
+        LogInfo("UIManager shutdown completed");
+
+        // Defensive: ensure MinHook is uninitialized even if monitor was not present
+        const MH_STATUS st = MH_Uninitialize();
+        if (st == MH_OK) {
+            LogInfo("MinHook uninitialized");
+        } else if (st != MH_ERROR_NOT_INITIALIZED) {
+            LogWarning("MinHook uninitialize returned: " + std::to_string(st));
+        }
+
+        LogInfo("=== Safe DLL Unload Complete ===");
+        Sleep(250);
+    } catch (...) {
+        LogError("Exception during cleanup - proceeding with unload");
+    }
+}
+
+static DWORD WINAPI ShutdownThread(LPVOID)
+{
+    __try {
+        PerformSafeUnload();
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        // best-effort shutdown
+    }
+
+    if (g_hModule) {
+        FreeLibraryAndExitThread(g_hModule, 0);
+    }
+    return 0;
+}
+
+// Exported entry to request a clean unload from an injector or UI button
+extern "C" __declspec(dllexport) void __stdcall SapphireHook_Shutdown()
+{
+    HANDLE th = CreateThread(nullptr, 0, ShutdownThread, nullptr, 0, nullptr);
+    if (th) CloseHandle(th);
+}
 
 DWORD WINAPI MainThread(LPVOID lpReserved)
 {
@@ -196,38 +282,15 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
             ULONGLONG now = GetTickCount64();
             if (now - s_lastWarn > 2000) {
                 SapphireHook::Logger::Instance().Warning("UI unload requested while minimized; deferring until window is restored");
-                s_lastWarn = now;
+                s_lastWarn = (DWORD)now;
             }
         }
 
         Sleep(100);
     }
 
-    try {
-        LogInfo("=== Starting Safe DLL Unload ===");
-        if (UIManager::HasInstance()) {
-            UIManager& ui = UIManager::GetInstance();
-            auto* functionMonitor =
-                dynamic_cast<FunctionCallMonitor*>(ui.GetModule("function_monitor"));
-            if (functionMonitor) {
-                functionMonitor->StopScan();
-                functionMonitor->UnhookAllFunctions();
-                LogInfo("Function monitor safely stopped");
-            }
-            auto& modules = ui.GetModules();
-            for (auto& module : modules)
-                if (module) module->SetWindowOpen(false);
-            LogInfo("All module windows closed");
-        }
-        CleanupOverlay();
-        LogInfo("Overlay cleanup completed");
-        UIManager::Shutdown();
-        LogInfo("UIManager shutdown completed");
-        LogInfo("=== Safe DLL Unload Complete ===");
-        Sleep(250);
-    } catch (...) {
-        LogError("Exception during cleanup - proceeding with unload");
-    }
+    // Centralized cleanup
+    PerformSafeUnload();
 
     LogInfo("SapphireHook unloading...");
 
@@ -241,10 +304,12 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
 {
     switch (reason) {
     case DLL_PROCESS_ATTACH:
+        g_hModule = hModule;
         DisableThreadLibraryCalls(hModule);
         CreateThread(nullptr, 0x10000, MainThread, hModule, 0, nullptr);
         break;
     case DLL_PROCESS_DETACH:
+        // No heavy work here; PerformSafeUnload runs from MainThread or ShutdownThread.
         break;
     }
     return TRUE;
