@@ -105,6 +105,7 @@
     <ClInclude Include="src\Core\FunctionDatabase.h" />
     <ClInclude Include="src\Core\PacketInjector.h" />
     <ClInclude Include="src\Core\ResourceLoader.h" />
+    <ClInclude Include="src\Core\RttiVTableFinder.h" />
     <ClInclude Include="src\Core\SafeMemory.h" />
     <ClInclude Include="src\Core\ServiceManager.h" />
     <ClInclude Include="src\Core\SignatureDatabase.h" />
@@ -176,7 +177,7 @@
   </ItemGroup>
   <!-- Sources -->
   <ItemGroup>
-    <ClCompile Include="src\DllMain.cpp" />
+    <ClCompile Include="src\Core\RttiVTableFinder.cpp" />
     <ClCompile Include="src\Network\PacketDecoder.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />

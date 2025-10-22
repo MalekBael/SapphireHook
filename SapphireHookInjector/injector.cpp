@@ -111,26 +111,56 @@ static bool IsProcessRunning(DWORD pid) {
     return ok && code == STILL_ACTIVE;
 }
 
-static bool IsDllAlreadyLoaded(DWORD pid, const std::wstring& dllNameCaseInsensitive) {
+static std::wstring ToLower(std::wstring s) {
+    std::transform(s.begin(), s.end(), s.begin(), ::towlower);
+    return s;
+}
+
+static std::wstring CanonicalLower(const std::wstring& path) {
+    std::error_code ec;
+    auto p = fs::weakly_canonical(fs::path(path), ec);
+    return ToLower(ec ? fs::path(path).wstring() : p.wstring());
+}
+
+// NOTE: Now compares full path; only returns true when the exact DLL path is already mapped.
+// If a same-named DLL exists at a different path, we log and allow injection to proceed.
+static bool IsDllAlreadyLoaded(DWORD pid, const std::wstring& dllFullPath) {
+    const std::wstring targetFullLower = CanonicalLower(dllFullPath);
+    const std::wstring targetBaseLower = ToLower(fs::path(dllFullPath).filename().wstring());
+
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
     if (snapshot == INVALID_HANDLE_VALUE) return false;
+
     MODULEENTRY32W me{ sizeof(me) };
-    bool found = false;
+    bool exactFound = false;
+    bool sameNameDifferentPath = false;
+    std::wstring sameNamePath;
+
     if (Module32FirstW(snapshot, &me)) {
         do {
-            std::wstring mod = me.szModule;
-            std::wstring lowerMod = mod;
-            std::transform(lowerMod.begin(), lowerMod.end(), lowerMod.begin(), ::towlower);
-            std::wstring lowerTarget = dllNameCaseInsensitive;
-            std::transform(lowerTarget.begin(), lowerTarget.end(), lowerTarget.begin(), ::towlower);
-            if (lowerMod == lowerTarget) {
-                found = true;
+            std::wstring modBaseLower = ToLower(me.szModule);
+            std::wstring modPathLower = CanonicalLower(me.szExePath);
+
+            if (modPathLower == targetFullLower) {
+                exactFound = true;
                 break;
+            }
+            if (modBaseLower == targetBaseLower && modPathLower != targetFullLower) {
+                sameNameDifferentPath = true;
+                sameNamePath = modPathLower;
             }
         } while (Module32NextW(snapshot, &me));
     }
     CloseHandle(snapshot);
-    return found;
+
+    if (exactFound) return true;
+
+    if (sameNameDifferentPath) {
+        Log(LogLevel::Warn,
+            "Module with same filename already loaded from different path; proceeding to inject: "
+            + std::string(fs::path(sameNamePath).string()));
+    }
+    return false;
 }
 
 static std::string HashFileSHA256(const fs::path& p) {
@@ -273,8 +303,8 @@ static bool InjectDLL(DWORD pid, const std::wstring& fullDllPath) {
         Log(LogLevel::Error, "Process not running at inject start");
         return false;
     }
-    if (IsDllAlreadyLoaded(pid, fs::path(fullDllPath).filename().wstring())) {
-        Log(LogLevel::Warn, "DLL already loaded; skipping");
+    if (IsDllAlreadyLoaded(pid, fullDllPath)) {
+        Log(LogLevel::Warn, "DLL already loaded (exact path match); skipping");
         return true;
     }
 
@@ -337,7 +367,7 @@ static bool InjectDLL(DWORD pid, const std::wstring& fullDllPath) {
         Log(LogLevel::Warn, "LoadLibraryW returned NULL (module load may have failed)");
     }
 
-    bool loaded = IsDllAlreadyLoaded(pid, fs::path(fullDllPath).filename().wstring());
+    bool loaded = IsDllAlreadyLoaded(pid, fullDllPath);
     Log(LogLevel::Info, std::string("Post-check: DLL ") + (loaded ? "present" : "NOT present"));
 
     CloseHandle(hProc);
@@ -352,7 +382,7 @@ int main(int argc, char** argv) {
     if (!dbg) Log(LogLevel::Warn, "SeDebugPrivilege not granted (continuing)");
 
     // Set SAPPHIRE_INJECTOR_PATH based on the injector's actual exe location
-    wchar_t exePathW[MAX_PATH] = {0};
+    wchar_t exePathW[MAX_PATH] = { 0 };
     DWORD got = GetModuleFileNameW(nullptr, exePathW, MAX_PATH);
     fs::path injectorDir = got ? fs::path(exePathW).parent_path() : fs::current_path();
     std::string pathEnv = std::string("SAPPHIRE_INJECTOR_PATH=") + injectorDir.string();
@@ -406,7 +436,7 @@ int main(int argc, char** argv) {
             std::this_thread::sleep_for(std::chrono::milliseconds(500));
         }
         return 0;
-    };
+        };
 
     DWORD selectedPid = waitForProcess(args.waitSeconds);
     if (selectedPid == 0) {
@@ -425,7 +455,7 @@ int main(int argc, char** argv) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
         }
         return false;
-    };
+        };
 
     if (!args.watch) {
         return injectWithRetries(selectedPid) ? 0 : 4;
@@ -435,7 +465,8 @@ int main(int argc, char** argv) {
     while (!g_cancel) {
         if (!injectWithRetries(selectedPid)) {
             Log(LogLevel::Error, "Failed to inject into current instance");
-        } else {
+        }
+        else {
             Log(LogLevel::Info, "Monitoring process (PID " + std::to_string(selectedPid) + ")");
             while (!g_cancel && IsProcessRunning(selectedPid))
                 std::this_thread::sleep_for(std::chrono::seconds(2));
@@ -452,4 +483,4 @@ int main(int argc, char** argv) {
 }
 #endif // SH_DISABLE_INJECTOR_MAIN
 
-
+//Test

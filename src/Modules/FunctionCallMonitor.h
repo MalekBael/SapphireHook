@@ -42,6 +42,8 @@ public:
     static FunctionCallMonitor * GetInstance() { return s_instance; }
     // Toggle real hooking mode (UI calls this)
     void SetRealHookingEnabled(bool enabled);
+    bool HasReplayForAddress(uintptr_t address) const;
+    bool TriggerMinHookedFunction(uintptr_t address);
     FunctionCallMonitor();
     ~FunctionCallMonitor(); // changed from = default
 
@@ -127,6 +129,7 @@ public:
     void RenderEnhancedDatabaseSearch();
     void RenderManualHookSection();
     void RenderMemoryScanTab();
+    void RenderStringXrefTab(); 
 
     void ScanAllFunctions();
     void ScanExportedFunctions(std::vector<uintptr_t>& functions);
@@ -333,6 +336,24 @@ private:
 
         void Reset() { *this = MemoryScanState{}; }
     } m_memScan;
+
+    struct StringXrefState {
+        bool running = false;
+        int minLen = 6;
+        size_t maxStringsPerFn = 3;
+        size_t totalAscii = 0;
+        size_t totalUtf16 = 0;
+        std::future<void> task;
+        std::string status;
+        std::atomic<bool> cancel{ false };
+        std::chrono::steady_clock::time_point started{};
+        struct Row {
+            uintptr_t addr{};
+            std::string name;
+            std::vector<std::string> strings; // top N strings
+        };
+        std::vector<Row> rows;
+    } m_strXref;
 
     std::unordered_map<uintptr_t, std::vector<std::string>> m_memScanTags;
     std::vector<uintptr_t> m_memScanMerged;
