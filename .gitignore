@@ -412,3 +412,5 @@ CppProperties.json
 /tools/Find-StalePragmas.ps1
 /tools/Scan-MsbuildLibs.ps1
 /tools
+/.github/copilot-instructions.md
+/docs/REFACTOR.md
