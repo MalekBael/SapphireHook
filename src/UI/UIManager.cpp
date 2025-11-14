@@ -24,6 +24,8 @@
 #include "../Logger/Logger.h"
 
 // Feature modules
+#include "../Modules/CharacterEdit.h"
+#include "../Modules/Weather.h"
 #include "../Modules/DebugCommandsModule.h"
 #include "../Modules/FunctionCallMonitor.h"
 #include "../Modules/MemoryViewerModule.h"
@@ -35,6 +37,8 @@
 #include "../Tools/MemoryScanner.h"
 #include "../Tools/StringXrefAnalyzer.h"
 #include "../Tools/LiveTraceMonitor.h"
+// NEW: Lua GameScript scanner module
+#include "../Modules/LuaGameScriptModule.h"
 
 #pragma comment(lib, "pdh.lib")
 #pragma comment(lib, "iphlpapi.lib")
@@ -505,6 +509,44 @@ void UIManager::RegisterDefaultModules()
 		LogError("Failed to register String XREF Analyzer: " + std::string(e.what()));
 	}
 
+	try {
+		if (GetModule("CharacterEdit") == nullptr) {
+			LogInfo("Creating Character Edit module...");
+			RegisterModule(std::make_unique<SapphireHook::CharacterEditModule>());
+			LogInfo("[OK] Character Edit module registered");
+			successCount++;
+		}
+		else {
+			LogInfo("Character Edit module already exists");
+			successCount++;
+		}
+	}
+	catch (const std::exception& e) {
+		LogError("Failed to register Character Edit: " + std::string(e.what()));
+	}
+	catch (...) {
+		LogError("Failed to register Character Edit: unknown exception");
+	}
+
+	try {
+		if (GetModule("Weather") == nullptr) {
+			LogInfo("Creating Weather module...");
+			RegisterModule(std::make_unique<SapphireHook::WeatherModule>());
+			LogInfo("[OK] Weather module registered");
+			successCount++;
+		}
+		else {
+			LogInfo("Weather module already exists");
+			successCount++;
+		}
+	}
+	catch (const std::exception& e) {
+		LogError("Failed to register Weather: " + std::string(e.what()));
+	}
+	catch (...) {
+		LogError("Failed to register Weather: unknown exception");
+	}
+
 	try
 	{
 		if (GetModule("LiveTraceMonitor") == nullptr)  // Original casing
@@ -518,6 +560,25 @@ void UIManager::RegisterDefaultModules()
 	catch (const std::exception& e)
 	{
 		LogError("Failed to register Live Trace Monitor: " + std::string(e.what()));
+	}
+
+	try {
+		if (GetModule("LuaGameScriptModule") == nullptr) {
+			LogInfo("Creating Lua GameScript module...");
+			RegisterModule(std::make_unique<SapphireHook::LuaGameScriptModule>());
+			LogInfo("[OK] Lua GameScript module registered");
+			successCount++;
+		}
+		else {
+			LogInfo("Lua GameScript module already exists");
+			successCount++;
+		}
+	}
+	catch (const std::exception& e) {
+		LogError("Failed to register Lua GameScript: " + std::string(e.what()));
+	}
+	catch (...) {
+		LogError("Failed to register Lua GameScript: unknown exception");
 	}
 
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
@@ -553,7 +614,8 @@ void UIManager::VerifyDefaultModules()
 		// Tool modules with original casing
 		"MemoryScanner",
 		"StringXrefAnalyzer",
-		"LiveTraceMonitor"
+		"LiveTraceMonitor",
+		"LuaGameScriptModule"
 	};
 
 	LogInfo("=== DEFAULT MODULE VERIFICATION START ===");
@@ -684,6 +746,36 @@ void UIManager::RenderMainMenu()
 				}
 			}
 
+			ImGui::Separator();
+			{
+				static UIModule* s_charEdit = nullptr;
+				if (!s_charEdit)
+					s_charEdit = GetModule("CharacterEdit");
+				if (s_charEdit) {
+					bool open = s_charEdit->IsWindowOpen();
+					if (ImGui::MenuItem("Character Edit", nullptr, open)) {
+						s_charEdit->SetWindowOpen(!open);
+					}
+				}
+				else {
+					ImGui::MenuItem("Character Edit", nullptr, false, false); // disabled until module is registered
+				}
+
+				// Weather (module-driven; no UIManager globals)
+				static UIModule* s_weather = nullptr;
+				if (!s_weather)
+					s_weather = GetModule("Weather");
+				if (s_weather) {
+					bool open = s_weather->IsWindowOpen();
+					if (ImGui::MenuItem("Weather", nullptr, open)) {
+						s_weather->SetWindowOpen(!open);
+					}
+				}
+				else {
+					ImGui::MenuItem("Weather", nullptr, false, false); // disabled until module is registered
+				}
+			}
+
 			ImGui::EndMenu();
 		}
 
@@ -750,6 +842,22 @@ void UIManager::RenderMainMenu()
 					if (ImGui::MenuItem(s_liveMonitor->GetDisplayName(), nullptr, open))
 					{
 						s_liveMonitor->SetWindowOpen(!open);
+					}
+				}
+			}
+
+			// NEW: Lua GameScript Scanner
+			{
+				static UIModule* s_luaMod = nullptr;
+				if (!s_luaMod)
+					s_luaMod = GetModule("LuaGameScriptModule");  // Module name
+
+				if (s_luaMod)
+				{
+					bool open = s_luaMod->IsWindowOpen();
+					if (ImGui::MenuItem(s_luaMod->GetDisplayName(), nullptr, open))
+					{
+						s_luaMod->SetWindowOpen(!open);
 					}
 				}
 			}

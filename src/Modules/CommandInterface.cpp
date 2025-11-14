@@ -211,35 +211,75 @@ namespace {
 		if (s_retryActive.exchange(true)) return;
 
 		s_retryThread = std::thread([]() {
-			using SapphireHook::Logger;
 			const UINT_PTR invalid = static_cast<UINT_PTR>(INVALID_SOCKET);
 
-			for (int i = 0; i < 15; ++i) {
+			// Single info at start to avoid per-second spam
+			Logger::Instance().Information("[CommandInterface] Waiting for sockets (quiet retry loop)...");
+
+			// Track last reported values to log only on change
+			UINT_PTR lastZoneLogged = invalid;
+			UINT_PTR lastChatLogged = invalid;
+
+			for (int i = 0; i < 15; ++i) { // ~15 seconds total
 				Sleep(1000);
 
 				UINT_PTR zone = SapphireHook::PacketInjector::s_zoneSocket;
 				UINT_PTR chat = SapphireHook::PacketInjector::s_chatSocket;
 
-				Logger::Instance().InformationF("[CommandInterface] Retry %d: zone=0x%llx chat=0x%llx",
-					i + 1,
-					static_cast<unsigned long long>(zone),
-					static_cast<unsigned long long>(chat));
+				// Log only when the visible state changes (and it’s not the initial invalid state)
+				bool stateChanged = (zone != lastZoneLogged) || (chat != lastChatLogged);
+				if (stateChanged && (zone != invalid || chat != invalid)) {
+					Logger::Instance().InformationF(
+						"[CommandInterface] Socket update: zone=0x%llx chat=0x%llx",
+						static_cast<unsigned long long>(zone),
+						static_cast<unsigned long long>(chat));
+					lastZoneLogged = zone;
+					lastChatLogged = chat;
+				}
+				else {
+					// Throttle periodic noise to Debug and only every 5 attempts
+					if (((i + 1) % 5) == 0) {
+						Logger::Instance().DebugF(
+							"[CommandInterface] Retry %d: zone=0x%llx chat=0x%llx",
+							i + 1,
+							static_cast<unsigned long long>(zone),
+							static_cast<unsigned long long>(chat));
+					}
+				}
 
 				if (zone != invalid && chat != invalid && zone != chat) {
-					Logger::Instance().Information("[CommandInterface] Sockets learned successfully during retry loop");
+					Logger::Instance().Information("[CommandInterface] Sockets learned successfully");
 					break;
 				}
 
-				std::lock_guard<std::mutex> lk(s_seenMx);
-				for (auto s : s_seenSockets) {
-					if (SapphireHook::PacketInjector::s_zoneSocket == invalid) {
-						SapphireHook::PacketInjector::s_zoneSocket = s;
-					}
-					else if (SapphireHook::PacketInjector::s_chatSocket == invalid &&
-						SapphireHook::PacketInjector::s_zoneSocket != s) {
-						SapphireHook::PacketInjector::s_chatSocket = s;
+				// If we have seen inbound sockets, try to assign them
+				{
+					std::lock_guard<std::mutex> lk(s_seenMx);
+					for (auto s : s_seenSockets) {
+						if (SapphireHook::PacketInjector::s_zoneSocket == invalid) {
+							SapphireHook::PacketInjector::s_zoneSocket = s;
+						}
+						else if (SapphireHook::PacketInjector::s_chatSocket == invalid &&
+							SapphireHook::PacketInjector::s_zoneSocket != s) {
+							SapphireHook::PacketInjector::s_chatSocket = s;
+						}
 					}
 				}
+
+				// Re-check success after assignment
+				zone = SapphireHook::PacketInjector::s_zoneSocket;
+				chat = SapphireHook::PacketInjector::s_chatSocket;
+				if (zone != invalid && chat != invalid && zone != chat) {
+					Logger::Instance().Information("[CommandInterface] Sockets learned successfully");
+					break;
+				}
+			}
+
+			// Final note if we didn’t fully learn both sockets
+			const UINT_PTR z = SapphireHook::PacketInjector::s_zoneSocket;
+			const UINT_PTR c = SapphireHook::PacketInjector::s_chatSocket;
+			if (z == invalid || c == invalid || z == c) {
+				Logger::Instance().Warning("[CommandInterface] Socket learning timed out; inbound hooks will continue silently");
 			}
 
 			s_retryActive.store(false);

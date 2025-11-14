@@ -32,6 +32,10 @@ namespace SapphireHook {
 		void CancelAnalysis();
 		std::vector<XrefRow> GetResults() const;
 		bool ExportResultsToText(std::string& outPath) const;
+		bool ExportToIDAPython(std::string& outPath) const;
+		bool ExportEnhancedResults(std::string& outPath) const;
+		bool ExportToCSV(std::string& outPath) const;
+		std::string SanitizeForPython(const std::string& str) const;
 
 	private:
 		bool m_windowOpen = false;

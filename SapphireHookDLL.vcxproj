@@ -24,13 +24,13 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <LanguageStandard>stdcpp20</LanguageStandard>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v145</PlatformToolset>
     <LanguageStandard>stdcpp20</LanguageStandard>
     <EnableUnitySupport>true</EnableUnitySupport>
   </PropertyGroup>
@@ -53,6 +53,7 @@
       <EnableModules>false</EnableModules>
       <AdditionalOptions>/FS /bigobj /Gy /Gw /sdl- %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <PreprocessorDefinitions>SAPPHIREHOOK_ENABLE_ZLIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <!-- Link static libs (adjust paths/names if your built static libs differ) -->
@@ -117,14 +118,17 @@
     <ClInclude Include="src\Hooking\hook_manager.h" />
     <ClInclude Include="src\Hooking\lua_hook.h" />
     <ClInclude Include="src\Logger\Logger.h" />
+    <ClInclude Include="src\Modules\CharacterEdit.h" />
     <ClInclude Include="src\Modules\CommandInterface.h" />
     <ClInclude Include="src\Modules\DebugCommandsModule.h" />
     <ClInclude Include="src\Modules\FunctionCallMonitor.h" />
     <ClInclude Include="src\Modules\GMCommandList.h" />
     <ClInclude Include="src\Modules\GMCommandsModule.h" />
+    <ClInclude Include="src\Modules\LuaGameScriptModule.h" />
     <ClInclude Include="src\Modules\MemoryViewerModule.h" />
     <ClInclude Include="src\Modules\NetDiagnosticsModule.h" />
     <ClInclude Include="src\Modules\SettingsModule.h" />
+    <ClInclude Include="src\Modules\Weather.h" />
     <ClInclude Include="src\Monitor\NetworkMonitor.h" />
     <ClInclude Include="src\Monitor\NetworkMonitorHelper.h" />
     <ClInclude Include="src\Monitor\NetworkMonitorTypes.h" />
@@ -142,7 +146,9 @@
     <ClInclude Include="src\ProtocolHandlers\Zone\ClientZoneDef.h" />
     <ClInclude Include="src\ProtocolHandlers\Zone\ServerZoneDef.h" />
     <ClInclude Include="src\Tools\LiveTraceMonitor.h" />
+    <ClInclude Include="src\Tools\LuaGameScriptScanner.h" />
     <ClInclude Include="src\Tools\MemoryScanner.h" />
+    <ClInclude Include="src\Tools\SqPackReader.h" />
     <ClInclude Include="src\Tools\StringXrefAnalyzer.h" />
     <ClInclude Include="src\UI\imgui_overlay.h" />
     <ClInclude Include="src\UI\UIManager.h" />
@@ -181,9 +187,14 @@
   <!-- Sources -->
   <ItemGroup>
     <ClCompile Include="src\Core\RttiVTableFinder.cpp" />
+    <ClCompile Include="src\Modules\CharacterEdit.cpp" />
+    <ClCompile Include="src\Modules\LuaGameScriptModule.cpp" />
+    <ClCompile Include="src\Modules\Weather.cpp" />
     <ClCompile Include="src\Network\PacketDecoder.cpp" />
     <ClCompile Include="src\Tools\LiveTraceMonitor.cpp" />
+    <ClCompile Include="src\Tools\LuaGameScriptScanner.cpp" />
     <ClCompile Include="src\Tools\MemoryScanner.cpp" />
+    <ClCompile Include="src\Tools\SqPackReader.cpp" />
     <ClCompile Include="src\Tools\StringXrefAnalyzer.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />
@@ -244,6 +255,8 @@
     <None Include=".editorconfig" />
     <None Include=".gitattributes" />
     <None Include=".gitignore" />
+    <None Include="G:\Workspace\Project Sapphire\coinach\2016.07.05.0000.0001\rawexd\Weather.csv" />
+    <None Include="G:\Workspace\Project Sapphire\coinach\2016.07.05.0000.0001\rawexd\WeatherGroup.csv" />
     <None Include="packages.config" />
     <None Include="vendor\hex_editor\LICENSE" />
     <None Include="vendor\implot\LICENSE" />
