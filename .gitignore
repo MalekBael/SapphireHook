@@ -417,3 +417,4 @@ CppProperties.json
 docs/refactor-18-11.md
 resources/filenames.csv
 resources/folders.csv
+vcpkg/
