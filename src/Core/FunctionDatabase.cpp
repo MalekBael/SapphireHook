@@ -441,8 +441,9 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
         return functionsLoaded > 0;
     }
 
-    // 3) Flat formats and other heuristics (unchanged)… existing code below if needed
-    // ... keep your existing flat-format SimpleJSON/heuristic logic here ...
+    // Fallback: no functions loaded from any format
+    LogWarning("No functions loaded from JSON file: " + filepath);
+    return false;
 }
 
 bool FunctionDatabase::SaveJsonFile(const std::string& filepath)

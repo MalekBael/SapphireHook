@@ -1,0 +1,6 @@
+#include "Resources.h"
+
+// Embed CSV files as RCDATA resources
+IDR_FOLDERS_CSV    RCDATA  "folders.csv"
+IDR_FILENAMES_CSV  RCDATA  "filenames.csv"
+// // End of resource file

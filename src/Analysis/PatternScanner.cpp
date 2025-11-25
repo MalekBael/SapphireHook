@@ -4,511 +4,8 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
-#include <fstream>
-#include <regex>
-#include <random>
-#include <locale>
-#include <codecvt>
-
-#include <iostream>
 
 namespace SapphireHook {
-
-    std::shared_ptr<EnhancedPatternScanner> PatternScanner::s_globalScanner;
-    std::mutex PatternScanner::s_globalScannerMutex;
-
-    std::string ScanCacheEntry::ToJson() const
-    {
-        std::ostringstream json;
-        json << "{\n";
-        json << "  \"gameVersion\": \"" << gameVersion << "\",\n";
-        json << "  \"moduleBase\": \"0x" << std::hex << moduleBase << "\",\n";
-        json << "  \"moduleSize\": " << std::dec << moduleSize << ",\n";
-        json << "  \"moduleHash\": \"" << moduleHash << "\",\n";
-        json << "  \"cacheTime\": " << std::chrono::duration_cast<std::chrono::seconds>(cacheTime.time_since_epoch()).count() << ",\n";
-        json << "  \"resolvedPatterns\": {\n";
-
-        bool first = true;
-        for (const auto& pair : resolvedPatterns)
-        {
-            if (!first) json << ",\n";
-            json << "    \"" << pair.first << "\": \"0x" << std::hex << pair.second << "\"";
-            first = false;
-        }
-        json << "\n  }\n";
-        json << "}";
-        return json.str();
-    }
-
-    std::optional<ScanCacheEntry> ScanCacheEntry::FromJson(const std::string& json)
-    {
-        ScanCacheEntry entry;
-
-        try
-        {
-            std::regex versionRegex("\"gameVersion\":\\s*\"([^\"]*)\"");
-            std::smatch match;
-            if (std::regex_search(json, match, versionRegex))
-            {
-                entry.gameVersion = match[1].str();
-            }
-
-            std::regex baseRegex("\"moduleBase\":\\s*\"0x([0-9a-fA-F]+)\"");
-            if (std::regex_search(json, match, baseRegex))
-            {
-                entry.moduleBase = std::stoull(match[1].str(), nullptr, 16);
-            }
-
-            std::regex sizeRegex("\"moduleSize\":\\s*(\\d+)");
-            if (std::regex_search(json, match, sizeRegex))
-            {
-                entry.moduleSize = std::stoull(match[1].str());
-            }
-
-            std::regex hashRegex("\"moduleHash\":\\s*\"([^\"]*)\"");
-            if (std::regex_search(json, match, hashRegex))
-            {
-                entry.moduleHash = match[1].str();
-            }
-
-            std::regex timeRegex("\"cacheTime\":\\s*(\\d+)");
-            if (std::regex_search(json, match, timeRegex))
-            {
-                auto timeValue = std::stoll(match[1].str());
-                entry.cacheTime = std::chrono::system_clock::from_time_t(timeValue);
-            }
-
-            std::regex patternRegex("\"([^\"]+)\":\\s*\"0x([0-9a-fA-F]+)\"");
-            std::sregex_iterator iter(json.begin(), json.end(), patternRegex);
-            std::sregex_iterator end;
-
-            for (; iter != end; ++iter)
-            {
-                std::string pattern = (*iter)[1].str();
-                uintptr_t address = std::stoull((*iter)[2].str(), nullptr, 16);
-                if (pattern != "gameVersion" && pattern != "moduleBase" &&
-                    pattern != "moduleHash" && pattern != "cacheTime")
-                {
-                    entry.resolvedPatterns[pattern] = address;
-                }
-            }
-
-            return entry;
-        }
-        catch (const std::exception& e)
-        {
-            LogError("Failed to parse cache JSON: " + std::string(e.what()));
-            return std::nullopt;
-        }
-    }
-
-    void ScanMetrics::RecordScan(std::chrono::milliseconds duration, bool fromCache)
-    {
-        totalScans++;
-
-        if (fromCache)
-        {
-            cacheHits++;
-        }
-        else
-        {
-            cacheMisses++;
-            totalScanTime += duration;
-
-            if (duration < fastestScan) fastestScan = duration;
-            if (duration > slowestScan) slowestScan = duration;
-        }
-
-        if (totalScans > 0)
-        {
-            averageScanTime = totalScanTime / (totalScans - cacheHits);
-        }
-    }
-
-    void ScanMetrics::Reset()
-    {
-        totalScans = 0;
-        cacheHits = 0;
-        cacheMisses = 0;
-        totalScanTime = std::chrono::milliseconds{ 0 };
-        averageScanTime = std::chrono::milliseconds{ 0 };
-        fastestScan = std::chrono::milliseconds::max();
-        slowestScan = std::chrono::milliseconds{ 0 };
-    }
-
-    double ScanMetrics::GetCacheHitRate() const
-    {
-        if (totalScans == 0) return 0.0;
-        return static_cast<double>(cacheHits) / totalScans * 100.0;
-    }
-
-    EnhancedPatternScanner::EnhancedPatternScanner(bool enableCaching, const std::filesystem::path& cacheFile)
-        : m_moduleBase(0), m_moduleSize(0), m_textSection(0), m_textSize(0),
-        m_dataSection(0), m_dataSize(0), m_enableCaching(enableCaching), m_cacheFile(cacheFile)
-    {
-
-        if (!InitializeModule())
-        {
-            LogError("Failed to initialize module for pattern scanner");
-            return;
-        }
-
-        if (m_enableCaching && !m_cacheFile.empty())
-        {
-            LoadCache();
-        }
-
-        LogInfo("EnhancedPatternScanner initialized - Base: 0x" + std::to_string(m_moduleBase) +
-            ", Size: " + std::to_string(m_moduleSize));
-    }
-
-    std::optional<uintptr_t> EnhancedPatternScanner::ScanText(std::string_view pattern)
-    {
-        auto result = ScanRegion(m_textSection, m_textSize, pattern);
-        return result ? std::optional<uintptr_t>(result->address) : std::nullopt;
-    }
-
-    std::optional<uintptr_t> EnhancedPatternScanner::ScanData(std::string_view pattern)
-    {
-        auto result = ScanRegion(m_dataSection, m_dataSize, pattern);
-        return result ? std::optional<uintptr_t>(result->address) : std::nullopt;
-    }
-
-    bool EnhancedPatternScanner::Is32BitProcess() const
-    {
-        return sizeof(void*) == 4;
-    }
-
-    const ScanMetrics& EnhancedPatternScanner::GetMetrics() const
-    {
-        std::lock_guard<std::mutex> lock(m_metricsMutex);
-        return m_metrics;
-    }
-
-    std::optional<EnhancedPatternScanner::ScanResult> EnhancedPatternScanner::ScanModule(std::string_view pattern)
-    {
-        return ScanRegionInternal(m_moduleBase, m_moduleSize, pattern, true);
-    }
-
-    std::optional<EnhancedPatternScanner::ScanResult> EnhancedPatternScanner::ScanRegion(uintptr_t base, size_t size, std::string_view pattern)
-    {
-        return ScanRegionInternal(base, size, pattern, true);
-    }
-
-    std::map<std::string, uintptr_t> EnhancedPatternScanner::ScanMultiple(const std::map<std::string, std::string>& patterns)
-    {
-        std::map<std::string, uintptr_t> results;
-
-        for (const auto& pair : patterns)
-        {
-            auto result = ScanModule(pair.second);
-            if (result)
-            {
-                results[pair.first] = result->address;
-            }
-        }
-
-        return results;
-    }
-
-    bool EnhancedPatternScanner::LoadCache()
-    {
-        if (!m_enableCaching || m_cacheFile.empty()) return false;
-
-        try
-        {
-            if (!std::filesystem::exists(m_cacheFile))
-            {
-                LogInfo("Cache file does not exist: " + m_cacheFile.string());
-                return false;
-            }
-
-            std::ifstream file(m_cacheFile);
-            if (!file.is_open())
-            {
-                LogError("Failed to open cache file: " + m_cacheFile.string());
-                return false;
-            }
-
-            const std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-
-            auto cache = ScanCacheEntry::FromJson(content);
-            if (!cache)
-            {
-                LogError("Failed to parse cache file");
-                return false;
-            }
-
-            if (!IsCacheValid())
-            {
-                LogWarning("Cache is invalid, will be regenerated");
-                return false;
-            }
-
-            {
-                std::lock_guard<std::mutex> guard(m_cacheMutex);
-                m_loadedCache = cache;
-            }
-
-            LogInfo("Loaded pattern cache with " + std::to_string(cache->resolvedPatterns.size()) + " patterns");
-            return true;
-        }
-        catch (const std::exception& e)
-        {
-            LogError("Exception loading cache: " + std::string(e.what()));
-            return false;
-        }
-    }
-
-    bool EnhancedPatternScanner::SaveCache() const
-    {
-        if (!m_enableCaching || m_cacheFile.empty()) return false;
-
-        std::string json;
-        {
-            std::lock_guard<std::mutex> guard(m_cacheMutex);
-            if (!m_loadedCache) return false;
-            json = m_loadedCache->ToJson();
-        }
-
-        try
-        {
-            std::filesystem::create_directories(m_cacheFile.parent_path());
-
-            std::ofstream file(m_cacheFile);
-            if (!file.is_open())
-            {
-                LogError("Failed to create cache file: " + m_cacheFile.string());
-                return false;
-            }
-
-            file << json;
-            file.close();
-
-            LogInfo("Saved pattern cache with " + std::to_string(m_loadedCache->resolvedPatterns.size()) + " patterns");
-            return true;
-        }
-        catch (const std::exception& e)
-        {
-            LogError("Exception saving cache: " + std::string(e.what()));
-            return false;
-        }
-    }
-
-    void EnhancedPatternScanner::ClearCache()
-    {
-        std::lock_guard<std::mutex> lock(m_cacheMutex);
-        m_loadedCache.reset();
-
-        if (!m_cacheFile.empty() && std::filesystem::exists(m_cacheFile))
-        {
-            std::filesystem::remove(m_cacheFile);
-        }
-
-        LogInfo("Pattern cache cleared");
-    }
-
-    bool EnhancedPatternScanner::IsCacheValid() const
-    {
-        std::lock_guard<std::mutex> lock(m_cacheMutex);
-        if (!m_loadedCache) return false;
-
-        if (m_loadedCache->moduleBase != m_moduleBase || m_loadedCache->moduleSize != m_moduleSize)
-        {
-            LogInfo("Cache invalid: module base/size changed");
-            return false;
-        }
-
-        std::string currentVersion = GetGameVersion();
-        if (m_loadedCache->gameVersion != currentVersion)
-        {
-            LogInfo("Cache invalid: game version changed from " + m_loadedCache->gameVersion + " to " + currentVersion);
-            return false;
-        }
-
-        std::string currentHash = CalculateModuleHash();
-        if (m_loadedCache->moduleHash != currentHash)
-        {
-            LogInfo("Cache invalid: module hash changed");
-            return false;
-        }
-
-        return true;
-    }
-
-    void EnhancedPatternScanner::InvalidateCache()
-    {
-        ClearCache();
-    }
-
-    void EnhancedPatternScanner::ResetMetrics()
-    {
-        std::lock_guard<std::mutex> lock(m_metricsMutex);
-        m_metrics.Reset();
-    }
-
-    std::map<std::string, std::string> EnhancedPatternScanner::GetDebugInfo() const
-    {
-        std::map<std::string, std::string> info;
-
-        info["ModuleBase"] = "0x" + std::to_string(m_moduleBase);
-        info["ModuleSize"] = std::to_string(m_moduleSize);
-        info["TextSection"] = "0x" + std::to_string(m_textSection);
-        info["TextSize"] = std::to_string(m_textSize);
-        info["DataSection"] = "0x" + std::to_string(m_dataSection);
-        info["DataSize"] = std::to_string(m_dataSize);
-        info["CachingEnabled"] = m_enableCaching ? "true" : "false";
-        info["CacheFile"] = m_cacheFile.string();
-        info["GameVersion"] = GetGameVersion();
-
-        std::lock_guard<std::mutex> lock(m_metricsMutex);
-        info["TotalScans"] = std::to_string(m_metrics.totalScans);
-        info["CacheHits"] = std::to_string(m_metrics.cacheHits);
-        info["CacheHitRate"] = std::to_string(m_metrics.GetCacheHitRate()) + "%";
-
-        return info;
-    }
-
-    std::string EnhancedPatternScanner::GetGameVersion() const
-    {
-        return "1.0.0.0";        
-    }
-
-    bool EnhancedPatternScanner::IsVersionCompatible(const std::string& version) const
-    {
-        return GetGameVersion() == version;
-    }
-
-    bool EnhancedPatternScanner::InitializeModule()
-    {
-        size_t moduleSize = 0;
-        uintptr_t moduleBase = GetModuleBaseAddress(L"ffxiv_dx11.exe", moduleSize);
-
-        if (moduleBase == 0)
-        {
-            LogError("Failed to get module base address");
-            return false;
-        }
-
-        m_moduleBase = moduleBase;
-        m_moduleSize = moduleSize;
-
-        return ParsePESection();
-    }
-
-    bool EnhancedPatternScanner::ParsePESection()
-    {
-        m_textSection = m_moduleBase + 0x1000;    
-        m_textSize = m_moduleSize / 2;           
-        m_dataSection = m_textSection + m_textSize;
-        m_dataSize = m_moduleSize / 4;           
-
-        LogInfo("PE sections: .text=0x" + std::to_string(m_textSection) +
-            " (size=" + std::to_string(m_textSize) +
-            "), .data=0x" + std::to_string(m_dataSection) +
-            " (size=" + std::to_string(m_dataSize) + ")");
-
-        return true;
-    }
-
-    std::optional<EnhancedPatternScanner::ScanResult> EnhancedPatternScanner::ScanRegionInternal(
-        uintptr_t base, size_t size, std::string_view pattern, bool useCache)
-    {
-
-        auto start = std::chrono::high_resolution_clock::now();
-
-        if (useCache && m_enableCaching)
-        {
-            uintptr_t cachedResult = 0;
-            std::string cacheKey = GenerateCacheKey(pattern);
-
-            if (IsPatternCached(cacheKey, cachedResult))
-            {
-                auto end = std::chrono::high_resolution_clock::now();
-                auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-                std::lock_guard<std::mutex> lock(m_metricsMutex);
-                m_metrics.RecordScan(duration, true);
-
-                ScanResult result;
-                result.address = cachedResult;
-                result.fromCache = true;
-                result.scanTime = duration;
-                return result;
-            }
-        }
-
-        auto legacyResult = PatternScanner::ScanPattern(base, size, pattern);
-
-        auto end = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
-
-        std::lock_guard<std::mutex> lock(m_metricsMutex);
-        m_metrics.RecordScan(duration, false);
-
-        if (legacyResult)
-        {
-            ScanResult result;
-            result.address = legacyResult->address;
-            result.offset = legacyResult->offset;
-            result.matched_bytes = legacyResult->matched_bytes;
-            result.fromCache = false;
-            result.scanTime = duration;
-
-            if (useCache && m_enableCaching)
-            {
-                CachePattern(GenerateCacheKey(pattern), result.address);
-            }
-
-            return result;
-        }
-
-        return std::nullopt;
-    }
-
-    std::string EnhancedPatternScanner::GenerateCacheKey(std::string_view pattern) const
-    {
-        return std::string(pattern);
-    }
-
-    std::string EnhancedPatternScanner::CalculateModuleHash() const
-    {
-        std::hash<std::string> hasher;
-        std::string data = std::to_string(m_moduleBase) + std::to_string(m_moduleSize);
-        return std::to_string(hasher(data));
-    }
-
-    bool EnhancedPatternScanner::IsPatternCached(const std::string& cacheKey, uintptr_t& result) const
-    {
-        std::lock_guard<std::mutex> lock(m_cacheMutex);
-        if (!m_loadedCache) return false;
-
-        auto it = m_loadedCache->resolvedPatterns.find(cacheKey);
-        if (it != m_loadedCache->resolvedPatterns.end())
-        {
-            result = it->second;
-            return true;
-        }
-
-        return false;
-    }
-
-    void EnhancedPatternScanner::CachePattern(const std::string& cacheKey, uintptr_t result)
-    {
-        std::lock_guard<std::mutex> lock(m_cacheMutex);
-
-        if (!m_loadedCache)
-        {
-            m_loadedCache = ScanCacheEntry{};
-            m_loadedCache->gameVersion = GetGameVersion();
-            m_loadedCache->moduleBase = m_moduleBase;
-            m_loadedCache->moduleSize = m_moduleSize;
-            m_loadedCache->moduleHash = CalculateModuleHash();
-            m_loadedCache->cacheTime = std::chrono::system_clock::now();
-        }
-
-        m_loadedCache->resolvedPatterns[cacheKey] = result;
-    }
 
     std::optional<std::vector<int>> PatternScanner::PatternToBytes(std::string_view pattern)
     {
@@ -617,7 +114,6 @@ namespace SapphireHook {
     std::optional<PatternScanner::ScanResult> PatternScanner::ScanPatternWithMask(uintptr_t start, size_t length,
         std::span<const uint8_t> pattern, std::span<const bool> mask)
     {
-
         if (pattern.size() != mask.size()) return std::nullopt;
 
         const uint8_t* memory = reinterpret_cast<const uint8_t*>(start);
@@ -698,18 +194,6 @@ namespace SapphireHook {
 #endif
     }
 
-    std::shared_ptr<EnhancedPatternScanner> PatternScanner::GetGlobalScanner()
-    {
-        std::lock_guard<std::mutex> lock(s_globalScannerMutex);
-        return s_globalScanner;
-    }
-
-    void PatternScanner::SetGlobalScanner(std::shared_ptr<EnhancedPatternScanner> scanner)
-    {
-        std::lock_guard<std::mutex> lock(s_globalScannerMutex);
-        s_globalScanner = scanner;
-    }
-
     bool PatternScanner::CompareBytes(const uint8_t* data, const std::vector<int>& pattern)
     {
         for (size_t i = 0; i < pattern.size(); ++i)
@@ -722,258 +206,7 @@ namespace SapphireHook {
         return true;
     }
 
-    std::future<AsyncScanResult> AsyncPatternScanner::ScanPatternAsync(
-        uintptr_t start,
-        size_t length,
-        std::string_view pattern,
-        CancellationToken cancellation,
-        const ScanConfig& config,
-        ProgressCallback progress)
-    {
-        return std::async(std::launch::async, [=]()
-            {
-                return PerformScan(start, length, pattern, cancellation, config, progress);
-            });
-    }
-
-    std::future<AsyncScanResult> AsyncPatternScanner::ScanModuleAsync(
-        const wchar_t* moduleName,
-        std::string_view pattern,
-        CancellationToken cancellation,
-        const ScanConfig& config,
-        ProgressCallback progress)
-    {
-        return std::async(std::launch::async, [=]()
-            {
-                std::string moduleNameStr;
-                for (const wchar_t* p = moduleName; *p; ++p)
-                {
-                    if (*p <= 127) moduleNameStr += static_cast<char>(*p);
-                    else moduleNameStr += '?';
-                }
-
-                void* hModule = GetModuleHandleWrapper(moduleNameStr.c_str());
-                if (!hModule)
-                {
-                    AsyncScanResult result;
-                    result.error = ScanError::ModuleNotFound;
-                    result.pattern = std::string(pattern);
-                    result.was_cancelled = false;
-
-                    LogError("Failed to get module handle for: " + moduleNameStr);
-                    return result;
-                }
-
-                uintptr_t moduleBase = reinterpret_cast<uintptr_t>(hModule);
-                size_t moduleSize = 0x10000000;        
-
-                if (config.enable_logging)
-                {
-                    LogInfo("Scanning module at 0x" + std::to_string(moduleBase) + " for pattern: " + std::string(pattern));
-                }
-
-                return PerformScan(moduleBase, moduleSize, pattern, cancellation, config, progress);
-            });
-    }
-
-    std::future<std::vector<AsyncScanResult>> AsyncPatternScanner::ScanPatternsAsync(
-        uintptr_t start,
-        size_t length,
-        const std::vector<std::string>& patterns,
-        CancellationToken cancellation,
-        const ScanConfig& config,
-        ProgressCallback progress)
-    {
-        return std::async(std::launch::async, [=]()
-            {
-                std::vector<AsyncScanResult> results;
-                results.reserve(patterns.size());
-
-                if (config.enable_logging)
-                {
-                    LogInfo("Starting batch scan of " + std::to_string(patterns.size()) + " patterns");
-                }
-
-                for (size_t i = 0; i < patterns.size(); ++i)
-                {
-                    if (cancellation.IsCancelled())
-                    {
-                        for (size_t j = i; j < patterns.size(); ++j)
-                        {
-                            AsyncScanResult cancelledResult;
-                            cancelledResult.pattern = patterns[j];
-                            cancelledResult.was_cancelled = true;
-                            cancelledResult.error = ScanError::NotFound;
-                            results.push_back(cancelledResult);
-                        }
-                        break;
-                    }
-
-                    if (progress)
-                    {
-                        progress(i, patterns.size(), patterns[i]);
-                    }
-
-                    AsyncScanResult result = PerformScan(start, length, patterns[i], cancellation, config, nullptr);
-                    results.push_back(result);
-
-                    if (config.enable_logging && result)
-                    {
-                        LogInfo("Pattern " + std::to_string(i + 1) + "/" + std::to_string(patterns.size()) +
-                            " found at 0x" + std::to_string(result.result->address));
-                    }
-                }
-
-                return results;
-            });
-    }
-
-    AsyncScanResult AsyncPatternScanner::PerformScan(
-        uintptr_t start,
-        size_t length,
-        std::string_view pattern,
-        CancellationToken cancellation,
-        const ScanConfig& config,
-        ProgressCallback progress)
-    {
-        AsyncScanResult result;
-        result.pattern = std::string(pattern);
-
-        auto startTime = std::chrono::steady_clock::now();
-
-        if (!ValidateMemoryRegion(start, length))
-        {
-            result.error = ScanError::MemoryAccessViolation;
-            result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - startTime);
-            LogScanResult(result);
-            return result;
-        }
-
-        if (config.enable_logging)
-        {
-            LogScanStart(pattern, start, length);
-        }
-
-        try
-        {
-            CancellationToken timeoutToken = CancellationToken::CreateWithTimeout(config.timeout);
-
-            auto scanResult = PatternScanner::ScanPattern(start, length, std::string(pattern));
-
-            if (cancellation.IsCancelled() || timeoutToken.IsCancelled())
-            {
-                result.was_cancelled = true;
-                result.error = ScanError::NotFound;
-            }
-            else if (scanResult)
-            {
-                result.result = *scanResult;
-            }
-            else
-            {
-                result.error = ScanError::NotFound;
-            }
-        }
-        catch (const std::exception& ex)
-        {
-            result.error = ScanError::MemoryAccessViolation;
-            if (config.enable_logging)
-            {
-                LogError("Exception during pattern scan: " + std::string(ex.what()));
-            }
-        }
-
-        result.duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now() - startTime);
-
-        if (config.enable_logging)
-        {
-            LogScanResult(result);
-        }
-
-        return result;
-    }
-
-    bool AsyncPatternScanner::ValidateMemoryRegion(uintptr_t start, size_t length)
-    {
-        if (start == 0 || length == 0)
-        {
-            return false;
-        }
-
-        try
-        {
-            char dummyBuffer[64];      
-            return VirtualQueryWrapper(reinterpret_cast<const void*>(start), dummyBuffer, sizeof(dummyBuffer));
-        }
-        catch (...)
-        {
-            return false;
-        }
-    }
-
-    void AsyncPatternScanner::LogScanStart(std::string_view pattern, uintptr_t start, size_t length)
-    {
-        std::ostringstream oss;
-        oss << "Starting pattern scan: '" << pattern << "' at 0x"
-            << std::hex << start << " (length: 0x" << length << ")";
-        LogInfo(oss.str());
-    }
-
-    void AsyncPatternScanner::LogScanResult(const AsyncScanResult& result)
-    {
-        std::ostringstream oss;
-
-        if (result.was_cancelled)
-        {
-            oss << "Pattern scan cancelled: '" << result.pattern << "'";
-        }
-        else if (result.result.has_value())
-        {
-            oss << "Pattern scan successful: '" << result.pattern
-                << "' found at 0x" << std::hex << result.result->address;
-        }
-        else
-        {
-            oss << "Pattern scan failed: '" << result.pattern << "' - ";
-            switch (result.error)
-            {
-            case ScanError::NotFound:
-                oss << "Not found";
-                break;
-            case ScanError::MemoryAccessViolation:
-                oss << "Memory access violation";
-                break;
-            case ScanError::InvalidAddress:
-                oss << "Invalid address";
-                break;
-            case ScanError::InvalidPattern:
-                oss << "Invalid pattern";
-                break;
-            case ScanError::ModuleNotFound:
-                oss << "Module not found";
-                break;
-            case ScanError::CacheCorrupted:
-                oss << "Cache corrupted";
-                break;
-            default:
-                oss << "Unknown error";
-                break;
-            }
-        }
-
-        oss << " (Duration: " << result.duration.count() << "ms)";
-
-        if (result.result.has_value())
-        {
-            LogInfo(oss.str());
-        }
-        else
-        {
-            LogWarning(oss.str());
-        }
-    }
+    // ===== STRING XREF FUNCTIONALITY =====
 
     PESection PatternScanner::GetPESection(HMODULE module, const char* sectionName)
     {
@@ -1060,7 +293,7 @@ namespace SapphireHook {
         const unsigned modrm = static_cast<unsigned>(instruction[modrmOffset]);
         const unsigned mod = (modrm >> 6) & 0x3;
         const unsigned rm = modrm & 0x7;
-        if (!(mod == 0 && rm == 5)) return false;    
+        if (!(mod == 0 && rm == 5)) return false;
 
         const int32_t displacement = *reinterpret_cast<const int32_t*>(instruction + dispOffset);
         const auto* nextInstruction = instruction + minLength;
@@ -1079,7 +312,7 @@ namespace SapphireHook {
         if (!textSection || textSection.size < 6) return references;
 
         const auto* begin = textSection.baseAddress;
-        const auto* end = textSection.baseAddress + textSection.size - 6;    
+        const auto* end = textSection.baseAddress + textSection.size - 6;
 
         for (const auto* p = begin; p <= end; ++p)
         {
@@ -1151,7 +384,7 @@ namespace SapphireHook {
             while (i < rdataSection.size)
             {
                 unsigned char c = bytes[i];
-                if (c >= 0x20 && c <= 0x7E)   
+                if (c >= 0x20 && c <= 0x7E)
                 {
                     ++i;
                     ++length;
@@ -1167,7 +400,7 @@ namespace SapphireHook {
                 auto address = reinterpret_cast<uintptr_t>(rdataSection.baseAddress + start);
                 std::string text(reinterpret_cast<const char*>(bytes + start), length);
                 result.emplace_back(address, std::move(text));
-                ++i;    
+                ++i;
             }
             else
             {
@@ -1199,7 +432,7 @@ namespace SapphireHook {
                 unsigned char low = bytes[i];
                 unsigned char high = bytes[i + 1];
 
-                if (high == 0x00 && low >= 0x20 && low <= 0x7E)    
+                if (high == 0x00 && low >= 0x20 && low <= 0x7E)
                 {
                     i += 2;
                     ++charCount;
@@ -1223,7 +456,7 @@ namespace SapphireHook {
                 }
 
                 result.emplace_back(address, std::move(text));
-                i += 2;     
+                i += 2;
             }
             else
             {
@@ -1289,7 +522,8 @@ namespace SapphireHook {
         result.asciiStringCount = asciiStrings.size();
         result.utf16StringCount = utf16Strings.size();
 
-        std::unordered_map<uintptr_t, std::unordered_set<std::string>> functionStringsSeen;
+        std::unordered_set<std::string> functionStringsSeen;
+        std::unordered_map<uintptr_t, std::unordered_set<std::string>> functionStringsMap;
 
         auto processString = [&](uintptr_t stringAddress, const std::string& text)
             {
@@ -1300,7 +534,7 @@ namespace SapphireHook {
                     auto functionStart = GetFunctionStartFromRva(module, rva);
                     if (!functionStart) continue;
 
-                    auto& seenStrings = functionStringsSeen[functionStart];
+                    auto& seenStrings = functionStringsMap[functionStart];
                     if (seenStrings.insert(text).second)
                     {
                         result.functionsToStrings[functionStart].push_back(text);
@@ -1387,7 +621,7 @@ namespace SapphireHook {
             {
                 char c = str[j];
                 if (c == '\0') break;
-                if (c < 0x20 || c > 0x7E)    
+                if (c < 0x20 || c > 0x7E)
                 {
                     candidate.clear();
                     break;
@@ -1406,8 +640,8 @@ namespace SapphireHook {
                 for (size_t j = 0; j + 1 < maxLen; j += 2)
                 {
                     unsigned char low = ptr[j], high = ptr[j + 1];
-                    if (low == 0x00 && high == 0x00) break;   
-                    if (high != 0x00 || low < 0x20 || low > 0x7E)    
+                    if (low == 0x00 && high == 0x00) break;
+                    if (high != 0x00 || low < 0x20 || low > 0x7E)
                     {
                         utf8Candidate.clear();
                         break;
@@ -1452,145 +686,7 @@ namespace SapphireHook {
         return result;
     }
 
-    void ScanOperation::Cancel()
-    {
-        LogWarning("Cancelling scan operation for pattern: " + m_pattern);
-        m_cancellation.Cancel();
-    }
-
-    ModuleInfo::ModuleInfo(const wchar_t* moduleName)
-        : m_baseAddress(0), m_size(0), m_scanned(std::chrono::system_clock::now())
-    {
-        if (moduleName)
-        {
-            m_name = moduleName;
-        }
-        else
-        {
-            m_name = L"ffxiv_dx11.exe";
-        }
-
-        size_t moduleSize = 0;
-        m_baseAddress = GetModuleBaseAddress(m_name.c_str(), moduleSize);
-        m_size = moduleSize;
-
-        if (m_baseAddress != 0)
-        {
-            CalculateModuleHash();
-            m_version = GetModuleVersion();
-        }
-    }
-
-    std::unique_ptr<MemoryBuffer> ModuleInfo::CreateBuffer() const
-    {
-        if (m_baseAddress == 0 || m_size == 0) return nullptr;
-
-        auto buffer = std::make_unique<MemoryBuffer>(m_size);
-        std::memcpy(buffer->Data(), reinterpret_cast<const void*>(m_baseAddress), m_size);
-        return buffer;
-    }
-
-    std::optional<PatternScanner::ScanResult> ModuleInfo::ScanPattern(std::string_view pattern) const
-    {
-        if (m_baseAddress == 0) return std::nullopt;
-        return PatternScanner::ScanPattern(m_baseAddress, m_size, pattern);
-    }
-
-    std::vector<PatternScanner::ScanResult> ModuleInfo::ScanAllPatterns(std::string_view pattern) const
-    {
-        if (m_baseAddress == 0) return {};
-        return PatternScanner::ScanAllPatterns(m_baseAddress, m_size, pattern);
-    }
-
-    Expected<PatternScanner::ScanResult> ModuleInfo::ScanPatternExpected(std::string_view pattern) const
-    {
-        if (m_baseAddress == 0) return Expected<PatternScanner::ScanResult>(ScanError::ModuleNotFound);
-        return PatternScanner::ScanPatternExpected(m_baseAddress, m_size, pattern);
-    }
-
-    std::map<std::string, std::string> ModuleInfo::GetDebugInfo() const
-    {
-        std::map<std::string, std::string> info;
-
-        std::string nameStr;
-        nameStr.reserve(m_name.size());
-        for (wchar_t wc : m_name)
-        {
-            if (wc <= 127)
-            {     
-                nameStr.push_back(static_cast<char>(wc));
-            }
-            else
-            {
-                nameStr.push_back('?');     
-            }
-        }
-
-        info["Name"] = nameStr;
-        info["BaseAddress"] = "0x" + std::to_string(m_baseAddress);
-        info["Size"] = std::to_string(m_size);
-        info["Version"] = m_version;
-        info["Hash"] = m_hash;
-
-        auto scannedTime = std::chrono::system_clock::to_time_t(m_scanned);
-        info["ScannedTime"] = std::to_string(scannedTime);
-
-        return info;
-    }
-
-    void ModuleInfo::CalculateModuleHash()
-    {
-        std::hash<std::string> hasher;
-        std::string data = std::to_string(m_baseAddress) + std::to_string(m_size);
-        m_hash = std::to_string(hasher(data));
-    }
-
-    std::string ModuleInfo::GetModuleVersion() const
-    {
-        return "1.0.0.0";
-    }
-
-    std::shared_ptr<EnhancedPatternScanner> ScannerFactory::CreateCachedScanner(
-        const std::filesystem::path& cacheDir, const std::string& gameVersion)
-    {
-        std::filesystem::create_directories(cacheDir);
-        std::filesystem::path cacheFile = cacheDir / "pattern_cache.json";
-
-        auto scanner = std::make_shared<EnhancedPatternScanner>(true, cacheFile);
-        return scanner;
-    }
-
-    std::shared_ptr<EnhancedPatternScanner> ScannerFactory::CreateMemoryOnlyScanner()
-    {
-        return std::make_shared<EnhancedPatternScanner>(false);
-    }
-
-    std::shared_ptr<EnhancedPatternScanner> ScannerFactory::CreateModuleScanner(
-        const std::wstring& moduleName, bool enableCaching)
-    {
-        std::filesystem::path cacheFile;
-        if (enableCaching)
-        {
-            std::string moduleNameStr;
-            moduleNameStr.reserve(moduleName.size());
-            for (wchar_t wc : moduleName)
-            {
-                if (wc <= 127)
-                {     
-                    moduleNameStr.push_back(static_cast<char>(wc));
-                }
-                else
-                {
-                    moduleNameStr.push_back('_');     
-                }
-            }
-            cacheFile = "cache/" + moduleNameStr + "_cache.json";
-        }
-
-        return std::make_shared<EnhancedPatternScanner>(enableCaching, cacheFile);
-    }
-
-}   
+} // namespace SapphireHook
 
 extern "C" {
     bool PatternToBytes(const char* pattern, std::vector<int>& bytes)
@@ -1612,7 +708,7 @@ extern "C" {
 
     uintptr_t GetModuleBaseAddress(const wchar_t* moduleName, size_t& outSize)
     {
-        outSize = 0x10000000;  
-        return 0x140000000;      
+        outSize = 0x10000000;
+        return 0x140000000;
     }
 }

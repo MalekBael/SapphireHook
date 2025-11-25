@@ -4,9 +4,11 @@
 #include <vector>
 #include <optional>
 #include <filesystem>
-#include <fstream> // for std::ifstream used in ReadAll signature
+#include <fstream>
+#include <span>
 
 namespace SqPack {
+	// ===== Platform & Header Structures =====
 	enum class PlatformId : uint8_t { Win32 = 0, PS3 = 1, PS4 = 2 };
 
 	struct SqPackHeader {
@@ -15,70 +17,134 @@ namespace SqPack {
 		uint8_t padding0[3]{};
 		uint32_t size = 0;       // absolute offset to first object after header
 		uint32_t version = 0;
-		uint32_t type = 0;       // 0x2=Index? (varies), not strictly needed here
+		uint32_t type = 0;
 	};
 
-	struct SqPackIndexHeader {   // only in index1 files; actual size is 0x400, we only need first 16
+	// ===== Index Structures =====
+	struct SqPackIndexHeader {
 		uint32_t size = 0;
 		uint32_t type = 0;
-		uint32_t indexDataOffset = 0; // absolute offset to table
-		uint32_t indexDataSize = 0;   // sum of all entries
 	};
 
-	// Unified entry view for our purposes
-	struct IndexEntry {
-		// For index1: hash = (folderCrc32<<32)|fileCrc32
-		// For index2: hash = fullPathCrc32 (lower 32 bits used)
-		uint64_t hash = 0;
-		uint32_t dataFileId = 0;
-		uint32_t offsetUnits = 0; // multiply by 8 for absolute file offset
-		bool isIndex2 = false;
+	struct SqPackBlockHash {
+		uint8_t  hash[0x14];
+		uint32_t padding[0xB];
 	};
 
-	struct LuaCandidate {
-		// Index metadata
-		uint64_t indexHash = 0;
-		uint32_t dataFileId = 0;
-		uint64_t dataFileOffset = 0; // absolute byte offset in the .datN
-		std::filesystem::path datPath;
-
-		// Probe results
-		bool    likelyBytecode = false; // matched 0x1B 'L' 'u' 'a' 0x51/52/53
-		bool    likelySource = false;   // heuristics (e.g. "function " / "local ")
-		size_t  probeSize = 0;          // bytes read for probe
+	struct IndexBlockRecord {
+		uint32_t offset;
+		uint32_t size;
+		SqPackBlockHash blockHash;
 	};
 
+	// Index1 file entry (with separate folder/file hashes)
+	struct IndexFileEntry {
+		uint32_t fileNameHash;
+		uint32_t folderHash;
+		uint32_t dataOffset;     // lower 4 bits: datId*2, rest: offset units
+		uint32_t padding;
+
+		[[nodiscard]] uint32_t GetDatId() const { return (dataOffset & 0xF) / 2; }
+		[[nodiscard]] uint64_t GetFileOffset() const { return static_cast<uint64_t>(dataOffset & ~0xF) * 8ULL; }
+	};
+
+	static_assert(sizeof(SqPackIndexHeader) == 8);
+	static_assert(sizeof(SqPackBlockHash) == 0x40);
+	static_assert(sizeof(IndexBlockRecord) == 0x48);
+	static_assert(sizeof(IndexFileEntry) == 16);
+
+	// ===== Dat File Structures =====
+	struct DataEntryHeader {
+		uint32_t headerLength;
+		uint32_t contentType;    // 0x02 = binary/standard, 0x03 = model, 0x04 = texture
+		uint32_t uncompressedSize;
+		uint32_t unknown;
+		uint32_t blockBufferSize;
+		uint32_t numBlocks;
+	};
+
+	struct Type2BlockEntry {
+		uint32_t offset;
+		uint16_t blockSize;
+		uint16_t decompressedDataSize;
+	};
+
+	struct BlockHeader {
+		uint32_t headerSize;     // always 0x10
+		uint32_t null;
+		uint32_t compressedLength;   // 32000 = uncompressed
+		uint32_t decompressedLength;
+
+		[[nodiscard]] bool IsUncompressed() const { return compressedLength == 32000; }
+	};
+
+	// ===== Result Types =====
+	struct ExtractResult {
+		std::vector<uint8_t> data;
+		uint32_t contentType = 0;
+		bool success = false;
+		std::string error;
+	};
+
+	// ===== Reader Class =====
 	class Reader {
 	public:
-		// Load entries from an index file (.index or .index2).
-		// indexPath: full path to e.g. "sqpack/.../020000.win32.index"
-		// Returns entries with dataFileId and offsetUnits populated.
-		static std::optional<std::vector<IndexEntry>> LoadIndex(const std::filesystem::path& indexPath, std::string& err);
-
-		// Compute SqPack hashes for lookup:
-		// - index1: folder/file lowercased, split by last '/'.
-		// - index2: whole path lowercased.
-		static uint64_t HashIndex1(const std::string& fullPathLower);
-		static uint32_t HashIndex2(const std::string& fullPathLower);
-
-		// Given the index path and an entry, return the corresponding .dat file path.
-		// Example: 020000.win32.index -> 020000.win32.dat{dataFileId}
+		// ----- Index Operations -----
+		
+		// Load all file entries from an index file (.index)
+		// Returns empty vector on failure, logs errors
+		static std::vector<IndexFileEntry> LoadIndex(const std::filesystem::path& indexPath);
+		
+		// Compute the dat file path for a given index path and dat ID
+		// Example: 0b0000.win32.index + datId=0 -> 0b0000.win32.dat0
 		static std::filesystem::path DatPathFor(const std::filesystem::path& indexPath, uint32_t dataFileId);
 
-		// Quick probe a subset of entries for Lua magic.
-		// maxEntries: cap to avoid huge scans; maxProbeBytes: read this many bytes starting at offset*8.
-		static std::vector<LuaCandidate> ProbeForLua(
-			const std::filesystem::path& indexPath,
-			const std::vector<IndexEntry>& entries,
-			size_t maxEntries = 5000,
-			size_t maxProbeBytes = 0x2000);
+		// ----- File Extraction -----
+		
+		// Extract file data from a dat file given an index entry
+		// Handles block decompression automatically
+		// maxBytes: limit extraction size (0 = full file)
+		static ExtractResult ExtractFile(
+			const std::filesystem::path& datPath,
+			const IndexFileEntry& entry,
+			size_t maxBytes = 0);
+
+		// Extract file data given explicit offset (for when you don't have IndexFileEntry)
+		static ExtractResult ExtractFileAt(
+			const std::filesystem::path& datPath,
+			uint64_t fileOffset,
+			size_t maxBytes = 0);
+
+		// ----- Hash Utilities -----
+		
+		// Compute CRC32 hash (SqPack uses IEEE 802.3 polynomial)
+		static uint32_t Crc32(const uint8_t* data, size_t len);
+		static uint32_t Crc32(std::string_view str);
+
+		// Compute index1 combined hash: (folderCrc32 << 32) | fileCrc32
+		static uint64_t HashIndex1(std::string_view fullPathLower);
+
+		// ----- Content Detection -----
+		
+		// Check if data starts with Lua bytecode magic (0x1B 'L' 'u' 'a' + version)
+		static bool IsLuaBytecode(std::span<const uint8_t> data);
+		
+		// Check if data contains Lua bytecode magic anywhere in first N bytes
+		static bool ContainsLuaBytecode(std::span<const uint8_t> data);
+
+		// ----- Decompression -----
+		
+		// Decompress a single block using zlib (raw deflate, windowBits=-15)
+		static bool DecompressBlock(
+			const uint8_t* compressedData, size_t compressedSize,
+			uint8_t* outputBuffer, size_t outputSize);
 
 	private:
-		static uint32_t Crc32(const uint8_t* data, size_t len);
+		// Low-level IO helper
+		static bool ReadAt(std::ifstream& stream, uint64_t offset, void* buffer, size_t bytes);
 
-		// Helpers
-		static bool ReadAll(std::ifstream& ifs, uint64_t offset, void* buf, size_t bytes);
-		static bool IsLuaBytecodeMagic(const uint8_t* p, size_t n);
-		static bool LooksLikeLuaSource(const uint8_t* p, size_t n);
+		// Initialize CRC table (lazy, thread-safe via static local)
+		static const uint32_t* GetCrcTable();
 	};
+
 } // namespace SqPack

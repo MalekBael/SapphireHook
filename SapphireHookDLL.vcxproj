@@ -98,6 +98,7 @@
   </ItemDefinitionGroup>
   <!-- Headers -->
   <ItemGroup>
+    <ClInclude Include="resources\Resources.h" />
     <ClInclude Include="src\Analysis\FunctionScanner.h" />
     <ClInclude Include="src\Analysis\PatternScanner.h" />
     <ClInclude Include="src\Analysis\SignatureScanner.h" />
@@ -255,9 +256,9 @@
     <None Include=".editorconfig" />
     <None Include=".gitattributes" />
     <None Include=".gitignore" />
-    <None Include="G:\Workspace\Project Sapphire\coinach\2016.07.05.0000.0001\rawexd\Weather.csv" />
-    <None Include="G:\Workspace\Project Sapphire\coinach\2016.07.05.0000.0001\rawexd\WeatherGroup.csv" />
     <None Include="packages.config" />
+    <None Include="resources\filenames.csv" />
+    <None Include="resources\folders.csv" />
     <None Include="vendor\hex_editor\LICENSE" />
     <None Include="vendor\implot\LICENSE" />
     <None Include="vendor\minhook\MinHook.x64.dll" />
@@ -274,6 +275,9 @@
     <Font Include="vendor\imgui\misc\fonts\ProggyClean.ttf" />
     <Font Include="vendor\imgui\misc\fonts\ProggyTiny.ttf" />
     <Font Include="vendor\imgui\misc\fonts\Roboto-Medium.ttf" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources\Hashlist.rc" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <Import Project="packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets" Condition="Exists('packages\nlohmann.json.3.12.0\build\native\nlohmann.json.targets')" />

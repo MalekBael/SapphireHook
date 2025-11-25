@@ -984,3 +984,105 @@ bool CommandInterface::FindGameConnection()
 	Logger::Instance().Information("[CommandInterface] FindGameConnection: not implemented; no game connection singleton");
 	return false;
 }
+
+// === New Wrapper Implementations (added safely; do not alter existing behavior) ===
+bool CommandInterface::SetPlayerRace(uint32_t raceId, uint64_t targetId)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::Race, raceId, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::SetPlayerTribe(uint32_t tribeId, uint64_t targetId)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::Tribe, tribeId, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::SetPlayerGender(uint32_t gender, uint64_t targetId)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::Sex, gender, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::SetPlayerHp(uint32_t hp, uint64_t targetId)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::Hp, hp, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::SetPlayerMp(uint32_t mp, uint64_t targetId)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::Mp, mp, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::SetPlayerGp(uint32_t gp, uint64_t targetId)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::Gp, gp, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::AddPlayerExp(uint32_t amount, uint64_t targetId)
+{
+	// If server treats Exp as additive, this works; otherwise identical to SetPlayerExp.
+	return SendGMCommand(SapphireHook::GmCommandId::Exp, amount, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::SetPlayerExp(uint32_t amount, uint64_t targetId)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::Exp, amount, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::SetPlayerIcon(uint32_t iconId, uint64_t targetId)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::Icon, iconId, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::SetInvincibility(uint32_t enabled, uint64_t targetId)
+{
+	// enabled: 1 = on, 0 = off
+	return SendGMCommand(SapphireHook::GmCommandId::Inv, enabled, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::SetInvisibility(uint32_t visibleFlag)
+{
+	// visibleFlag: 1 = visible, 0 = invisible (current UI logic in CharacterEdit)
+	return SendGMCommand(SapphireHook::GmCommandId::Invis, visibleFlag, 0, 0, 0, 0);
+}
+
+bool CommandInterface::SetWireframe(uint32_t enabled)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::Wireframe, enabled, 0, 0, 0, 0);
+}
+
+bool CommandInterface::UnlockOrchestrion(uint32_t songId)
+{
+	// Arg0=1 per existing usage, Arg1 = songId (0 => all)
+	return SendGMCommand(SapphireHook::GmCommandId::Orchestrion, 1, songId, 0, 0, 0);
+}
+
+bool CommandInterface::SetGrandCompany(uint32_t companyId, uint64_t targetId)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::GC, companyId, 0, 0, 0, targetId);
+}
+
+bool CommandInterface::SetGrandCompanyRank(uint32_t rank, uint64_t targetId)
+{
+	return SendGMCommand(SapphireHook::GmCommandId::GCRank, rank, 0, 0, 0, targetId);
+}
+
+// === Implementations for previously declared but missing functions ===
+bool CommandInterface::SendCommandPacket(uint32_t commandId,
+	uint32_t arg0,
+	uint32_t arg1,
+	uint32_t arg2,
+	uint32_t arg3,
+	uint64_t target)
+{
+	// Direct GM1 send; discovery modules may override with SendGMCommandEx.
+	return SendGMCommand(commandId, arg0, arg1, arg2, arg3, target);
+}
+
+bool CommandInterface::ProcessCommand(const std::string& command)
+{
+	// Try GM-style parse first, then fallback to chat debug path.
+	if (TryParseAsGMCommand(command.c_str()))
+		return true;
+	return SendDebugCommand(command.c_str());
+}
+
+// (No changes below this point in existing file)

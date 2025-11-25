@@ -1404,6 +1404,13 @@ namespace PacketStructures::Server::Zone {
         uint32_t Value;
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(ZoneProtoDownHate,
+        STRUCT_FIELD(ZoneProtoDownHate, Id),
+        STRUCT_FIELD(ZoneProtoDownHate, Value)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcHateList {
         uint8_t Count;
         uint8_t __padding1;
@@ -2388,6 +2395,13 @@ namespace PacketStructures::Server::Zone {
         uint32_t mapId;
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcDiscoveryReply,
+        STRUCT_FIELD(FFXIVIpcDiscoveryReply, mapPartId),
+        STRUCT_FIELD(FFXIVIpcDiscoveryReply, mapId)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcMoveTerritory {
         int16_t index;
         uint8_t territoryType;
@@ -2686,6 +2700,13 @@ namespace PacketStructures::Server::Zone {
         House House;
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHouse,
+        STRUCT_FIELD(FFXIVIpcHouse, Block),
+        STRUCT_FIELD(FFXIVIpcHouse, House)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcYardObjectList {
         uint8_t PacketIndex;
         uint8_t PacketEnd;
@@ -2693,6 +2714,16 @@ namespace PacketStructures::Server::Zone {
         uint8_t PacketEnd2;
         Furniture YardObjects[400];
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcYardObjectList,
+        STRUCT_FIELD(FFXIVIpcYardObjectList, PacketIndex),
+        STRUCT_FIELD(FFXIVIpcYardObjectList, PacketEnd),
+        STRUCT_FIELD(FFXIVIpcYardObjectList, PacketEnd1),
+        STRUCT_FIELD(FFXIVIpcYardObjectList, PacketEnd2),
+        STRUCT_FIELD(FFXIVIpcYardObjectList, YardObjects)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcYardObject {
         uint8_t PacketIndex;
@@ -2702,6 +2733,13 @@ namespace PacketStructures::Server::Zone {
         Furniture YardObject;
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcYardObject,
+        STRUCT_FIELD(FFXIVIpcYardObject, PacketIndex),
+        STRUCT_FIELD(FFXIVIpcYardObject, YardObject)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcInterior {
         uint16_t Window;
         uint16_t WindowColor;
@@ -2710,10 +2748,27 @@ namespace PacketStructures::Server::Zone {
         uint32_t Interior[10];
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcInterior,
+        STRUCT_FIELD(FFXIVIpcInterior, Window),
+        STRUCT_FIELD(FFXIVIpcInterior, WindowColor),
+        STRUCT_FIELD(FFXIVIpcInterior, Door),
+        STRUCT_FIELD(FFXIVIpcInterior, DoorColor),
+        STRUCT_FIELD(FFXIVIpcInterior, Interior)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcHousingAuction {
         uint32_t Price;
         uint32_t Timer;
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingAuction,
+        STRUCT_FIELD(FFXIVIpcHousingAuction, Price),
+        STRUCT_FIELD(FFXIVIpcHousingAuction, Timer)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcHousingProfile {
         LandIdent LandId;
@@ -2728,21 +2783,57 @@ namespace PacketStructures::Server::Zone {
         char FCTag[7];
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingProfile,
+        STRUCT_FIELD(FFXIVIpcHousingProfile, LandId),
+        STRUCT_FIELD(FFXIVIpcHousingProfile, OwnerId),
+        STRUCT_FIELD(FFXIVIpcHousingProfile, Like),
+        STRUCT_FIELD(FFXIVIpcHousingProfile, Welcome),
+        STRUCT_FIELD(FFXIVIpcHousingProfile, Size),
+        STRUCT_FIELD(FFXIVIpcHousingProfile, Name),
+        STRUCT_FIELD(FFXIVIpcHousingProfile, Greeting),
+        STRUCT_FIELD(FFXIVIpcHousingProfile, OwnerName),
+        STRUCT_FIELD(FFXIVIpcHousingProfile, FCTag)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcHousingHouseName {
         LandIdent LandId;
         char Name[23];
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingHouseName,
+        STRUCT_FIELD(FFXIVIpcHousingHouseName, LandId),
+        STRUCT_FIELD(FFXIVIpcHousingHouseName, Name)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcHousingGreeting {
         LandIdent LandId;
         uint8_t Greeting[193];
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingGreeting,
+        STRUCT_FIELD(FFXIVIpcHousingGreeting, LandId),
+        STRUCT_FIELD(FFXIVIpcHousingGreeting, Greeting)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcCharaHousingLandData {
         uint8_t Index;
         uint32_t unknown;
         CharaLandData LandData;
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcCharaHousingLandData,
+        STRUCT_FIELD(FFXIVIpcCharaHousingLandData, Index),
+        STRUCT_FIELD(FFXIVIpcCharaHousingLandData, unknown),
+        STRUCT_FIELD(FFXIVIpcCharaHousingLandData, LandData)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcCharaHousing {
         CharaLandData FcLands;
@@ -2754,6 +2845,15 @@ namespace PacketStructures::Server::Zone {
         CharaLandData sharedHouse[2];
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcCharaHousing,
+        STRUCT_FIELD(FFXIVIpcCharaHousing, FcLands),
+        STRUCT_FIELD(FFXIVIpcCharaHousing, CharaLands),
+        STRUCT_FIELD(FFXIVIpcCharaHousing, apartment),
+        STRUCT_FIELD(FFXIVIpcCharaHousing, sharedHouse)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcHousingWelcome {
         uint8_t Welcome;
         uint8_t __padding1;
@@ -2761,6 +2861,13 @@ namespace PacketStructures::Server::Zone {
         uint8_t __padding3;
         LandIdent LandId;
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingWelcome,
+        STRUCT_FIELD(FFXIVIpcHousingWelcome, Welcome),
+        STRUCT_FIELD(FFXIVIpcHousingWelcome, LandId)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcFurnitureListS {
         LandIdent LandId;
@@ -2771,6 +2878,15 @@ namespace PacketStructures::Server::Zone {
         Furniture Furnitures[100];
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcFurnitureListS,
+        STRUCT_FIELD(FFXIVIpcFurnitureListS, LandId),
+        STRUCT_FIELD(FFXIVIpcFurnitureListS, packetNum),
+        STRUCT_FIELD(FFXIVIpcFurnitureListS, packetTotal),
+        STRUCT_FIELD(FFXIVIpcFurnitureListS, Furnitures)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcFurnitureListM {
         LandIdent LandId;
         int8_t u1;
@@ -2779,6 +2895,15 @@ namespace PacketStructures::Server::Zone {
         uint8_t u2;
         Furniture Furnitures[150];
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcFurnitureListM,
+        STRUCT_FIELD(FFXIVIpcFurnitureListM, LandId),
+        STRUCT_FIELD(FFXIVIpcFurnitureListM, packetNum),
+        STRUCT_FIELD(FFXIVIpcFurnitureListM, packetTotal),
+        STRUCT_FIELD(FFXIVIpcFurnitureListM, Furnitures)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcFurnitureListL {
         LandIdent LandId;
@@ -2789,6 +2914,15 @@ namespace PacketStructures::Server::Zone {
         Furniture Furnitures[200];
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcFurnitureListL,
+        STRUCT_FIELD(FFXIVIpcFurnitureListL, LandId),
+        STRUCT_FIELD(FFXIVIpcFurnitureListL, packetNum),
+        STRUCT_FIELD(FFXIVIpcFurnitureListL, packetTotal),
+        STRUCT_FIELD(FFXIVIpcFurnitureListL, Furnitures)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcFurniture {
         uint16_t StorageId;
         uint8_t ContainerIndex;
@@ -2796,10 +2930,25 @@ namespace PacketStructures::Server::Zone {
         Furniture Furniture;
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcFurniture,
+        STRUCT_FIELD(FFXIVIpcFurniture, StorageId),
+        STRUCT_FIELD(FFXIVIpcFurniture, ContainerIndex),
+        STRUCT_FIELD(FFXIVIpcFurniture, Furniture)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcHousingProfileList {
         LandIdent LandSetId;
         SimpleProfile ProfileList[30];
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingProfileList,
+        STRUCT_FIELD(FFXIVIpcHousingProfileList, LandSetId),
+        STRUCT_FIELD(FFXIVIpcHousingProfileList, ProfileList)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcHousingObjectTransform {
         uint16_t Dir;
@@ -2810,6 +2959,16 @@ namespace PacketStructures::Server::Zone {
         uint16_t Pos[3];
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingObjectTransform,
+        STRUCT_FIELD(FFXIVIpcHousingObjectTransform, Dir),
+        STRUCT_FIELD(FFXIVIpcHousingObjectTransform, UserData1),
+        STRUCT_FIELD(FFXIVIpcHousingObjectTransform, UserData2),
+        STRUCT_FIELD(FFXIVIpcHousingObjectTransform, ContainerIndex),
+        STRUCT_FIELD(FFXIVIpcHousingObjectTransform, Pos)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcHousingObjectColor {
         uint8_t Color;
         uint8_t __padding1;
@@ -2818,10 +2977,26 @@ namespace PacketStructures::Server::Zone {
         uint8_t UserData;
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingObjectColor,
+        STRUCT_FIELD(FFXIVIpcHousingObjectColor, Color),
+        STRUCT_FIELD(FFXIVIpcHousingObjectColor, StorageId),
+        STRUCT_FIELD(FFXIVIpcHousingObjectColor, ContainerIndex),
+        STRUCT_FIELD(FFXIVIpcHousingObjectColor, UserData)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcHousingObjectTransformMulti {
         LandIdent LandId;
         HousingLayout LayoutInfos[10];
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingObjectTransformMulti,
+        STRUCT_FIELD(FFXIVIpcHousingObjectTransformMulti, LandId),
+        STRUCT_FIELD(FFXIVIpcHousingObjectTransformMulti, LayoutInfos)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcHousingGetPersonalRoomProfileListResult {
         uint64_t CharacterID;
@@ -2831,6 +3006,15 @@ namespace PacketStructures::Server::Zone {
         uint8_t __padding2;
         HousingPersonalRoomProfileData ProfileList[15];
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingGetPersonalRoomProfileListResult,
+        STRUCT_FIELD(FFXIVIpcHousingGetPersonalRoomProfileListResult, CharacterID),
+        STRUCT_FIELD(FFXIVIpcHousingGetPersonalRoomProfileListResult, HouseLandID),
+        STRUCT_FIELD(FFXIVIpcHousingGetPersonalRoomProfileListResult, TopRoomID),
+        STRUCT_FIELD(FFXIVIpcHousingGetPersonalRoomProfileListResult, ProfileList)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcHousingGetHouseBuddyStableListResult {
         uint64_t CharacterID;
@@ -2842,6 +3026,16 @@ namespace PacketStructures::Server::Zone {
         HouseBuddyStableData BuddyList[15];
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingGetHouseBuddyStableListResult,
+        STRUCT_FIELD(FFXIVIpcHousingGetHouseBuddyStableListResult, CharacterID),
+        STRUCT_FIELD(FFXIVIpcHousingGetHouseBuddyStableListResult, LandID),
+        STRUCT_FIELD(FFXIVIpcHousingGetHouseBuddyStableListResult, Page),
+        STRUCT_FIELD(FFXIVIpcHousingGetHouseBuddyStableListResult, IsMyBuddy),
+        STRUCT_FIELD(FFXIVIpcHousingGetHouseBuddyStableListResult, BuddyList)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcHouseTrainBuddyData {
         uint8_t OwnerRace;
         uint8_t OwnerSex;
@@ -2849,12 +3043,29 @@ namespace PacketStructures::Server::Zone {
         uint8_t Equips[3];
     };
 
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHouseTrainBuddyData,
+        STRUCT_FIELD(FFXIVIpcHouseTrainBuddyData, OwnerRace),
+        STRUCT_FIELD(FFXIVIpcHouseTrainBuddyData, OwnerSex),
+        STRUCT_FIELD(FFXIVIpcHouseTrainBuddyData, Stain),
+        STRUCT_FIELD(FFXIVIpcHouseTrainBuddyData, Equips)
+    );
+#endif // DECLARE_PACKET_FIELDS
+
     struct FFXIVIpcHousingObjectTransformMultiResult {
         LandIdent LandId;
         uint8_t Result;
         uint8_t __padding1;
         uint16_t FixIndexes[10];
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingObjectTransformMultiResult,
+        STRUCT_FIELD(FFXIVIpcHousingObjectTransformMultiResult, LandId),
+        STRUCT_FIELD(FFXIVIpcHousingObjectTransformMultiResult, Result),
+        STRUCT_FIELD(FFXIVIpcHousingObjectTransformMultiResult, FixIndexes)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcHousingLogWithHouseName {
         uint32_t LogId;
@@ -2926,6 +3137,29 @@ namespace PacketStructures::Server::Zone {
         uint32_t Args3;
         FFXIVARR_POSITION3 Pos;
     };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcCreateObject,
+        STRUCT_FIELD(FFXIVIpcCreateObject, Index),
+        STRUCT_FIELD(FFXIVIpcCreateObject, Kind),
+        STRUCT_FIELD(FFXIVIpcCreateObject, Flag),
+        STRUCT_FIELD(FFXIVIpcCreateObject, BaseId),
+        STRUCT_FIELD(FFXIVIpcCreateObject, EntityId),
+        STRUCT_FIELD(FFXIVIpcCreateObject, LayoutId),
+        STRUCT_FIELD(FFXIVIpcCreateObject, ContentId),
+        STRUCT_FIELD(FFXIVIpcCreateObject, OwnerId),
+        STRUCT_FIELD(FFXIVIpcCreateObject, BindLayoutId),
+        STRUCT_FIELD(FFXIVIpcCreateObject, Scale),
+        STRUCT_FIELD(FFXIVIpcCreateObject, SharedGroupTimelineState),
+        STRUCT_FIELD(FFXIVIpcCreateObject, Dir),
+        STRUCT_FIELD(FFXIVIpcCreateObject, FATE),
+        STRUCT_FIELD(FFXIVIpcCreateObject, PermissionInvisibility),
+        STRUCT_FIELD(FFXIVIpcCreateObject, Args),
+        STRUCT_FIELD(FFXIVIpcCreateObject, Args2),
+        STRUCT_FIELD(FFXIVIpcCreateObject, Args3),
+        STRUCT_FIELD(FFXIVIpcCreateObject, Pos)
+    );
+#endif // DECLARE_PACKET_FIELDS
 
     struct FFXIVIpcDeleteObject {
         uint8_t Index;
