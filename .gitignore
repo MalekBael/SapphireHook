@@ -415,6 +415,8 @@ CppProperties.json
 /.github/copilot-instructions.md
 /docs/REFACTOR.md
 docs/refactor-18-11.md
+docs/TEMPLATE_FAMILY_STRATEGY.md
+docs/Weather.csv
 resources/filenames.csv
 resources/folders.csv
 vcpkg/
