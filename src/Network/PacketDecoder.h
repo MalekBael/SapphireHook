@@ -95,6 +95,10 @@ namespace PacketDecoding {
             return *this;
         }
         
+        FieldBuilder& Field(std::string_view name, uint64_t value) {
+            return Field(name, std::to_string(value));
+        }
+        
         FieldBuilder& Field(std::string_view name, uint32_t value) {
             return Field(name, std::to_string(value));
         }
