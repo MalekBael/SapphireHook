@@ -444,11 +444,24 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // Build zlib.dll full path from injector directory to keep all binaries together
+    fs::path zlibPath = injectorDir / L"zlib.dll";
+
     auto injectWithRetries = [&](DWORD pid) -> bool {
         const int maxAttempts = (std::max)(1, args.retry + 1);
         for (int attempt = 1; attempt <= maxAttempts; ++attempt) {
             if (g_cancel) return false;
             Log(LogLevel::Info, "Injection attempt " + std::to_string(attempt));
+            // Pre-load zlib.dll from the injector/export folder to satisfy dependencies
+            if (fs::exists(zlibPath)) {
+                Log(LogLevel::Info, std::string("Preloading zlib from: ") + zlibPath.string());
+                if (!InjectDLL(pid, zlibPath.wstring())) {
+                    Log(LogLevel::Warn, "Failed to preload zlib.dll; continuing to try SapphireHook");
+                }
+            } else {
+                Log(LogLevel::Warn, std::string("zlib.dll not found at: ") + zlibPath.string());
+            }
+
             if (InjectDLL(pid, dllPath.wstring())) return true;
             Log(LogLevel::Error, "Attempt failed");
             if (attempt < maxAttempts)

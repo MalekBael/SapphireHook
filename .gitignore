@@ -420,3 +420,5 @@ docs/Weather.csv
 resources/filenames.csv
 resources/folders.csv
 vcpkg/
+project.json
+sonar-project.properties

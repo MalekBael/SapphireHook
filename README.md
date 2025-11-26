@@ -9,7 +9,7 @@ SapphireHook aims to be an  reverse engineering and analysis toolkit for Final F
 ### Key Features
 
 #### Network Analysis
-- **181+ Packet Decoders**: Comprehensive coverage of FFXIV's zone protocol (96% of known opcodes)
+- **181+ Packet Decoders**: Coverage of FFXIV's zone protocol
 - **Real-time Packet Monitor**: Live capture with filtering, search, and export capabilities
 - **Template Family Support**: Efficient handling of variable-length array packets
 
