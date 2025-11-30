@@ -544,25 +544,38 @@ inline bool IsChatConn(uint16_t connType) {
     };
 
     // Centralized ActorControl (Order/ActorControl) category names
+    // Based on Sapphire CommonActorControl.h ActorControlType enum
     static const std::unordered_map<uint16_t, const char*> kActorControlCategories = {
-        { 0x00, "ToggleWeapon" },
-        { 0x01, "AutoAttack" },
-        { 0x02, "SetStatus" },
-        { 0x03, "CastStart" },
-        { 0x04, "SetBattle" },
-        { 0x05, "ClassJobChange" },
+        // === Core Combat & Status (0x00 - 0x1F) ===
+        { 0x00, "ToggleWeapon" },           // cycleID
+        { 0x01, "AutoAttack" },             // cycleID
+        { 0x02, "SetStatus" },              // cycleID
+        { 0x03, "CastStart" },              // cycleID
+        { 0x04, "SetBattle" },              // cycleID
+        { 0x05, "ClassJobChange" },         // cycleID
         { 0x06, "DefeatMsg" },
-        { 0x07, "GainExpMsg" },
+        { 0x07, "GainExpMsg" },             // cycleID (expGained, bonus)
         { 0x0A, "LevelUpEffect" },
+        { 0x0B, "ClassJobLevelUp" },        // cycleID
         { 0x0C, "ExpChainMsg" },
         { 0x0D, "HpSetStat" },
         { 0x0E, "DeathAnimation" },
-        { 0x0F, "CastInterrupt" },
-        { 0x11, "ActionStart" },
+        { 0x0F, "CastInterrupt" },          // cycleID
+        { 0x10, "SetRecastTimer" },         // cycleID (recastGroupId, cast time, recast time)
+        { 0x11, "ActionStart" },            // cycleID (startResult, targetId, actionId)
+        { 0x12, "StartAttackCombat" },      // cycleID
+        { 0x13, "StopAttackCombat" },       // cycleID
         { 0x14, "StatusEffectGain" },
         { 0x15, "StatusEffectLose" },
-        { 0x17, "HPFloatingText" },
-        { 0x1B, "Flee" },
+        { 0x16, "SetMaxHP" },
+        { 0x17, "HPFloatingText" },         // cycleID
+        { 0x18, "UpdateRestedExp" },        // cycleID (expRested, bSameZone)
+        { 0x19, "SetCharaGearParam" },      // cycleID
+        { 0x1B, "Flee" },                   // cycleID (duration, targetId)
+        { 0x1C, "LevelUpLimitBreakRate" },  // cycleID (rateAdd, skillPointReward)
+        { 0x1D, "SetCasting" },             // cycleID
+
+        // === UI & Effects (0x20 - 0x5F) ===
         { 0x22, "CombatIndicationShow" },
         { 0x25, "SpawnEffect" },
         { 0x26, "ToggleInvisible" },
@@ -571,26 +584,49 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x2B, "UpdateUiExp" },
         { 0x2D, "SetFallDamage" },
         { 0x32, "SetTarget" },
+        { 0x33, "SetGp" },                  // cycleID (currentGP, maxGP)
+        { 0x34, "SetGpRate" },              // cycleID
+        { 0x35, "SetMountEnable" },         // cycleID
         { 0x36, "ToggleNameHidden" },
-        { 0x47, "LimitbreakStart" },
+        { 0x39, "SetHomePoint" },           // cycleID (aetheryteId)
+        { 0x3B, "SetFavorite" },            // cycleID (aetheryteId, slot)
+        { 0x3D, "AddBlackList" },           // cycleID (serverId, contentId)
+        { 0x3F, "SetAOZScore" },            // cycleID
+        { 0x43, "SetEurekaStep" },          // cycleID
+        { 0x47, "LimitbreakStart" },        // cycleID (LB gauge current, max)
         { 0x48, "LimitbreakPartyStart" },
-        { 0x49, "BubbleText" },
+        { 0x49, "BubbleText" },             // cycleID (textId, 0=common, 1=gender/race)
         { 0x50, "DamageEffect" },
         { 0x51, "RaiseAnimation" },
+        { 0x54, "SetSanctuaryFlag" },       // cycleID
         { 0x57, "TreasureScreenMsg" },
         { 0x59, "SetOwnerId" },
+        { 0x5A, "SetItemLevel" },           // cycleID
         { 0x5C, "ItemRepairMsg" },
+
+        // === Actions & Learning (0x60 - 0x8F) ===
+        { 0x5E, "RequestEmote" },           // cycleID (emoteId)
+        { 0x5F, "SetCriticalHit" },         // cycleID
+        { 0x60, "SetDirectHit" },           // cycleID
         { 0x63, "BluActionLearn" },
-        { 0x64, "DirectorInit" },
-        { 0x65, "DirectorClear" },
+        { 0x64, "DirectorInit" },           // cycleID (directorId, contentId)
+        { 0x65, "DirectorClear" },          // cycleID (directorId)
         { 0x66, "LeveStartAnim" },
         { 0x67, "LeveStartError" },
-        { 0x6A, "DirectorEObjMod" },
+        { 0x69, "DirectorPopUp" },          // cycleID (popupId)
+        { 0x6A, "DirectorEObjMod" },        // cycleID (layoutId, state)
+        { 0x6B, "EnterContent" },           // cycleID (contentId)
         { 0x6D, "DirectorUpdate" },
-        { 0x74, "SetFateState" },
+        { 0x72, "SetCp" },                  // cycleID (cp, maxCp)
+        { 0x73, "SetCpRate" },              // cycleID
+        { 0x74, "SetFateState" },           // cycleID (fateId, progress, state)
         { 0x75, "ObtainFateItem" },
         { 0x76, "FateReqFailMsg" },
+        { 0x79, "SetLfgJob" },              // cycleID
         { 0x7B, "DutyQuestScreenMsg" },
+        { 0x7D, "MiniGameSetting" },        // cycleID
+        { 0x80, "SetEnmityPercent" },       // cycleID
+        { 0x81, "SetEnmityValue" },         // cycleID
         { 0x82, "SetContentClearFlag" },
         { 0x83, "SetContentOpenFlag" },
         { 0x84, "ItemObtainIcon" },
@@ -598,22 +634,61 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x86, "ItemFailMsg" },
         { 0x87, "ActionLearnMsg1" },
         { 0x8A, "FreeEventPos" },
+        { 0x8D, "ActionRejected" },         // cycleID (rejectId)
         { 0x8E, "MoveType" },
-        { 0x90, "DailyQuestSeed" },
+
+        // === Daily/Quest/Fate (0x90 - 0xBF) ===
+        { 0x8F, "SyncReset" },              // cycleID
+        { 0x90, "DailyQuestSeed" },         // cycleID (seed)
+        { 0x91, "SetBeastReputation" },     // cycleID (beastId, reputation, rank)
+        { 0x93, "QuestOpenGlobalFlag" },    // cycleID
+        { 0x95, "LogMessage" },             // cycleID (messageId, 5x param)
+        { 0x96, "SetModelScale" },          // cycleID (scale * 128)
         { 0x9B, "SetFateProgress" },
-        { 0xA1, "SetBGM" },
+        { 0x9D, "SetFateRank" },            // cycleID
+        { 0x9E, "SetPvpRank" },             // cycleID
+        { 0x9F, "SetPetHotbar" },           // cycleID
+        { 0xA1, "SetBGM" },                 // cycleID (bgmId, override)
         { 0xA4, "UnlockAetherCurrentMsg" },
+        { 0xA5, "SetMpRate" },              // cycleID
+        { 0xA6, "SetHpRate" },              // cycleID
         { 0xA8, "RemoveName" },
+        { 0xA9, "SetObjOffsetType" },       // cycleID
         { 0xAA, "ScreenFadeOut" },
-        { 0xC8, "Appear" },
+        { 0xAB, "SetOnlineStatus" },        // cycleID (statusId)
+        { 0xAE, "SetStatusIcon" },          // cycleID (iconId)
+        { 0xAF, "RequestGcRank" },          // cycleID
+        { 0xB0, "SetGcRank" },              // cycleID (gcId, rank)
+        { 0xB1, "RequestGcMemberCount" },   // cycleID
+        { 0xB5, "SetForceEquip" },          // cycleID
+
+        // === Teleport & Zone (0xC0 - 0xFF) ===
+        { 0xC8, "Appear" },                 // cycleID (spawnIndex)
         { 0xC9, "ZoneInDefaultPos" },
+        { 0xCA, "SetZoneIntention" },       // cycleID (zoneId)
         { 0xCB, "OnExecuteTelepo" },
         { 0xCC, "OnInvitationTelepo" },
         { 0xCD, "OnExecuteTelepoAction" },
         { 0xCE, "TownTranslate" },
         { 0xCF, "WarpStart" },
+        { 0xD0, "WarpEnd" },
+        { 0xD1, "WarpCancel" },
         { 0xD2, "InstanceSelectDlg" },
         { 0xD4, "ActorDespawnEffect" },
+        { 0xD5, "SetMount" },               // cycleID (mountId)
+        { 0xD6, "SetMountSpeed" },          // cycleID (speed)
+        { 0xD7, "Dismount" },               // cycleID
+        { 0xD9, "SetBit" },                 // cycleID (bitIndex)
+        { 0xDA, "SetWeather" },             // cycleID (weatherId)
+        { 0xDB, "SetSpawnHud" },            // cycleID
+        { 0xDC, "SetControllerIndex" },     // cycleID
+        { 0xDD, "SetZoneProvisionalLock" }, // cycleID
+        { 0xDE, "SetProvisionalLock" },     // cycleID
+        { 0xDF, "SetInInstance" },          // cycleID (inContent)
+        { 0xE4, "SetBuddyAction" },         // cycleID (slot, actionId)
+        { 0xF0, "SetTerritoryType" },       // cycleID (territoryId)
+
+        // === Companion/Mount (0xFD - 0x12F) ===
         { 0xFD, "CompanionUnlock" },
         { 0xFE, "ObtainBarding" },
         { 0xFF, "EquipBarding" },
@@ -628,32 +703,205 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x10E, "ToggleCompanion" },
         { 0x10F, "LearnCompanion" },
         { 0x110, "ActorFateOut1" },
-        { 0x122, "Emote" },
+        { 0x111, "SetMountAction" },        // cycleID (slot, actionId)
+        { 0x112, "SetPvpAction" },          // cycleID
+        { 0x113, "SetMinionAction" },       // cycleID (slot, actionId)
+        { 0x114, "SetOrnamentAction" },     // cycleID
+
+        // === Emote/Pose (0x120 - 0x14F) ===
+        { 0x122, "Emote" },                 // cycleID (emoteId, flipBook)
         { 0x123, "EmoteInterrupt" },
         { 0x124, "EmoteModeInterrupt" },
         { 0x125, "EmoteModeInterruptNonImmediate" },
-        { 0x127, "SetPose" },
+        { 0x127, "SetPose" },               // cycleID (poseId)
+        { 0x128, "SetModelState" },         // cycleID (state)
+        { 0x129, "SetTargetSign" },         // cycleID (iconId, actorId)
+        { 0x12A, "TargetPossible" },        // cycleID
         { 0x12C, "CraftingUnk" },
+        { 0x12D, "CraftingRequestId" },     // cycleID
+        { 0x12E, "CraftingQualityUp" },     // cycleID
+        { 0x12F, "CraftingStatusUp" },      // cycleID
+
+        // === Gathering/Mining (0x130 - 0x15F) ===
         { 0x130, "GatheringSenseMsg" },
         { 0x131, "PartyMsg" },
         { 0x132, "GatheringSenseMsg1" },
+        { 0x133, "GatheringBonusMax" },     // cycleID
+        { 0x134, "GatheringBonusPlus" },    // cycleID
+        { 0x135, "GatheringBonusRate" },    // cycleID
+        { 0x136, "GatheringBonusChain" },   // cycleID
+        { 0x137, "GatheringBonusCraft" },   // cycleID
         { 0x138, "GatheringSenseMsg2" },
+        { 0x139, "GatheringHQ" },           // cycleID
+        { 0x13A, "GatheringCollectable" },  // cycleID
+        { 0x13B, "GatheringIntegrity" },    // cycleID
+        { 0x13C, "GatheringChain" },        // cycleID
+        { 0x13D, "GatheringBoon" },         // cycleID
+        { 0x13E, "GatheringYield" },        // cycleID
+        { 0x13F, "GatheringAttempts" },     // cycleID
+
+        // === Fishing (0x140 - 0x15F) ===
         { 0x140, "FishingMsg" },
+        { 0x141, "FishingStart" },          // cycleID
         { 0x142, "FishingTotalFishCaught" },
+        { 0x143, "FishingBiteOn" },         // cycleID (tugType)
+        { 0x144, "FishingEnd" },            // cycleID
         { 0x145, "FishingBaitMsg" },
+        { 0x146, "FishingCatch" },          // cycleID (fishId, isHQ, size)
         { 0x147, "FishingReachMsg" },
         { 0x148, "FishingFailMsg" },
+        { 0x149, "FishingNewRecord" },      // cycleID
+        { 0x14A, "FishingLog" },            // cycleID
+        { 0x14B, "SpearFishingStart" },     // cycleID
+        { 0x14C, "SpearFishingEnd" },       // cycleID
+
+        // === Materia/Glamour/Dye (0x15E - 0x170) ===
         { 0x15E, "MateriaConvertMsg" },
         { 0x15F, "MeldSuccessMsg" },
         { 0x160, "MeldFailMsg" },
         { 0x161, "MeldModeToggle" },
         { 0x163, "AetherRestoreMsg" },
+        { 0x164, "SetAutoAfk" },            // cycleID
+        { 0x165, "SetAfk" },                // cycleID
+        { 0x166, "SetWalkMode" },           // cycleID
+        { 0x167, "SetDutyReady" },          // cycleID
         { 0x168, "DyeMsg" },
         { 0x16A, "ToggleCrestMsg" },
         { 0x16B, "ToggleBulkCrestMsg" },
         { 0x16C, "MateriaRemoveMsg" },
         { 0x16D, "GlamourCastMsg" },
         { 0x16E, "GlamourRemoveMsg" },
+
+        // === Retainer/Mailbox (0x170 - 0x1FF) ===
+        { 0x170, "RelicInfoMsg" },          // cycleID
+        { 0x171, "OpenRetainerBag" },       // cycleID
+        { 0x172, "RetainerMsg" },           // cycleID
+        { 0x173, "RetainerInfoUpdate" },    // cycleID
+        { 0x175, "MailArrived" },           // cycleID
+        { 0x176, "MailSent" },              // cycleID
+        { 0x177, "MailDeleted" },           // cycleID
+        { 0x178, "MailRead" },              // cycleID
+        { 0x179, "MailGetItem" },           // cycleID
+        { 0x17A, "MailGetGil" },            // cycleID
+        { 0x17B, "MailDeliveryQuery" },     // cycleID
+        { 0x17C, "MailDeliveryStatus" },    // cycleID
+        { 0x17D, "MailReturned" },          // cycleID
+
+        // === PvP Related (0x200 - 0x2FF) ===
+        { 0x200, "PvpRankUp" },             // cycleID
+        { 0x201, "PvpPointGain" },          // cycleID
+        { 0x202, "SetPvpSeriesLevel" },     // cycleID
+        { 0x203, "SetPvpSeriesExp" },       // cycleID
+        { 0x204, "SetPvpCrystalCredit" },   // cycleID
+        { 0x23E, "SetGilLimit" },           // cycleID
+
+        // === Gold Saucer (0x2A0 - 0x2CF) ===
+        { 0x2A0, "GoldSaucerUpdate" },      // cycleID
+        { 0x2A1, "SetMGP" },                // cycleID (mgp)
+        { 0x2A2, "ChocoboRaceResult" },     // cycleID
+        { 0x2A3, "SetMGPMax" },             // cycleID
+        { 0x2A4, "TripleTriadUpdate" },     // cycleID
+        { 0x2A5, "TripleTriadCardObtain" }, // cycleID (cardId)
+        { 0x2A6, "LordOfVerminion" },       // cycleID
+        { 0x2A7, "MahjongUpdate" },         // cycleID
+
+        // === Treasure/Maps (0x2D0 - 0x2FF) ===
+        { 0x2D0, "TreasureSpot" },          // cycleID
+        { 0x2D1, "TreasureOpen" },          // cycleID
+        { 0x2D2, "TreasureObtainMsg" },     // cycleID
+        { 0x2D3, "TreasureDigging" },       // cycleID
+        { 0x2D4, "TreasurePortal" },        // cycleID
+
+        // === Housing (0x3E9 - 0x47E) ===
+        { 0x3E9, "HousingPlaceItem" },      // cycleID (catalogId, slot)
+        { 0x3EA, "HousingMoveItem" },       // cycleID
+        { 0x3EB, "HousingRemoveItem" },     // cycleID (catalogId, slot)
+        { 0x3EC, "HousingWardInfo" },       // cycleID
+        { 0x3ED, "HousingUpdateLand" },     // cycleID
+        { 0x3EE, "HousingFurniture" },      // cycleID
+        { 0x3EF, "HousingEstateGreeting" }, // cycleID
+        { 0x3F0, "HousingEstateName" },     // cycleID
+        { 0x3F1, "HousingEstateTag" },      // cycleID
+        { 0x3F2, "HousingDyeItem" },        // cycleID
+        { 0x3F3, "HousingEditMode" },       // cycleID (enable)
+        { 0x3F4, "HousingRotateItem" },     // cycleID
+        { 0x3F5, "HousingStorageStatus" },  // cycleID
+        { 0x3F6, "HousingUpdateObject" },   // cycleID
+        { 0x3F7, "HousingPlaceYard" },      // cycleID
+        { 0x3F8, "HousingRemoveYard" },     // cycleID
+        { 0x3F9, "HousingMoveYard" },       // cycleID
+        { 0x3FA, "HousingHousingFlag" },    // cycleID (flag)
+        { 0x3FB, "HousingUpdateState" },    // cycleID
+        { 0x3FC, "HousingPlace" },          // cycleID
+        { 0x3FD, "HousingInternal" },       // cycleID
+        { 0x400, "HousingExterior" },       // cycleID
+        { 0x401, "HousingShowEstateGarden" }, // cycleID
+        { 0x402, "HousingLotteryInfo" },    // cycleID
+        { 0x403, "HousingLotteryResult" },  // cycleID
+        { 0x404, "HousingLotteryEntry" },   // cycleID
+        { 0x410, "HousingFreeCompanyWorkshop" }, // cycleID
+        { 0x411, "HousingFreeCompanySubmarine" }, // cycleID
+        { 0x412, "HousingFreeCompanyAirship" }, // cycleID
+        { 0x464, "SetSharedGroupParam" },   // cycleID
+        { 0x46E, "HousingRoomUpdate" },     // cycleID
+        { 0x47E, "HousingOrchestrionPlay" }, // cycleID (songId)
+
+        // === Doman Mahjong (0x4E0 - 0x4FF) ===
+        { 0x4E0, "MahjongDiscard" },        // cycleID
+        { 0x4E1, "MahjongDraw" },           // cycleID
+        { 0x4E2, "MahjongMeld" },           // cycleID
+        { 0x4E3, "MahjongReach" },          // cycleID
+        { 0x4E4, "MahjongRon" },            // cycleID
+        { 0x4E5, "MahjongTsumo" },          // cycleID
+        { 0x4E6, "MahjongKan" },            // cycleID
+
+        // === Frontline/PvP Modes (0x5E0 - 0x5EF) ===
+        { 0x5DC, "SetBeastClassJob" },      // cycleID
+        { 0x5DD, "OpenBeastGauge" },        // cycleID
+        { 0x5E0, "PvpSetMatchingState" },   // cycleID
+        { 0x5E1, "PvpFrontlineJoin" },      // cycleID
+        { 0x5E2, "PvpFrontlineEnd" },       // cycleID
+        { 0x5E3, "PvpFrontlineScore" },     // cycleID
+        { 0x5E4, "PvpFrontlineRank" },      // cycleID
+        { 0x5E5, "PvpRivalWingsJoin" },     // cycleID
+        { 0x5E6, "PvpRivalWingsEnd" },      // cycleID
+        { 0x5E7, "PvpRivalWingsScore" },    // cycleID
+        { 0x5E8, "PvpCrystallineConflict" }, // cycleID
+        { 0x5E9, "PvpCCRankPoint" },        // cycleID
+        { 0x5EA, "PvpCCMatchResult" },      // cycleID
+        { 0x5EB, "PvpCCSeasonEnd" },        // cycleID
+
+        // === Island Sanctuary (0x600 - 0x6FF) ===
+        { 0x600, "IslandSanctuaryInit" },   // cycleID
+        { 0x601, "IslandSanctuaryGather" }, // cycleID (itemId)
+        { 0x602, "IslandSanctuaryCraft" },  // cycleID
+        { 0x603, "IslandSanctuaryPasture" }, // cycleID
+        { 0x604, "IslandSanctuaryFarm" },   // cycleID
+        { 0x605, "IslandSanctuaryWorkshop" }, // cycleID
+        { 0x606, "IslandSanctuaryMinion" }, // cycleID
+        { 0x607, "IslandSanctuaryWeather" }, // cycleID
+        { 0x608, "IslandSanctuaryLandmark" }, // cycleID
+        { 0x609, "IslandSanctuaryRank" },   // cycleID
+        { 0x60A, "IslandSanctuaryVision" }, // cycleID
+
+        // === Variant/Criterion Dungeons (0x700 - 0x7FF) ===
+        { 0x700, "VariantDungeonInit" },    // cycleID
+        { 0x701, "VariantDungeonRoute" },   // cycleID
+        { 0x702, "VariantDungeonScore" },   // cycleID
+        { 0x703, "CriterionDungeonInit" },  // cycleID
+        { 0x704, "CriterionDungeonProgress" }, // cycleID
+        { 0x705, "CriterionDungeonEnd" },   // cycleID
+
+        // === Misc UI/System (0x800+) ===
+        { 0x800, "SetCurrency" },           // cycleID (currencyId, amount)
+        { 0x801, "SetWeeklyBonusComplete" }, // cycleID
+        { 0x802, "SetDailyBonusComplete" }, // cycleID
+        { 0x803, "SetSharedGroup" },        // cycleID
+        { 0x810, "SetSearchInfo" },         // cycleID
+        { 0x811, "SetSearchComment" },      // cycleID
+        { 0x812, "SetPartySearching" },     // cycleID
+        { 0x820, "DpsChallenge" },          // cycleID
+        { 0x821, "DpsChallengeResult" },    // cycleID
     };
 }
 

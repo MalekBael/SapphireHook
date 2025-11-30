@@ -67,7 +67,10 @@
       <AdditionalOptions>/VERBOSE:LIB %(AdditionalOptions)</AdditionalOptions>
     </Link>
     <PostBuildEvent>
-      <Command>echo [BUILD] SapphireHookDLL Debug (static Capstone + MinHook) - no dependency DLL copy needed</Command>
+      <Command>echo [BUILD] SapphireHookDLL Debug (static Capstone + MinHook)
+if not exist "$(OutDir)data" mkdir "$(OutDir)data"
+xcopy /Y /E /I "$(ProjectDir)data\*" "$(OutDir)data\" &gt;nul 2&gt;&amp;1
+echo [BUILD] Copied data folder to output directory</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <!-- Release: same /MDd runtime for now & static libs -->
@@ -93,7 +96,10 @@
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
     </Link>
     <PostBuildEvent>
-      <Command>echo SapphireHookDLL Release (static Capstone + MinHook, /MDd runtime temporary)</Command>
+      <Command>echo [BUILD] SapphireHookDLL Release (static Capstone + MinHook)
+if not exist "$(OutDir)data" mkdir "$(OutDir)data"
+xcopy /Y /E /I "$(ProjectDir)data\*" "$(OutDir)data\" &gt;nul 2&gt;&amp;1
+echo [BUILD] Copied data folder to output directory</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <!-- Headers -->
@@ -105,6 +111,7 @@
     <ClInclude Include="src\Core\CommandInvoker.h" />
     <ClInclude Include="src\Core\FunctionAnalyzer.h" />
     <ClInclude Include="src\Core\FunctionDatabase.h" />
+    <ClInclude Include="src\Core\GameData.h" />
     <ClInclude Include="src\Core\PacketInjector.h" />
     <ClInclude Include="src\Core\ResourceLoader.h" />
     <ClInclude Include="src\Core\RttiVTableFinder.h" />
@@ -133,6 +140,7 @@
     <ClInclude Include="src\Monitor\NetworkMonitor.h" />
     <ClInclude Include="src\Monitor\NetworkMonitorHelper.h" />
     <ClInclude Include="src\Monitor\NetworkMonitorTypes.h" />
+    <ClInclude Include="src\Network\GameEnums.h" />
     <ClInclude Include="src\Network\OpcodeNames.h" />
     <ClInclude Include="src\Network\PacketDecoder.h" />
     <ClInclude Include="src\Network\PacketRegistration.h" />
@@ -187,6 +195,7 @@
   </ItemGroup>
   <!-- Sources -->
   <ItemGroup>
+    <ClCompile Include="src\Core\GameData.cpp" />
     <ClCompile Include="src\Core\RttiVTableFinder.cpp" />
     <ClCompile Include="src\Modules\CharacterEdit.cpp" />
     <ClCompile Include="src\Modules\LuaGameScriptModule.cpp" />
@@ -225,6 +234,7 @@
     <ClCompile Include="src\Modules\SettingsModule.cpp" />
     <ClCompile Include="src\Monitor\NetworkMonitor.cpp" />
     <ClCompile Include="src\Monitor\NetworkMonitorHelper.cpp" />
+    <ClCompile Include="src\Network\GameEnums.cpp" />
     <ClCompile Include="src\Network\OpcodeNames.cpp" />
     <ClCompile Include="src\Network\PacketRegistration.Chat.cpp" />
     <ClCompile Include="src\Network\PacketRegistration.cpp" />

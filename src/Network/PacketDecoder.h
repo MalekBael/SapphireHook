@@ -11,7 +11,7 @@
 #include <array>
 #include <tuple>
 #include <type_traits>
-#include <chrono> // added
+#include <chrono>
 
 #ifdef min
 #undef min
@@ -22,6 +22,8 @@
 
 #include "PacketRegistration.h" // for Net::ConnectionType
 #include "OpcodeNames.h"        // updated signatures
+#include "GameEnums.h"          // for enum lookups
+#include "../Core/GameData.h"   // for item/action/etc lookups
 
 namespace PacketDecoding {
     using RowEmitter = std::function<void(const char*, const std::string&)>;
@@ -169,9 +171,664 @@ namespace PacketDecoding {
             }
             return Field(name, os.str());
         }
+        
+        // ================================================================
+        // GameEnums Helper Methods - Common enum lookups
+        // ================================================================
+        
+        FieldBuilder& InventoryType(std::string_view name, uint16_t value) {
+            auto inv = static_cast<GameEnums::InventoryType>(value);
+            return Enum(name, inv, GameEnums::GetInventoryTypeName);
+        }
+        
+        FieldBuilder& ObjKind(std::string_view name, uint8_t value) {
+            auto kind = static_cast<GameEnums::ObjKind>(value);
+            return Enum(name, kind, GameEnums::GetObjKindName);
+        }
+        
+        FieldBuilder& ActionKind(std::string_view name, uint8_t value) {
+            auto kind = static_cast<GameEnums::ActionKind>(value);
+            return Enum(name, kind, GameEnums::GetActionKindName);
+        }
+        
+        FieldBuilder& WarpType(std::string_view name, uint8_t value) {
+            auto warp = static_cast<GameEnums::WarpType>(value);
+            return Enum(name, warp, GameEnums::GetWarpTypeName);
+        }
+        
+        FieldBuilder& ActorStatus(std::string_view name, uint8_t value) {
+            auto status = static_cast<GameEnums::ActorStatus>(value);
+            return Enum(name, status, GameEnums::GetActorStatusName);
+        }
+        
+        FieldBuilder& ItemOperation(std::string_view name, uint8_t value) {
+            auto op = static_cast<GameEnums::ItemOperationType>(value);
+            return Enum(name, op, GameEnums::GetItemOperationTypeName);
+        }
+        
+        FieldBuilder& GrandCompany(std::string_view name, uint8_t value) {
+            auto gc = static_cast<GameEnums::GrandCompany>(value);
+            return Enum(name, gc, GameEnums::GetGrandCompanyName);
+        }
+        
+        FieldBuilder& GearSlot(std::string_view name, uint8_t value) {
+            auto slot = static_cast<GameEnums::GearSetSlot>(value);
+            return Enum(name, slot, GameEnums::GetGearSlotName);
+        }
+        
+        FieldBuilder& HouseSize(std::string_view name, uint8_t value) {
+            auto size = static_cast<GameEnums::HouseSize>(value);
+            return Enum(name, size, GameEnums::GetHouseSizeName);
+        }
+        
+        // Item lookup with GameData (catalog ID → item name)
+        FieldBuilder& Item(std::string_view name, uint32_t catalogId) {
+            return Field(name, GameData::FormatItem(catalogId));
+        }
+        
+        // Action lookup with GameData
+        FieldBuilder& Action(std::string_view name, uint32_t actionId) {
+            return Field(name, GameData::FormatAction(actionId));
+        }
+        
+        // Territory lookup with GameData
+        FieldBuilder& Territory(std::string_view name, uint16_t territoryId) {
+            return Field(name, GameData::FormatTerritory(territoryId));
+        }
+        
+        // ClassJob lookup with GameData
+        FieldBuilder& ClassJob(std::string_view name, uint8_t classJobId) {
+            return Field(name, GameData::FormatClassJob(classJobId));
+        }
+        
+        // Status effect lookup with GameData
+        FieldBuilder& StatusEffect(std::string_view name, uint16_t statusId) {
+            return Field(name, GameData::FormatStatus(statusId));
+        }
+        
+        // Mount lookup with GameData
+        FieldBuilder& Mount(std::string_view name, uint32_t mountId) {
+            return Field(name, GameData::FormatMount(mountId));
+        }
+        
+        // Emote lookup with GameData
+        FieldBuilder& Emote(std::string_view name, uint32_t emoteId) {
+            return Field(name, GameData::FormatEmote(emoteId));
+        }
+        
+        // Quest lookup with GameData
+        FieldBuilder& Quest(std::string_view name, uint32_t questId) {
+            return Field(name, GameData::FormatQuest(questId));
+        }
+        
+        // Minion lookup with GameData
+        FieldBuilder& Minion(std::string_view name, uint32_t minionId) {
+            return Field(name, GameData::FormatMinion(minionId));
+        }
 
     private:
         RowEmitter m_emit;
+    };
+
+// ============================================================================
+// Partial Field Builder - Supports decoding undersized packets
+// Tracks struct base and payload length, marks out-of-bounds fields
+// ============================================================================
+
+    template<typename PacketT>
+    class PartialFieldBuilder {
+    public:
+        PartialFieldBuilder(RowEmitter emit, const uint8_t* payload, size_t payloadLen)
+            : m_emit(std::move(emit))
+            , m_base(payload)
+            , m_len(payloadLen)
+            , m_structSize(sizeof(PacketT))
+            , m_truncatedCount(0)
+        {
+            // Emit size warning at start if undersized
+            if (payloadLen < sizeof(PacketT)) {
+                std::ostringstream os;
+                os << "Partial decode: have " << payloadLen << " of " << sizeof(PacketT) << " bytes";
+                m_emit("warning", os.str());
+            }
+        }
+        
+        ~PartialFieldBuilder() {
+            // Emit summary of truncated fields at end
+            if (m_truncatedCount > 0) {
+                std::ostringstream os;
+                os << m_truncatedCount << " field(s) beyond payload boundary";
+                m_emit("truncated", os.str());
+            }
+        }
+        
+        // Check if a field at given offset with given size is accessible
+        [[nodiscard]] bool CanAccess(size_t offset, size_t size) const {
+            return (offset + size) <= m_len;
+        }
+        
+        // Get pointer to packet (for member access) - caller must check CanAccess first
+        [[nodiscard]] const PacketT* Pkt() const {
+            return reinterpret_cast<const PacketT*>(m_base);
+        }
+        
+        // Check if a member is accessible using offsetof
+        template<typename MemberT>
+        [[nodiscard]] bool CanAccessMember(MemberT PacketT::*member) const {
+            // Calculate offset of member within struct
+            const PacketT* dummy = nullptr;
+            const auto* memberPtr = &(dummy->*member);
+            size_t offset = reinterpret_cast<size_t>(memberPtr);
+            return CanAccess(offset, sizeof(MemberT));
+        }
+        
+        // Field with automatic bounds checking using member pointer
+        template<typename MemberT>
+        PartialFieldBuilder& Field(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                const auto& value = Pkt()->*member;
+                EmitValue(name, value);
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Hex field with bounds checking
+        template<typename MemberT>
+        PartialFieldBuilder& Hex(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                const auto& value = Pkt()->*member;
+                std::ostringstream os;
+                os << "0x" << std::hex << std::uppercase << static_cast<uint64_t>(value);
+                m_emit(std::string(name).c_str(), os.str());
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // String field with bounds checking
+        template<size_t N>
+        PartialFieldBuilder& String(std::string_view name, const char (PacketT::*member)[N]) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, N)) {
+                const char* str = &(Pkt()->*member)[0];
+                size_t len = strnlen(str, N);
+                m_emit(std::string(name).c_str(), std::string(str, len));
+            } else if (CanAccess(offset, 1)) {
+                // Partial string - show what we have
+                size_t available = m_len - offset;
+                const char* str = reinterpret_cast<const char*>(m_base + offset);
+                size_t len = strnlen(str, available);
+                std::string partial(str, len);
+                partial += " [PARTIAL]";
+                m_emit(std::string(name).c_str(), partial);
+                m_truncatedCount++;
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Enum field with bounds checking (member pointer version)
+        template<typename MemberT, typename LookupFunc>
+        PartialFieldBuilder& Enum(std::string_view name, MemberT PacketT::*member, LookupFunc lookupFunc) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                const auto& value = Pkt()->*member;
+                std::ostringstream os;
+                os << static_cast<int>(value);
+                if (auto* str = lookupFunc(value)) {
+                    os << " (" << str << ")";
+                }
+                m_emit(std::string(name).c_str(), os.str());
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Enum field with direct value (for when value is already accessed)
+        template<typename T, typename LookupFunc>
+        PartialFieldBuilder& Enum(std::string_view name, T value, LookupFunc lookupFunc) {
+            std::ostringstream os;
+            os << static_cast<int>(value);
+            if (auto* str = lookupFunc(value)) {
+                os << " (" << str << ")";
+            }
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // Direct value emit (for computed values, already-read data)
+        PartialFieldBuilder& Field(std::string_view name, std::string value) {
+            m_emit(std::string(name).c_str(), std::move(value));
+            return *this;
+        }
+        
+        PartialFieldBuilder& Field(std::string_view name, uint64_t value) {
+            return Field(name, std::to_string(value));
+        }
+        
+        PartialFieldBuilder& Field(std::string_view name, uint32_t value) {
+            return Field(name, std::to_string(value));
+        }
+        
+        PartialFieldBuilder& Field(std::string_view name, int32_t value) {
+            return Field(name, std::to_string(value));
+        }
+        
+        PartialFieldBuilder& Field(std::string_view name, uint16_t value) {
+            return Field(name, std::to_string(value));
+        }
+        
+        PartialFieldBuilder& Field(std::string_view name, uint8_t value) {
+            return Field(name, std::to_string(static_cast<unsigned>(value)));
+        }
+        
+        PartialFieldBuilder& Field(std::string_view name, float value) {
+            std::ostringstream os;
+            os << std::fixed << std::setprecision(3) << value;
+            return Field(name, os.str());
+        }
+        
+        PartialFieldBuilder& Field(std::string_view name, double value) {
+            std::ostringstream os;
+            os << std::fixed << std::setprecision(3) << value;
+            return Field(name, os.str());
+        }
+        
+        PartialFieldBuilder& Hex(std::string_view name, uint64_t value) {
+            std::ostringstream os;
+            os << "0x" << std::hex << std::uppercase << value;
+            return Field(name, os.str());
+        }
+        
+        // Position helper
+        template<typename PosT>
+        PartialFieldBuilder& Position(std::string_view name, PosT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(PosT))) {
+                const auto& pos = Pkt()->*member;
+                std::ostringstream os;
+                os << std::fixed << std::setprecision(2) 
+                   << "(" << pos.x << ", " << pos.y << ", " << pos.z << ")";
+                m_emit(std::string(name).c_str(), os.str());
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // ================================================================
+        // GameData Lookup Helpers - show human-readable names
+        // ================================================================
+        
+        // Item lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& Item(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatItem(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Item lookup (direct value)
+        PartialFieldBuilder& Item(std::string_view name, uint32_t itemId) {
+            m_emit(std::string(name).c_str(), GameData::FormatItem(itemId));
+            return *this;
+        }
+        
+        // Action lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& Action(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatAction(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Action lookup (direct value)
+        PartialFieldBuilder& Action(std::string_view name, uint32_t actionId) {
+            m_emit(std::string(name).c_str(), GameData::FormatAction(actionId));
+            return *this;
+        }
+        
+        // Status effect lookup
+        template<typename MemberT>
+        PartialFieldBuilder& Status(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatStatus(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Territory/Zone lookup
+        template<typename MemberT>
+        PartialFieldBuilder& Territory(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatTerritory(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // ClassJob lookup
+        template<typename MemberT>
+        PartialFieldBuilder& ClassJob(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint8_t id = static_cast<uint8_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatClassJob(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // ================================================================
+        // Angle/Rotation Helpers - convert packed values to degrees
+        // ================================================================
+        
+        // 16-bit packed angle (0-65535 maps to 0-360 degrees)
+        template<typename MemberT>
+        PartialFieldBuilder& Angle16(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint16_t raw = static_cast<uint16_t>(Pkt()->*member);
+                float degrees = raw * 360.0f / 65535.0f;
+                std::ostringstream os;
+                os << std::fixed << std::setprecision(1) << degrees << "°";
+                m_emit(std::string(name).c_str(), os.str());
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // 8-bit packed angle (0-255 maps to 0-360 degrees)  
+        template<typename MemberT>
+        PartialFieldBuilder& Angle8(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint8_t raw = static_cast<uint8_t>(Pkt()->*member);
+                float degrees = raw * 360.0f / 255.0f;
+                std::ostringstream os;
+                os << std::fixed << std::setprecision(1) << degrees << "°";
+                m_emit(std::string(name).c_str(), os.str());
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Radians to degrees
+        template<typename MemberT>
+        PartialFieldBuilder& AngleRad(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                float radians = static_cast<float>(Pkt()->*member);
+                float degrees = radians * (180.0f / 3.14159265f);
+                std::ostringstream os;
+                os << std::fixed << std::setprecision(1) << degrees << "°";
+                m_emit(std::string(name).c_str(), os.str());
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Direct angle values
+        PartialFieldBuilder& Angle16(std::string_view name, uint16_t raw) {
+            float degrees = raw * 360.0f / 65535.0f;
+            std::ostringstream os;
+            os << std::fixed << std::setprecision(1) << degrees << "°";
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        PartialFieldBuilder& Angle8(std::string_view name, uint8_t raw) {
+            float degrees = raw * 360.0f / 255.0f;
+            std::ostringstream os;
+            os << std::fixed << std::setprecision(1) << degrees << "°";
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // ================================================================
+        // Mount/Minion/Emote Helpers
+        // ================================================================
+        
+        template<typename MemberT>
+        PartialFieldBuilder& Mount(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatMount(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        template<typename MemberT>
+        PartialFieldBuilder& Minion(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatMinion(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        template<typename MemberT>
+        PartialFieldBuilder& Emote(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatEmote(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        template<typename MemberT>
+        PartialFieldBuilder& Quest(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatQuest(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // ================================================================
+        // GameEnums Helpers - Common enum lookups
+        // ================================================================
+        
+        // Inventory type (direct value)
+        PartialFieldBuilder& InventoryType(std::string_view name, uint16_t value) {
+            auto inv = static_cast<GameEnums::InventoryType>(value);
+            std::ostringstream os;
+            os << value;
+            if (auto* str = GameEnums::GetInventoryTypeName(inv)) {
+                os << " (" << str << ")";
+            }
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // ObjKind (direct value)
+        PartialFieldBuilder& ObjKind(std::string_view name, uint8_t value) {
+            auto kind = static_cast<GameEnums::ObjKind>(value);
+            std::ostringstream os;
+            os << static_cast<int>(value);
+            if (auto* str = GameEnums::GetObjKindName(kind)) {
+                os << " (" << str << ")";
+            }
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // ActionKind (direct value)
+        PartialFieldBuilder& ActionKind(std::string_view name, uint8_t value) {
+            auto kind = static_cast<GameEnums::ActionKind>(value);
+            std::ostringstream os;
+            os << static_cast<int>(value);
+            if (auto* str = GameEnums::GetActionKindName(kind)) {
+                os << " (" << str << ")";
+            }
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // WarpType (direct value)
+        PartialFieldBuilder& WarpType(std::string_view name, uint8_t value) {
+            auto warp = static_cast<GameEnums::WarpType>(value);
+            std::ostringstream os;
+            os << static_cast<int>(value);
+            if (auto* str = GameEnums::GetWarpTypeName(warp)) {
+                os << " (" << str << ")";
+            }
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // ActorStatus (direct value)
+        PartialFieldBuilder& ActorStatus(std::string_view name, uint8_t value) {
+            auto status = static_cast<GameEnums::ActorStatus>(value);
+            std::ostringstream os;
+            os << static_cast<int>(value);
+            if (auto* str = GameEnums::GetActorStatusName(status)) {
+                os << " (" << str << ")";
+            }
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // ItemOperationType (direct value)
+        PartialFieldBuilder& ItemOperationType(std::string_view name, uint8_t value) {
+            auto op = static_cast<GameEnums::ItemOperationType>(value);
+            std::ostringstream os;
+            os << static_cast<int>(value);
+            if (auto* str = GameEnums::GetItemOperationTypeName(op)) {
+                os << " (" << str << ")";
+            }
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // GrandCompany (direct value)
+        PartialFieldBuilder& GrandCompany(std::string_view name, uint8_t value) {
+            auto gc = static_cast<GameEnums::GrandCompany>(value);
+            std::ostringstream os;
+            os << static_cast<int>(value);
+            if (auto* str = GameEnums::GetGrandCompanyName(gc)) {
+                os << " (" << str << ")";
+            }
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // GearSlot (direct value)
+        PartialFieldBuilder& GearSlot(std::string_view name, uint8_t value) {
+            auto slot = static_cast<GameEnums::GearSetSlot>(value);
+            std::ostringstream os;
+            os << static_cast<int>(value);
+            if (auto* str = GameEnums::GetGearSlotName(slot)) {
+                os << " (" << str << ")";
+            }
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // HouseSize (direct value)
+        PartialFieldBuilder& HouseSize(std::string_view name, uint8_t value) {
+            auto size = static_cast<GameEnums::HouseSize>(value);
+            std::ostringstream os;
+            os << static_cast<int>(value);
+            if (auto* str = GameEnums::GetHouseSizeName(size)) {
+                os << " (" << str << ")";
+            }
+            m_emit(std::string(name).c_str(), os.str());
+            return *this;
+        }
+        
+        // StatusEffect (direct value, uses GameData lookup)
+        PartialFieldBuilder& StatusEffect(std::string_view name, uint16_t statusId) {
+            m_emit(std::string(name).c_str(), GameData::FormatStatus(statusId));
+            return *this;
+        }
+        
+        // Get available length
+        [[nodiscard]] size_t AvailableLen() const { return m_len; }
+        [[nodiscard]] size_t StructSize() const { return m_structSize; }
+        [[nodiscard]] bool IsComplete() const { return m_len >= m_structSize; }
+        
+    private:
+        template<typename MemberT>
+        static size_t OffsetOf(MemberT PacketT::*member) {
+            return reinterpret_cast<size_t>(&(static_cast<const PacketT*>(nullptr)->*member));
+        }
+        
+        template<typename T>
+        void EmitValue(std::string_view name, const T& value) {
+            if constexpr (std::is_integral_v<T>) {
+                m_emit(std::string(name).c_str(), std::to_string(value));
+            } else if constexpr (std::is_floating_point_v<T>) {
+                std::ostringstream os;
+                os << std::fixed << std::setprecision(3) << value;
+                m_emit(std::string(name).c_str(), os.str());
+            } else {
+                m_emit(std::string(name).c_str(), "[complex type]");
+            }
+        }
+        
+        RowEmitter m_emit;
+        const uint8_t* m_base;
+        size_t m_len;
+        size_t m_structSize;
+        int m_truncatedCount;
     };
 
     // Move DumpBytesAsHex BEFORE any use (FieldStringifier / ValueToString)

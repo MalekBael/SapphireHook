@@ -1,13 +1,82 @@
 #pragma once
 #include <cstdint>
+#include <cmath>
+#include <string>
+#include <format>
 
 namespace PacketStructures {
 
-    // Common position structure
+    // ============================================
+    // Position Structures (matching Sapphire/game)
+    // ============================================
+
+    // Common 3D position (12 bytes) - used in most network packets
     struct FFXIVARR_POSITION3 {
         float x;
         float y;
         float z;
+
+        // Operators for convenience
+        bool operator==(const FFXIVARR_POSITION3& other) const {
+            return x == other.x && y == other.y && z == other.z;
+        }
+
+        bool operator!=(const FFXIVARR_POSITION3& other) const {
+            return !(*this == other);
+        }
+
+        FFXIVARR_POSITION3 operator-(const FFXIVARR_POSITION3& other) const {
+            return { x - other.x, y - other.y, z - other.z };
+        }
+
+        // Distance calculations
+        float DistanceSquared(const FFXIVARR_POSITION3& other) const {
+            float dx = x - other.x;
+            float dy = y - other.y;
+            float dz = z - other.z;
+            return dx * dx + dy * dy + dz * dz;
+        }
+
+        float Distance(const FFXIVARR_POSITION3& other) const {
+            return std::sqrt(DistanceSquared(other));
+        }
+
+        float Distance2D(const FFXIVARR_POSITION3& other) const {
+            float dx = x - other.x;
+            float dz = z - other.z;
+            return std::sqrt(dx * dx + dz * dz);
+        }
+
+        // Format as string (for logging/display)
+        std::string ToString() const {
+            return std::format("({:.2f}, {:.2f}, {:.2f})", x, y, z);
+        }
+    };
+
+    // Extended position with padding (16 bytes) - used in some internal structures
+    struct Vector3 {
+        float x;
+        float y;
+        float z;
+        float reserve;  // Padding for 16-byte alignment
+
+        // Conversion from FFXIVARR_POSITION3
+        static Vector3 FromPosition3(const FFXIVARR_POSITION3& pos) {
+            return { pos.x, pos.y, pos.z, 0.0f };
+        }
+
+        FFXIVARR_POSITION3 ToPosition3() const {
+            return { x, y, z };
+        }
+
+        std::string ToString() const {
+            return std::format("({:.2f}, {:.2f}, {:.2f})", x, y, z);
+        }
+    };
+
+    // 3x3 rotation matrix
+    struct Matrix33 {
+        float m[3][3];
     };
 
     // Chat type enum

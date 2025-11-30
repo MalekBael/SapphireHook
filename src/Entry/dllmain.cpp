@@ -13,6 +13,7 @@
 #include "../Logger/Logger.h"
 #include "../UI/UIManager.h"
 #include "../Modules/FunctionCallMonitor.h"
+#include "../Core/GameData.h"
 
 using SapphireHook::LogInfo;
 using SapphireHook::LogWarning;
@@ -191,6 +192,24 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
         }
         LogInfo("Still waiting for game window...");
         Sleep(1000);
+    }
+
+    // Initialize game data lookups (items, actions, etc.)
+    try {
+        // Use DLL directory as data directory
+        wchar_t dllPath[MAX_PATH];
+        GetModuleFileNameW(g_hModule, dllPath, MAX_PATH);
+        std::filesystem::path dataDir = std::filesystem::path(dllPath).parent_path() / "data";
+        if (GameData::Initialize(dataDir)) {
+            const auto& stats = GameData::GetLoadStats();
+            LogInfo("GameData initialized: " + std::to_string(stats.itemCount) + " items, " +
+                    std::to_string(stats.actionCount) + " actions, " +
+                    std::to_string(stats.classJobCount) + " classjobs");
+        } else {
+            LogInfo("GameData: No data files found (lookups will show IDs only)");
+        }
+    } catch (const std::exception& e) {
+        LogWarning("GameData initialization failed: " + std::string(e.what()));
     }
 
     bool hooksInitialized = false;

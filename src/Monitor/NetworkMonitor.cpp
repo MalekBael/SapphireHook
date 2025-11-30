@@ -821,49 +821,120 @@ namespace {
 		return decoded;
 	}
 
-	static void RenderPayload_Heuristics(const uint8_t* base, size_t len) {
+	// ============================================================================
+	// Raw Payload View - Clean data display without guessing
+	// Shows payload data in multiple formats for manual analysis
+	// ============================================================================
+	
+	static void RenderPayload_RawView(const uint8_t* base, size_t len) {
 		if (!base || len == 0) return;
 		ImGui::PushID(base);
-		if (ImGui::CollapsingHeader("Payload preview (heuristic)", ImGuiTreeNodeFlags_DefaultOpen)) {
+		
+		ImGui::TextDisabled("Payload: %zu bytes (no registered decoder)", len);
+		ImGui::Spacing();
+		
+		// Hex dump view (default open - most useful for unknown packets)
+		if (ImGui::CollapsingHeader("Hex Dump", ImGuiTreeNodeFlags_DefaultOpen)) {
+			ImGui::BeginChild("hexdump", ImVec2(0, 200), true);
+			for (size_t row = 0; row < len; row += 16) {
+				ImGui::Text("%04zX: ", row);
+				ImGui::SameLine();
+				// Hex bytes
+				for (size_t col = 0; col < 16; ++col) {
+					if (row + col < len) {
+						ImGui::Text("%02X ", base[row + col]);
+					} else {
+						ImGui::Text("   ");
+					}
+					ImGui::SameLine();
+					if (col == 7) { ImGui::Text(" "); ImGui::SameLine(); }
+				}
+				ImGui::Text(" ");
+				ImGui::SameLine();
+				// ASCII
+				for (size_t col = 0; col < 16 && row + col < len; ++col) {
+					uint8_t c = base[row + col];
+					ImGui::Text("%c", (c >= 0x20 && c < 0x7F) ? c : '.');
+					ImGui::SameLine();
+				}
+				ImGui::NewLine();
+			}
+			ImGui::EndChild();
+		}
+		
+		// u32/float view
+		if (ImGui::CollapsingHeader("u32 / float View")) {
 			if (ImGui::BeginTable("pv_u32", 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-				ImGui::TableSetupColumn("off");
-				ImGui::TableSetupColumn("u32 (dec)");
-				ImGui::TableSetupColumn("u32 (hex)");
-				ImGui::TableSetupColumn("float");
+				ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, 60.f);
+				ImGui::TableSetupColumn("u32 (dec)", ImGuiTableColumnFlags_WidthFixed, 100.f);
+				ImGui::TableSetupColumn("u32 (hex)", ImGuiTableColumnFlags_WidthFixed, 100.f);
+				ImGui::TableSetupColumn("float", ImGuiTableColumnFlags_WidthFixed, 100.f);
+				ImGui::TableHeadersRow();
 				for (size_t off = 0; off + 4 <= len; off += 4) {
 					uint32_t v = loadLE<uint32_t>(base + off);
 					float f; std::memcpy(&f, base + off, sizeof(float));
-					char b1[32], b2[32], b3[64];
-					std::snprintf(b1, sizeof(b1), "0x%04zx", off);
-					std::snprintf(b2, sizeof(b2), "%u", v);
-					std::snprintf(b3, sizeof(b3), "0x%08X", v);
 					ImGui::TableNextRow();
-					ImGui::TableNextColumn(); ImGui::TextUnformatted(b1);
-					ImGui::TableNextColumn(); ImGui::TextUnformatted(b2);
-					ImGui::TableNextColumn(); ImGui::TextUnformatted(b3);
+					ImGui::TableNextColumn(); ImGui::Text("0x%04zX", off);
+					ImGui::TableNextColumn(); ImGui::Text("%u", v);
+					ImGui::TableNextColumn(); ImGui::Text("0x%08X", v);
 					ImGui::TableNextColumn(); ImGui::Text("%.6f", f);
 				}
 				ImGui::EndTable();
 			}
-			if (ImGui::CollapsingHeader("u16 view", ImGuiTreeNodeFlags_None)) {
-				if (ImGui::BeginTable("pv_u16", 8, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
-					for (size_t off = 0; off + 2 <= len; off += 16) {
-						ImGui::TableNextRow();
-						for (int i = 0; i < 8; i++) {
-							size_t o2 = off + i * 2; ImGui::TableNextColumn();
-							if (o2 + 2 <= len) {
-								uint16_t v = loadLE<uint16_t>(base + o2);
-								ImGui::Text("%04zx:%5u (0x%04X)", o2, v, v);
-							}
-							else {
-								ImGui::TextUnformatted(" ");
-							}
+		}
+		
+		// u16 view
+		if (ImGui::CollapsingHeader("u16 View")) {
+			if (ImGui::BeginTable("pv_u16", 5, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+				ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, 60.f);
+				ImGui::TableSetupColumn("u16[0]", ImGuiTableColumnFlags_WidthFixed, 100.f);
+				ImGui::TableSetupColumn("u16[1]", ImGuiTableColumnFlags_WidthFixed, 100.f);
+				ImGui::TableSetupColumn("u16[2]", ImGuiTableColumnFlags_WidthFixed, 100.f);
+				ImGui::TableSetupColumn("u16[3]", ImGuiTableColumnFlags_WidthFixed, 100.f);
+				ImGui::TableHeadersRow();
+				for (size_t off = 0; off + 2 <= len; off += 8) {
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn(); ImGui::Text("0x%04zX", off);
+					for (int i = 0; i < 4; i++) {
+						ImGui::TableNextColumn();
+						size_t o2 = off + i * 2;
+						if (o2 + 2 <= len) {
+							uint16_t v = loadLE<uint16_t>(base + o2);
+							ImGui::Text("%5u (0x%04X)", v, v);
+						} else {
+							ImGui::TextDisabled("-");
 						}
 					}
-					ImGui::EndTable();
 				}
+				ImGui::EndTable();
 			}
 		}
+		
+		// u8 view (bytes)
+		if (ImGui::CollapsingHeader("u8 View")) {
+			if (ImGui::BeginTable("pv_u8", 9, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg)) {
+				ImGui::TableSetupColumn("Offset", ImGuiTableColumnFlags_WidthFixed, 60.f);
+				for (int i = 0; i < 8; ++i) {
+					char colName[8]; std::snprintf(colName, sizeof(colName), "+%d", i);
+					ImGui::TableSetupColumn(colName, ImGuiTableColumnFlags_WidthFixed, 50.f);
+				}
+				ImGui::TableHeadersRow();
+				for (size_t off = 0; off < len; off += 8) {
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn(); ImGui::Text("0x%04zX", off);
+					for (int i = 0; i < 8; ++i) {
+						ImGui::TableNextColumn();
+						if (off + i < len) {
+							ImGui::Text("%3u", base[off + i]);
+						} else {
+							ImGui::TextDisabled("-");
+						}
+					}
+				}
+				ImGui::EndTable();
+			}
+		}
+		
 		ImGui::PopID();
 	}
 
@@ -882,8 +953,8 @@ namespace {
 
 		if (decoded) return;
 
-		if (ImGui::CollapsingHeader("Unknown Packet - Heuristic Analysis", ImGuiTreeNodeFlags_DefaultOpen)) {
-			RenderPayload_Heuristics(payload, payloadLen);
+		if (ImGui::CollapsingHeader("Unknown Packet - Raw Payload", ImGuiTreeNodeFlags_DefaultOpen)) {
+			RenderPayload_RawView(payload, payloadLen);
 		}
 	}
 
@@ -999,8 +1070,8 @@ namespace {
 				RenderPayload_KnownAt(s.opcode, outgoing, hp, payloadPtr, payloadLen);
 				ImGui::Unindent(8.0f);
 
-				if (ImGui::CollapsingHeader("Segment Payload Heuristic View")) {
-					RenderPayload_Heuristics(payloadPtr, payloadLen);
+				if (ImGui::CollapsingHeader("Raw Payload View")) {
+					RenderPayload_RawView(payloadPtr, payloadLen);
 				}
 
 				ImGui::PopID();

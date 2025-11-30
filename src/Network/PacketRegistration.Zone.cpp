@@ -1,4 +1,5 @@
 #include "../Network/OpcodeNames.h"
+#include "../Network/GameEnums.h"
 #include "../ProtocolHandlers/CommonTypes.h"
 #include "../ProtocolHandlers/Zone/ClientZoneDef.h"
 #include "../ProtocolHandlers/Zone/ServerZoneDef.h"
@@ -42,16 +43,25 @@ namespace {
     std::string ClassifyItemOperation(const PacketStructures::Server::Zone::FFXIVIpcItemOperation* p) {
         if (!p) return "null";
         std::ostringstream os;
-        switch (p->operationType) {
-        case 1: os << "Move"; break;
-        case 2: os << "Split"; break;
-        case 3: os << "Combine"; break;
-        case 4: os << "Discard"; break;
-        case 5: os << "Use"; break;
-        default: os << "Op" << p->operationType; break;
+        // Use GameEnums for operation type
+        auto opType = static_cast<GameEnums::ItemOperationType>(p->operationType);
+        if (auto* name = GameEnums::GetItemOperationTypeName(opType)) {
+            os << name;
+        } else {
+            os << "Op" << static_cast<int>(p->operationType);
         }
-        if (p->srcStorageId != p->dstStorageId)
-            os << "(Storage:" << p->srcStorageId << "→" << p->dstStorageId << ")";
+        if (p->srcStorageId != p->dstStorageId) {
+            // Try to look up inventory names
+            auto srcInv = static_cast<GameEnums::InventoryType>(p->srcStorageId);
+            auto dstInv = static_cast<GameEnums::InventoryType>(p->dstStorageId);
+            const char* srcName = GameEnums::GetInventoryTypeName(srcInv);
+            const char* dstName = GameEnums::GetInventoryTypeName(dstInv);
+            os << "(";
+            if (srcName) os << srcName; else os << p->srcStorageId;
+            os << "→";
+            if (dstName) os << dstName; else os << p->dstStorageId;
+            os << ")";
+        }
         if (p->srcStack > 0 || p->dstStack > 0)
             os << "(Stack:" << p->srcStack << "→" << p->dstStack << ")";
         return os.str();
@@ -149,12 +159,28 @@ namespace PacketDecoding {
         return os.str();
     }
 
+    inline std::string FormatCalcResult(const CalcResult& cr) {
+        auto effectType = static_cast<GameEnums::CalcResultType>(cr.effectType);
+        const char* typeName = GameEnums::GetCalcResultTypeName(effectType);
+        std::ostringstream os;
+        if (typeName) {
+            os << typeName;
+        } else {
+            os << "Unk" << static_cast<int>(cr.effectType);
+        }
+        os << ":" << static_cast<int>(cr.value);
+        if (cr.hitSeverity > 0) {
+            os << " (sev=" << static_cast<int>(cr.hitSeverity) << ")";
+        }
+        return os.str();
+    }
+
     inline std::string SummarizeCalcResults(const CalcResult* cr, size_t count, size_t maxShow = 3) {
         std::ostringstream os;
         os << count << " [";
         for (size_t i = 0; i < count && i < maxShow; ++i) {
             if (i) os << ", ";
-            os << "hpΔ=" << std::dec << (int)cr[i].value;
+            os << FormatCalcResult(cr[i]);
         }
         if (count > maxShow) os << ", ...";
         os << "]";
@@ -173,169 +199,365 @@ namespace {
     template<typename PacketT>
     DecoderFunc MakeGenericDecoder() {
         return [](const uint8_t* payload, size_t len, RowEmitter emit) {
-            if (len < sizeof(PacketT)) {
-                std::ostringstream os; os << "Packet too small (have " << len
-                    << ", need " << sizeof(PacketT) << ")";
-                emit("error", os.str());
-                return;
-            }
-            emit("PacketType", typeid(PacketT).name());
+            // Use partial decoding - show what we can
+            PartialFieldBuilder<PacketT> b(emit, payload, len);
+            b.Field("PacketType", std::string(typeid(PacketT).name()));
+            // Generic decoder just shows the type name
             };
     }
 
     // ================= CATEGORY 1: COMBAT =================
     template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActorControl>() {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
-            if (l < sizeof(ServerZone::FFXIVIpcActorControl)) { emit("error", "Packet too small"); return; }
-            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorControl*>(p);
-            FieldBuilder(emit)
-                .Field("Category", pkt->category)
-                .Enum("CategoryName", pkt->category, ::LookupActorControlCategoryName)
-                .Hex("Param1", pkt->param1).Hex("Param2", pkt->param2)
-                .Hex("Param3", pkt->param3).Hex("Param4", pkt->param4);
-            };
+            using PktT = ServerZone::FFXIVIpcActorControl;
+            PartialFieldBuilder<PktT> b(emit, p, l);
+            
+            // These fields use direct offset checking via member pointers
+            if (b.CanAccess(offsetof(PktT, category), sizeof(uint16_t))) {
+                b.Field("Category", b.Pkt()->category);
+                b.Enum("CategoryName", b.Pkt()->category, ::LookupActorControlCategoryName);
+            } else {
+                b.Field("Category", "[TRUNCATED]");
+            }
+            if (b.CanAccess(offsetof(PktT, param1), sizeof(uint32_t)))
+                b.Hex("Param1", b.Pkt()->param1);
+            else b.Field("Param1", "[TRUNCATED]");
+            if (b.CanAccess(offsetof(PktT, param2), sizeof(uint32_t)))
+                b.Hex("Param2", b.Pkt()->param2);
+            else b.Field("Param2", "[TRUNCATED]");
+            if (b.CanAccess(offsetof(PktT, param3), sizeof(uint32_t)))
+                b.Hex("Param3", b.Pkt()->param3);
+            else b.Field("Param3", "[TRUNCATED]");
+            if (b.CanAccess(offsetof(PktT, param4), sizeof(uint32_t)))
+                b.Hex("Param4", b.Pkt()->param4);
+            else b.Field("Param4", "[TRUNCATED]");
+        };
     }
 
     template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActionResult1>() {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
-            if (l < sizeof(ServerZone::FFXIVIpcActionResult1)) { emit("error", "Packet too small"); return; }
-            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActionResult1*>(p);
-            FieldBuilder(emit)
-                .Field("Action", pkt->Action)
-                .Enum("ActionKind", pkt->ActionKind, GetActionTypeName)
-                .Field("RequestId", pkt->RequestId)
-                .Field("ResultId", pkt->ResultId)
-                .Hex("MainTarget", pkt->MainTarget)
-                .Hex("Target", pkt->Target)
-                .Hex("Flag", pkt->Flag)
-                .Field("LockTime", static_cast<double>(pkt->LockTime))
-                .Field("DamageHP", static_cast<int>(pkt->CalcResult.value))
-                .Hex("BallistaEntityId", pkt->BallistaEntityId);
-            };
+            using PktT = ServerZone::FFXIVIpcActionResult1;
+            PartialFieldBuilder<PktT> b(emit, p, l);
+            
+            // Use GameData lookup for action name
+            if (b.CanAccess(offsetof(PktT, Action), sizeof(uint32_t)))
+                b.Action("Action", b.Pkt()->Action);
+            else b.Field("Action", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, ActionKind), sizeof(uint8_t))) {
+                auto kind = static_cast<GameEnums::ActionKind>(b.Pkt()->ActionKind);
+                b.Enum("ActionKind", kind, GameEnums::GetActionKindName);
+            } else b.Field("ActionKind", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, RequestId), sizeof(uint32_t)))
+                b.Field("RequestId", b.Pkt()->RequestId);
+            else b.Field("RequestId", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, ResultId), sizeof(uint32_t)))
+                b.Field("ResultId", b.Pkt()->ResultId);
+            else b.Field("ResultId", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, MainTarget), sizeof(uint64_t)))
+                b.Hex("MainTarget", b.Pkt()->MainTarget);
+            else b.Field("MainTarget", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Target), sizeof(uint64_t)))
+                b.Hex("Target", b.Pkt()->Target);
+            else b.Field("Target", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Flag), sizeof(uint32_t)))
+                b.Hex("Flag", b.Pkt()->Flag);
+            else b.Field("Flag", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, LockTime), sizeof(float)))
+                b.Field("LockTime", static_cast<double>(b.Pkt()->LockTime));
+            else b.Field("LockTime", "[TRUNCATED]");
+            
+            // CalcResult with effect type decoding
+            if (b.CanAccess(offsetof(PktT, CalcResult), sizeof(CalcResult)))
+                b.Field("Effect", FormatCalcResult(b.Pkt()->CalcResult));
+            else b.Field("Effect", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, BallistaEntityId), sizeof(uint32_t)))
+                b.Hex("BallistaEntityId", b.Pkt()->BallistaEntityId);
+            else b.Field("BallistaEntityId", "[TRUNCATED]");
+        };
     }
 
     template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActionResult>() {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
-            if (l < sizeof(ServerZone::FFXIVIpcActionResult)) { emit("error", "Packet too small"); return; }
-            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActionResult*>(p);
-            FieldBuilder b(emit);
-            b.Field("Action", pkt->Action)
-                .Enum("ActionKind", pkt->ActionKind, GetActionTypeName)
-                .Field("RequestId", pkt->RequestId)
-                .Field("ResultId", pkt->ResultId)
-                .Hex("MainTarget", pkt->MainTarget)
-                .Field("TargetCount", pkt->TargetCount)
-                .Hex("Flag", pkt->Flag)
-                .Field("LockTime", static_cast<double>(pkt->LockTime));
-            int show = std::min<int>(pkt->TargetCount, 3);
-            for (int i = 0; i < show; i++) {
-                std::ostringstream tk, dk; tk << "Target" << i; dk << "Damage" << i;
-                b.Hex(tk.str(), pkt->Target[i])
-                    .Field(dk.str(), static_cast<int>(pkt->CalcResult[i].value));
+            using PktT = ServerZone::FFXIVIpcActionResult;
+            PartialFieldBuilder<PktT> b(emit, p, l);
+            
+            // Use GameData lookup for action name
+            if (b.CanAccess(offsetof(PktT, Action), sizeof(uint32_t)))
+                b.Action("Action", b.Pkt()->Action);
+            else b.Field("Action", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, ActionKind), sizeof(uint8_t))) {
+                auto kind = static_cast<GameEnums::ActionKind>(b.Pkt()->ActionKind);
+                b.Enum("ActionKind", kind, GameEnums::GetActionKindName);
+            } else b.Field("ActionKind", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, RequestId), sizeof(uint32_t)))
+                b.Field("RequestId", b.Pkt()->RequestId);
+            else b.Field("RequestId", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, ResultId), sizeof(uint32_t)))
+                b.Field("ResultId", b.Pkt()->ResultId);
+            else b.Field("ResultId", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, MainTarget), sizeof(uint64_t)))
+                b.Hex("MainTarget", b.Pkt()->MainTarget);
+            else b.Field("MainTarget", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, TargetCount), sizeof(uint8_t)))
+                b.Field("TargetCount", b.Pkt()->TargetCount);
+            else b.Field("TargetCount", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Flag), sizeof(uint32_t)))
+                b.Hex("Flag", b.Pkt()->Flag);
+            else b.Field("Flag", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, LockTime), sizeof(float)))
+                b.Field("LockTime", static_cast<double>(b.Pkt()->LockTime));
+            else b.Field("LockTime", "[TRUNCATED]");
+            
+            // Decode target effects with CalcResult type names
+            if (b.CanAccess(offsetof(PktT, TargetCount), sizeof(uint8_t))) {
+                int show = std::min<int>(b.Pkt()->TargetCount, 3);
+                for (int i = 0; i < show; i++) {
+                    size_t targetOff = offsetof(PktT, Target) + i * sizeof(uint64_t);
+                    size_t calcOff = offsetof(PktT, CalcResult) + i * sizeof(CalcResult);
+                    std::ostringstream tk, ek; 
+                    tk << "Target" << i; 
+                    ek << "Effect" << i;
+                    if (b.CanAccess(targetOff, sizeof(uint64_t)))
+                        b.Hex(tk.str(), b.Pkt()->Target[i]);
+                    else b.Field(tk.str(), "[TRUNCATED]");
+                    if (b.CanAccess(calcOff, sizeof(CalcResult)))
+                        b.Field(ek.str(), FormatCalcResult(b.Pkt()->CalcResult[i]));
+                    else b.Field(ek.str(), "[TRUNCATED]");
+                }
+                if (b.Pkt()->TargetCount > 3) {
+                    std::ostringstream os; 
+                    os << "... and " << (b.Pkt()->TargetCount - 3) << " more targets";
+                    b.Field("MoreTargets", os.str());
+                }
             }
-            if (pkt->TargetCount > 3) {
-                std::ostringstream os; os << "... and " << (pkt->TargetCount - 3) << " more targets";
-                b.Field("MoreTargets", os.str());
-            }
-            };
+        };
     }
 
     template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcPlayerSpawn>() {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
-            if (l < sizeof(ServerZone::FFXIVIpcPlayerSpawn)) { emit("error", "Packet too small"); return; }
-            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPlayerSpawn*>(p);
-            FieldBuilder b(emit);
-            b.Field("LayoutId", pkt->LayoutId)
-                .Field("NameId", pkt->NameId)
-                .String("Name", reinterpret_cast<const char*>(pkt->Name), 32)
-                .Field("ObjKind", pkt->ObjKind)
-                .Field("ObjType", pkt->ObjType)
-                .Field("ClassJob", pkt->ClassJob)
-                .Field("Level", pkt->Lv)
-                .Field("HP", pkt->Hp).Field("HPMax", pkt->HpMax)
-                .Field("MP", pkt->Mp).Field("MPMax", pkt->MpMax)
-                .Position("Position", pkt->Pos[0], pkt->Pos[1], pkt->Pos[2])
-                .Angle("Direction", static_cast<float>(pkt->Dir) / 65535.f * 6.283185f);
-            if (pkt->GrandCompany > 0)
-                b.Field("GrandCompany", pkt->GrandCompany)
-                .Field("GrandCompanyRank", pkt->GrandCompanyRank);
-            if (pkt->Crest != 0)
-                b.Hex("FCCrest", pkt->Crest)
-                .String("FCTag", reinterpret_cast<const char*>(pkt->FreeCompanyTag), 6);
-            int active = 0;
-            for (int i = 0; i < 30; i++) if (pkt->Status[i].id) active++;
-            if (active) {
-                b.Field("ActiveStatusCount", active);
-                int shown = 0;
-                for (int i = 0; i < 30 && shown < 5; i++) {
-                    if (!pkt->Status[i].id) continue;
-                    std::ostringstream k; k << "Status" << shown;
-                    b.Hex(k.str(), pkt->Status[i].id);
-                    if (const char* n = GetStatusEffectName(pkt->Status[i].id))
-                        b.Field(k.str() + "Name", n);
-                    shown++;
+            using PktT = ServerZone::FFXIVIpcPlayerSpawn;
+            PartialFieldBuilder<PktT> b(emit, p, l);
+            
+            if (b.CanAccess(offsetof(PktT, LayoutId), sizeof(uint32_t)))
+                b.Field("LayoutId", b.Pkt()->LayoutId);
+            else b.Field("LayoutId", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, NameId), sizeof(uint32_t)))
+                b.Field("NameId", b.Pkt()->NameId);
+            else b.Field("NameId", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Name), 32))
+                b.Field("Name", std::string(reinterpret_cast<const char*>(b.Pkt()->Name), strnlen(reinterpret_cast<const char*>(b.Pkt()->Name), 32)));
+            else b.Field("Name", "[TRUNCATED]");
+            
+            // ObjKind with enum lookup
+            if (b.CanAccess(offsetof(PktT, ObjKind), sizeof(uint8_t))) {
+                auto kind = static_cast<GameEnums::ObjKind>(b.Pkt()->ObjKind);
+                b.Enum("ObjKind", kind, GameEnums::GetObjKindName);
+            } else b.Field("ObjKind", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, ObjType), sizeof(uint8_t)))
+                b.Field("ObjType", b.Pkt()->ObjType);
+            else b.Field("ObjType", "[TRUNCATED]");
+            
+            // Use GameData lookup for ClassJob name
+            if (b.CanAccess(offsetof(PktT, ClassJob), sizeof(uint8_t)))
+                b.ClassJob("ClassJob", &PktT::ClassJob);
+            else b.Field("ClassJob", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Lv), sizeof(uint8_t)))
+                b.Field("Level", b.Pkt()->Lv);
+            else b.Field("Level", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Hp), sizeof(uint32_t)))
+                b.Field("HP", b.Pkt()->Hp);
+            else b.Field("HP", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, HpMax), sizeof(uint32_t)))
+                b.Field("HPMax", b.Pkt()->HpMax);
+            else b.Field("HPMax", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Mp), sizeof(uint16_t)))
+                b.Field("MP", b.Pkt()->Mp);
+            else b.Field("MP", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, MpMax), sizeof(uint16_t)))
+                b.Field("MPMax", b.Pkt()->MpMax);
+            else b.Field("MPMax", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Pos), sizeof(float) * 3)) {
+                std::ostringstream os;
+                os << std::fixed << std::setprecision(2) 
+                   << "(" << b.Pkt()->Pos[0] << ", " << b.Pkt()->Pos[1] << ", " << b.Pkt()->Pos[2] << ")";
+                b.Field("Position", os.str());
+            } else b.Field("Position", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Dir), sizeof(uint16_t))) {
+                float degrees = b.Pkt()->Dir * 360.0f / 65535.0f;
+                std::ostringstream os;
+                os << std::fixed << std::setprecision(1) << degrees << "deg";
+                b.Field("Direction", os.str());
+            } else b.Field("Direction", "[TRUNCATED]");
+            
+            // Optional fields only if accessible
+            if (b.CanAccess(offsetof(PktT, GrandCompany), sizeof(uint8_t)) && b.Pkt()->GrandCompany > 0) {
+                b.GrandCompany("GrandCompany", b.Pkt()->GrandCompany);
+                if (b.CanAccess(offsetof(PktT, GrandCompanyRank), sizeof(uint8_t)))
+                    b.Field("GrandCompanyRank", b.Pkt()->GrandCompanyRank);
+            }
+            
+            if (b.CanAccess(offsetof(PktT, Crest), sizeof(uint64_t)) && b.Pkt()->Crest != 0) {
+                b.Hex("FCCrest", b.Pkt()->Crest);
+                if (b.CanAccess(offsetof(PktT, FreeCompanyTag), 6))
+                    b.Field("FCTag", std::string(reinterpret_cast<const char*>(b.Pkt()->FreeCompanyTag), strnlen(reinterpret_cast<const char*>(b.Pkt()->FreeCompanyTag), 6)));
+            }
+            
+            // Count active status effects
+            if (b.CanAccess(offsetof(PktT, Status), sizeof(StatusWork) * 30)) {
+                int active = 0;
+                for (int i = 0; i < 30; i++) if (b.Pkt()->Status[i].id) active++;
+                if (active > 0) {
+                    b.Field("ActiveStatusCount", active);
+                    int shown = 0;
+                    for (int i = 0; i < 30 && shown < 5; i++) {
+                        if (!b.Pkt()->Status[i].id) continue;
+                        std::ostringstream k; k << "Status" << shown;
+                        b.StatusEffect(k.str(), b.Pkt()->Status[i].id);
+                        shown++;
+                    }
                 }
             }
-            };
+        };
     }
 
     template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActorControlSelf>() {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
-            if (l < sizeof(ServerZone::FFXIVIpcActorControlSelf)) { emit("error", "Packet too small"); return; }
-            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorControlSelf*>(p);
-            FieldBuilder(emit)
-                .Field("Category", pkt->category)
-                .Enum("CategoryName", pkt->category, ::LookupActorControlCategoryName)
-                .Hex("Param1", pkt->param1).Hex("Param2", pkt->param2)
-                .Hex("Param3", pkt->param3).Hex("Param4", pkt->param4)
-                .Hex("Param5", pkt->param5).Hex("Param6", pkt->param6);
-            };
+            using PktT = ServerZone::FFXIVIpcActorControlSelf;
+            PartialFieldBuilder<PktT> b(emit, p, l);
+            
+            if (b.CanAccess(offsetof(PktT, category), sizeof(uint16_t))) {
+                b.Field("Category", b.Pkt()->category);
+                b.Enum("CategoryName", b.Pkt()->category, ::LookupActorControlCategoryName);
+            } else b.Field("Category", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, param1), sizeof(uint32_t)))
+                b.Hex("Param1", b.Pkt()->param1);
+            else b.Field("Param1", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, param2), sizeof(uint32_t)))
+                b.Hex("Param2", b.Pkt()->param2);
+            else b.Field("Param2", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, param3), sizeof(uint32_t)))
+                b.Hex("Param3", b.Pkt()->param3);
+            else b.Field("Param3", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, param4), sizeof(uint32_t)))
+                b.Hex("Param4", b.Pkt()->param4);
+            else b.Field("Param4", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, param5), sizeof(uint32_t)))
+                b.Hex("Param5", b.Pkt()->param5);
+            else b.Field("Param5", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, param6), sizeof(uint32_t)))
+                b.Hex("Param6", b.Pkt()->param6);
+            else b.Field("Param6", "[TRUNCATED]");
+        };
     }
 
     template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcActorControlTarget>() {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
-            if (l < sizeof(ServerZone::FFXIVIpcActorControlTarget)) { emit("error", "Packet too small"); return; }
-            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorControlTarget*>(p);
-            FieldBuilder(emit)
-                .Field("Category", pkt->category)
-                .Enum("CategoryName", pkt->category, ::LookupActorControlCategoryName)
-                .Hex("Param1", pkt->param1).Hex("Param2", pkt->param2)
-                .Hex("Param3", pkt->param3).Hex("Param4", pkt->param4)
-                .Hex("TargetId", pkt->targetId);
-            };
+            using PktT = ServerZone::FFXIVIpcActorControlTarget;
+            PartialFieldBuilder<PktT> b(emit, p, l);
+            
+            if (b.CanAccess(offsetof(PktT, category), sizeof(uint16_t))) {
+                b.Field("Category", b.Pkt()->category);
+                b.Enum("CategoryName", b.Pkt()->category, ::LookupActorControlCategoryName);
+            } else b.Field("Category", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, param1), sizeof(uint32_t)))
+                b.Hex("Param1", b.Pkt()->param1);
+            else b.Field("Param1", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, param2), sizeof(uint32_t)))
+                b.Hex("Param2", b.Pkt()->param2);
+            else b.Field("Param2", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, param3), sizeof(uint32_t)))
+                b.Hex("Param3", b.Pkt()->param3);
+            else b.Field("Param3", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, param4), sizeof(uint32_t)))
+                b.Hex("Param4", b.Pkt()->param4);
+            else b.Field("Param4", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, targetId), sizeof(uint64_t)))
+                b.Hex("TargetId", b.Pkt()->targetId);
+            else b.Field("TargetId", "[TRUNCATED]");
+        };
     }
 
     template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcResting>() {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
-            if (l < sizeof(ServerZone::FFXIVIpcResting)) { emit("error", "Packet too small"); return; }
-            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcResting*>(p);
-            FieldBuilder(emit)
-                .Field("Hp", pkt->Hp)
-                .Field("Mp", pkt->Mp)
-                .Field("Tp", pkt->Tp)
-                .Field("Gp", pkt->Gp)
-                .Hex("Unknown_3_2", pkt->Unknown_3_2);
-            };
+            using PktT = ServerZone::FFXIVIpcResting;
+            PartialFieldBuilder<PktT> b(emit, p, l);
+            
+            if (b.CanAccess(offsetof(PktT, Hp), sizeof(uint32_t)))
+                b.Field("Hp", b.Pkt()->Hp);
+            else b.Field("Hp", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Mp), sizeof(uint16_t)))
+                b.Field("Mp", b.Pkt()->Mp);
+            else b.Field("Mp", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Tp), sizeof(uint16_t)))
+                b.Field("Tp", b.Pkt()->Tp);
+            else b.Field("Tp", "[TRUNCATED]");
+            
+            if (b.CanAccess(offsetof(PktT, Gp), sizeof(uint16_t)))
+                b.Field("Gp", b.Pkt()->Gp);
+            else b.Field("Gp", "[TRUNCATED]");
+        };
     }
 
     template<> DecoderFunc MakeGenericDecoder<ServerZone::FFXIVIpcStatus>() {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
-            if (l < sizeof(ServerZone::FFXIVIpcStatus)) { emit("error", "Packet too small"); return; }
-            auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcStatus*>(p);
-            FieldBuilder b(emit);
+            using PktT = ServerZone::FFXIVIpcStatus;
+            PartialFieldBuilder<PktT> b(emit, p, l);
+            
+            if (!b.CanAccess(offsetof(PktT, effect), sizeof(StatusWork) * 30)) {
+                b.Field("effect", "[TRUNCATED - status array inaccessible]");
+                return;
+            }
+            
             int active = 0;
-            for (int i = 0; i < 30; i++) if (pkt->effect[i].id) active++;
+            for (int i = 0; i < 30; i++) if (b.Pkt()->effect[i].id) active++;
             b.Field("ActiveStatusCount", active);
+            
             int shown = 0;
             for (int i = 0; i < 30 && shown < 10; i++) {
-                if (!pkt->effect[i].id) continue;
+                if (!b.Pkt()->effect[i].id) continue;
                 std::ostringstream pfx; pfx << "Status" << shown;
-                b.Hex(pfx.str() + "Id", pkt->effect[i].id);
-                if (const char* n = GetStatusEffectName(pkt->effect[i].id))
-                    b.Field(pfx.str() + "Name", n);
-                b.Field(pfx.str() + "SystemParam", (int)pkt->effect[i].systemParam)
-                    .Field(pfx.str() + "Time", pkt->effect[i].time)
-                    .Hex(pfx.str() + "Source", pkt->effect[i].source);
+                b.StatusEffect(pfx.str(), b.Pkt()->effect[i].id);
+                b.Field(pfx.str() + "SystemParam", (int)b.Pkt()->effect[i].systemParam)
+                    .Field(pfx.str() + "Time", b.Pkt()->effect[i].time)
+                    .Hex(pfx.str() + "Source", b.Pkt()->effect[i].source);
                 shown++;
             }
             if (shown < active) {
@@ -374,8 +596,8 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorCast*>(p);
             float x = pkt->TargetPos[0] * 0.001f, y = pkt->TargetPos[1] * 0.001f, z = pkt->TargetPos[2] * 0.001f;
             FieldBuilder(emit)
-                .Field("Action", pkt->Action)
-                .Enum("ActionKind", pkt->ActionKind, GetActionTypeName)
+                .Action("Action", pkt->Action)
+                .ActionKind("ActionKind", pkt->ActionKind)
                 .Hex("ActionKey", pkt->ActionKey)
                 .Field("CastTime", pkt->CastTime)
                 .Hex("Target", pkt->Target)
@@ -418,8 +640,7 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcWarp*>(p);
             FieldBuilder b(emit);
             b.Field("Dir", pkt->Dir)
-                .Field("Type", pkt->Type)
-                .Enum("TypeName", pkt->Type, GetWarpTypeName)
+                .WarpType("Type", pkt->Type)
                 .Field("TypeArg", pkt->TypeArg)
                 .Hex("LayerSet", pkt->LayerSet)
                 .Position("Position", pkt->x, pkt->y, pkt->z);
@@ -549,13 +770,13 @@ namespace {
                 b.String(pfx + "Name", pkt->Member[i].Name, 32)
                     .Hex(pfx + "CharaId", pkt->Member[i].CharaId)
                     .Hex(pfx + "EntityId", pkt->Member[i].EntityId)
-                    .Field(pfx + "ClassJob", (int)pkt->Member[i].ClassJob)
+                    .ClassJob(pfx + "ClassJob", pkt->Member[i].ClassJob)
                     .Field(pfx + "Lv", (int)pkt->Member[i].Lv)
                     .Field(pfx + "HP", pkt->Member[i].Hp)
                     .Field(pfx + "HPMax", pkt->Member[i].HpMax)
                     .Field(pfx + "MP", pkt->Member[i].Mp)
                     .Field(pfx + "MPMax", pkt->Member[i].MpMax)
-                    .Field(pfx + "TerritoryType", pkt->Member[i].TerritoryType);
+                    .Territory(pfx + "Zone", pkt->Member[i].TerritoryType);
             }
             };
     }
@@ -596,7 +817,7 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPartyPos*>(p);
             FieldBuilder(e)
                 .Field("Index", (int)pkt->Index)
-                .Field("TerritoryType", pkt->TerritoryType)
+                .Territory("Zone", pkt->TerritoryType)
                 .Hex("EntityId", pkt->EntityId)
                 .Position("Position", pkt->X, pkt->Y, pkt->Z);
             };
@@ -609,7 +830,7 @@ namespace {
             FieldBuilder(e)
                 .Field("AllianceIndex", (int)pkt->AllianceIndex)
                 .Field("PartyIndex", (int)pkt->PartyIndex)
-                .Field("TerritoryType", pkt->TerritoryType)
+                .Territory("Zone", pkt->TerritoryType)
                 .Hex("EntityId", pkt->EntityId)
                 .Position("Position", pkt->X, pkt->Y, pkt->Z);
             };
@@ -851,13 +1072,8 @@ namespace {
         return [](const uint8_t* p, size_t l, RowEmitter e) {
             if (l < sizeof(ServerZone::FFXIVIpcGrandCompany)) { e("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcGrandCompany*>(p);
-            const char* gc = "Unknown";
-            switch (pkt->GrandCompany) {
-            case 0: gc = "None"; break; case 1: gc = "Maelstrom"; break;
-            case 2: gc = "Order of the Twin Adder"; break; case 3: gc = "Immortal Flames"; break;
-            }
-            std::ostringstream os; os << gc << " (" << (int)pkt->GrandCompany << ")";
-            FieldBuilder(e).Field("GrandCompany", os.str())
+            FieldBuilder(e)
+                .GrandCompany("GrandCompany", pkt->GrandCompany)
                 .Field("GrandCompanyRank", (int)pkt->GrandCompanyRank);
             };
     }
@@ -901,9 +1117,9 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcNormalItem*>(p);
             FieldBuilder b(e);
             b.Field("ContextId", pkt->contextId)
-                .Field("StorageId", pkt->item.storageId)
+                .InventoryType("StorageId", pkt->item.storageId)
                 .Field("ContainerIndex", pkt->item.containerIndex)
-                .Field("CatalogId", pkt->item.catalogId)
+                .Item("Item", pkt->item.catalogId)
                 .Field("Stack", pkt->item.stack);
             if (pkt->item.signatureId) b.Hex("SignatureId", pkt->item.signatureId);
             b.Hex("Flags", (uint32_t)pkt->item.flags)
@@ -928,9 +1144,9 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcUpdateItem*>(p);
             FieldBuilder(e)
                 .Field("ContextId", pkt->contextId)
-                .Field("StorageId", pkt->item.storageId)
+                .InventoryType("StorageId", pkt->item.storageId)
                 .Field("ContainerIndex", pkt->item.containerIndex)
-                .Field("CatalogId", pkt->item.catalogId)
+                .Item("Item", pkt->item.catalogId)
                 .Field("Stack", pkt->item.stack)
                 .Field("Durability", pkt->item.durability)
                 .Field("Refine", pkt->item.refine);
@@ -944,7 +1160,7 @@ namespace {
             FieldBuilder(e)
                 .Field("ContextId", pkt->contextId)
                 .Field("Size", pkt->size)
-                .Field("StorageId", pkt->storageId);
+                .InventoryType("StorageId", pkt->storageId);
             };
     }
 
@@ -952,25 +1168,19 @@ namespace {
         return [](const uint8_t* p, size_t l, RowEmitter e) {
             if (l < sizeof(ServerZone::FFXIVIpcItemOperation)) { e("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcItemOperation*>(p);
-            const char* op = "Unknown";
-            switch (pkt->operationType) {
-            case 1: op = "Move"; break; case 2: op = "Split"; break; case 3: op = "Combine"; break;
-            case 4: op = "Discard"; break; case 5: op = "Use"; break; case 6: op = "Sort"; break;
-            }
-            std::ostringstream os; os << op << " (" << (int)pkt->operationType << ")";
             FieldBuilder b(e);
             b.Field("ContextId", pkt->contextId)
-                .Field("OperationType", os.str());
+                .ItemOperation("OperationType", pkt->operationType);
             if (pkt->srcEntity) b.Hex("SrcEntity", pkt->srcEntity);
-            b.Field("SrcStorageId", pkt->srcStorageId)
+            b.InventoryType("SrcStorageId", pkt->srcStorageId)
                 .Field("SrcContainerIndex", (int)pkt->srcContainerIndex)
                 .Field("SrcStack", pkt->srcStack)
-                .Field("SrcCatalogId", pkt->srcCatalogId);
+                .Item("SrcItem", pkt->srcCatalogId);
             if (pkt->dstEntity) b.Hex("DstEntity", pkt->dstEntity);
-            b.Field("DstStorageId", pkt->dstStorageId)
+            b.InventoryType("DstStorageId", pkt->dstStorageId)
                 .Field("DstContainerIndex", (int)pkt->dstContainerIndex)
                 .Field("DstStack", pkt->dstStack)
-                .Field("DstCatalogId", pkt->dstCatalogId);
+                .Item("DstItem", pkt->dstCatalogId);
             };
     }
 
@@ -1002,10 +1212,10 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcGilItem*>(p);
             FieldBuilder(e)
                 .Field("ContextId", pkt->contextId)
-                .Field("StorageId", pkt->item.storageId)
+                .InventoryType("StorageId", pkt->item.storageId)
                 .Field("ContainerIndex", pkt->item.containerIndex)
                 .Field("Amount", pkt->item.stack)
-                .Field("CatalogId", pkt->item.catalogId)
+                .Item("Item", pkt->item.catalogId)
                 .Field("SubQuality", (int)pkt->item.subquarity);
             };
     }
@@ -1022,7 +1232,7 @@ namespace {
             std::ostringstream ts; ts << t << " (" << pkt->storage.type << ")";
             FieldBuilder(e)
                 .Field("ContextId", pkt->contextId)
-                .Field("StorageId", pkt->storage.storageId)
+                .InventoryType("StorageId", pkt->storage.storageId)
                 .Field("Type", ts.str())
                 .Field("Index", (int)pkt->storage.index)
                 .Field("ContainerSize", pkt->storage.containerSize);
@@ -1038,7 +1248,7 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcInitZone*>(p);
             FieldBuilder(emit)
                 .Field("ZoneId", pkt->ZoneId)
-                .Field("TerritoryType", pkt->TerritoryType)
+                .Territory("TerritoryType", pkt->TerritoryType)
                 .Field("TerritoryIndex", pkt->TerritoryIndex)
                 .Hex("LayerSetId", pkt->LayerSetId)
                 .Hex("LayoutId", pkt->LayoutId)
@@ -1066,14 +1276,14 @@ namespace {
                 .Field("Race", (int)pkt->Race)
                 .Field("Tribe", (int)pkt->Tribe)
                 .Field("Sex", (int)pkt->Sex)
-                .Field("ClassJob", (int)pkt->ClassJob)
-                .Field("FirstClass", (int)pkt->FirstClass)
+                .ClassJob("ClassJob", pkt->ClassJob)
+                .ClassJob("FirstClass", pkt->FirstClass)
                 .Field("GuardianDeity", (int)pkt->GuardianDeity)
                 .Field("BirthMonth", (int)pkt->BirthMonth)
                 .Field("Birthday", (int)pkt->Birthday)
                 .Field("StartTown", (int)pkt->StartTown)
                 .Field("HomePoint", (int)pkt->HomePoint)
-                .Field("GrandCompany", (int)pkt->GrandCompany)
+                .GrandCompany("GrandCompany", pkt->GrandCompany)
                 .Field("Pet", (int)pkt->Pet)
                 .Field("BuddyRank", (int)pkt->BuddyRank)
                 .String("Name", reinterpret_cast<const char*>(pkt->Name), 32)
@@ -1114,7 +1324,7 @@ namespace {
             if (l < sizeof(ServerZone::FFXIVIpcHudParam)) { emit("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcHudParam*>(p);
             FieldBuilder b(emit);
-            b.Field("ClassJob", (int)pkt->ClassJob)
+            b.ClassJob("ClassJob", pkt->ClassJob)
                 .Field("Lv", (int)pkt->Lv)
                 .Field("OrgLv", (int)pkt->OrgLv)
                 .Field("LvSync", (int)pkt->LvSync)
@@ -1148,9 +1358,9 @@ namespace {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
             if (l < sizeof(ServerZone::FFXIVIpcMount)) { emit("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcMount*>(p);
-            // Struct currently only exposes a single field: id
+            // Use GameData for mount name lookup
             FieldBuilder(emit)
-                .Field("MountId", pkt->id);
+                .Field("Mount", GameData::FormatMount(pkt->id));
             };
     }
 
@@ -1230,7 +1440,7 @@ namespace {
                 .Field("value3", pkt->value3)
                 .Field("value4", pkt->value4)
                 .Field("Unknown", pkt->Unknown)
-                .Field("territoryType", pkt->territoryType)
+                .Territory("Content", pkt->territoryType)
                 .Field("Unknown1", pkt->Unknown1)
                 .Field("Unknown2", pkt->Unknown2)
                 .Field("Unknown3", pkt->Unknown3)
@@ -1244,7 +1454,7 @@ namespace {
             if (l < sizeof(ServerZone::FFXIVIpcNotifyFindContentStatus)) { emit("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcNotifyFindContentStatus*>(p);
             FieldBuilder(emit)
-                .Field("territoryType", pkt->territoryType)
+                .Territory("Content", pkt->territoryType)
                 .Field("status", (int)pkt->status)
                 .Field("tankRoleCount", (int)pkt->tankRoleCount)
                 .Field("dpsRoleCount", (int)pkt->dpsRoleCount)
@@ -1259,10 +1469,10 @@ namespace {
             if (l < sizeof(ServerZone::FFXIVIpcFinishContentMatchToClient)) { emit("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcFinishContentMatchToClient*>(p);
             FieldBuilder(emit)
-                .Field("classJob", (int)pkt->classJob)
+                .ClassJob("classJob", pkt->classJob)
                 .Field("progress", (int)pkt->progress)
                 .Field("playerNum", (int)pkt->playerNum)
-                .Field("territoryType", pkt->territoryType)
+                .Territory("Content", pkt->territoryType)
                 .Hex("flags", pkt->flags)
                 .Hex("finishContentMatchFlags", pkt->finishContentMatchFlags)
                 .Field("startTime", std::to_string(pkt->startTime));
@@ -1315,7 +1525,7 @@ namespace {
             if (l < sizeof(ServerZone::FFXIVIpcUpdateContent)) { emit("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcUpdateContent*>(p);
             FieldBuilder(emit)
-                .Field("territoryType", pkt->territoryType)
+                .Territory("Content", pkt->territoryType)
                 .Field("kind", pkt->kind)
                 .Field("value1", pkt->value1)
                 .Field("value2", pkt->value2);
@@ -1490,7 +1700,7 @@ namespace {
             FieldBuilder(emit)
                 .Field("Index", (int)pkt->Index)
                 .Field("LandId.landId", pkt->LandData.landIdent.landId)
-                .Field("Size", (int)pkt->LandData.size)
+                .HouseSize("Size", pkt->LandData.size)
                 .Field("Status", (int)pkt->LandData.status);
         };
     }
@@ -2194,10 +2404,8 @@ namespace {
                     activeCount++;
                     if (activeCount <= maxShow) {
                         char prefix[64];
-                        snprintf(prefix, sizeof(prefix), "Quest[%d].", i);
-                        builder
-                            .Field(std::string(prefix) + "questId", pkt->activeQuests[i].questId)
-                            .Hex(std::string(prefix) + "flags", pkt->activeQuests[i].flags);
+                        snprintf(prefix, sizeof(prefix), "Quest[%d]", i);
+                        builder.Quest(prefix, pkt->activeQuests[i].questId);
                     }
                 }
             }
@@ -2215,7 +2423,7 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcQuest*>(p);
             FieldBuilder(emit)
                 .Field("index", (int)pkt->index)
-                .Field("questId", pkt->questInfo.questId)
+                .Quest("Quest", pkt->questInfo.questId)
                 .Hex("flags", pkt->questInfo.flags)
                 .Field("a2", (int)pkt->questInfo.a2);
         };
@@ -2248,7 +2456,7 @@ namespace {
             if (l < sizeof(ServerZone::FFXIVIpcQuestFinish)) { emit("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcQuestFinish*>(p);
             FieldBuilder(emit)
-                .Field("questId", pkt->questId)
+                .Quest("Quest", pkt->questId)
                 .Hex("flag1", pkt->flag1)
                 .Hex("flag2", pkt->flag2);
         };
@@ -2445,7 +2653,7 @@ namespace {
             for (int i = 0; i < 20; ++i) {
                 if (pkt->CatalogList[i].CatalogID != 0) {
                     std::string prefix = "Catalog" + std::to_string(i);
-                    builder.Hex(prefix + "_ID", pkt->CatalogList[i].CatalogID)
+                    builder.Item(prefix, pkt->CatalogList[i].CatalogID)
                            .Field(prefix + "_Stock", pkt->CatalogList[i].StockCount)
                            .Field(prefix + "_RequestCount", pkt->CatalogList[i].RequestItemCount);
                 }
@@ -2551,11 +2759,11 @@ namespace {
             builder
                 .Field("ObjType", (int)pkt->ObjType)
                 .Field("Sex", (int)pkt->Sex)
-                .Field("ClassJob", (int)pkt->ClassJob)
+                .ClassJob("ClassJob", pkt->ClassJob)
                 .Field("Lv", (int)pkt->Lv)
                 .Field("LvSync", (int)pkt->LvSync)
                 .Hex("Title", pkt->Title)
-                .Field("GrandCompany", (int)pkt->GrandCompany)
+                .GrandCompany("GrandCompany", pkt->GrandCompany)
                 .Field("GrandCompanyRank", (int)pkt->GrandCompanyRank)
                 .Field("Flag", (int)pkt->Flag)
                 .Hex("Crest", pkt->Crest)
@@ -2574,12 +2782,11 @@ namespace {
             for (int i = 0; i < 14 && shownCount < maxShow; ++i) {
                 if (pkt->Equipment[i].CatalogId != 0) {
                     char prefix[64];
-                    snprintf(prefix, sizeof(prefix), "Equipment[%d].", i);
+                    snprintf(prefix, sizeof(prefix), "Equipment[%d]", i);
                     builder
-                        .Hex(std::string(prefix) + "CatalogId", pkt->Equipment[i].CatalogId)
-                        .Hex(std::string(prefix) + "Pattern", pkt->Equipment[i].Pattern)
-                        .Field(std::string(prefix) + "HQ", pkt->Equipment[i].HQ ? "Yes" : "No")
-                        .Field(std::string(prefix) + "Stain", (int)pkt->Equipment[i].Stain);
+                        .Item(prefix, pkt->Equipment[i].CatalogId)
+                        .Field(std::string(prefix) + ".HQ", pkt->Equipment[i].HQ ? "Yes" : "No")
+                        .Field(std::string(prefix) + ".Stain", (int)pkt->Equipment[i].Stain);
                     shownCount++;
                 }
             }
@@ -2598,7 +2805,7 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcMoveTerritory*>(p);
             FieldBuilder(emit)
                 .Field("index", pkt->index)
-                .Field("territoryType", (int)pkt->territoryType)
+                .Territory("Territory", pkt->territoryType)
                 .Field("zoneId", (int)pkt->zoneId)
                 .Hex("worldId", pkt->worldId)
                 .Hex("landSetId", pkt->landSetId)
@@ -2641,7 +2848,7 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcChangeClass*>(p);
             FieldBuilder builder(emit);
             builder
-                .Field("ClassJob", (int)pkt->ClassJob)
+                .ClassJob("ClassJob", pkt->ClassJob)
                 .Field("Penalty", (int)pkt->Penalty)
                 .Field("Login", (int)pkt->Login)
                 .Field("Lv1", pkt->Lv1)
@@ -2706,7 +2913,7 @@ namespace {
             if (l < sizeof(ServerZone::FFXIVIpcPlayerStatusUpdate)) { emit("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPlayerStatusUpdate*>(p);
             FieldBuilder(emit)
-                .Field("ClassJob", (int)pkt->ClassJob)
+                .ClassJob("ClassJob", pkt->ClassJob)
                 .Field("Lv", pkt->Lv)
                 .Field("Lv1", pkt->Lv1)
                 .Field("LvSync", pkt->LvSync)
@@ -2722,7 +2929,7 @@ namespace {
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcCreateObject*>(p);
             FieldBuilder(emit)
                 .Field("Index", (int)pkt->Index)
-                .Field("Kind", (int)pkt->Kind)
+                .ObjKind("Kind", pkt->Kind)
                 .Field("Flag", (int)pkt->Flag)
                 .Hex("BaseId", pkt->BaseId)
                 .Hex("EntityId", pkt->EntityId)
