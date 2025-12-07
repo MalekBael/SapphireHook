@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
+#include <Psapi.h>
+#pragma comment(lib, "psapi.lib")
 
 namespace SapphireHook {
 
@@ -708,7 +710,21 @@ extern "C" {
 
     uintptr_t GetModuleBaseAddress(const wchar_t* moduleName, size_t& outSize)
     {
-        outSize = 0x10000000;
-        return 0x140000000;
+        HMODULE hModule = GetModuleHandleW(moduleName);
+        if (!hModule)
+        {
+            outSize = 0;
+            return 0;
+        }
+
+        MODULEINFO moduleInfo = {};
+        if (!GetModuleInformation(GetCurrentProcess(), hModule, &moduleInfo, sizeof(moduleInfo)))
+        {
+            outSize = 0;
+            return 0;
+        }
+
+        outSize = moduleInfo.SizeOfImage;
+        return reinterpret_cast<uintptr_t>(moduleInfo.lpBaseOfDll);
     }
 }

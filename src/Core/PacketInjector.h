@@ -52,8 +52,6 @@ namespace SapphireHook {
     PacketLogMode GetPacketLogMode();
     bool PacketLogAtLeast(PacketLogMode level);
 
-    // Persistence (INI: sapphirehook_settings.ini)
-    bool LoadPacketLogModeFromConfig();  // returns true if key found (creates file if missing)
-    bool SavePacketLogModeToConfig();    // returns true on successful write
+    // Note: Persistence is handled by SettingsManager (sapphire_settings.json)
 
 } // namespace SapphireHook

@@ -14,7 +14,7 @@ namespace SapphireHook {
         // UIModule interface
         const char* GetName() const override { return "settings"; }
         const char* GetDisplayName() const override { return "Settings"; }
-        void Initialize() override {}
+        void Initialize() override;  // Loads saved settings
         void RenderMenu() override;
         void RenderWindow() override;
         bool IsWindowOpen() const override { return m_windowOpen; }

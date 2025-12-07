@@ -1,15 +1,13 @@
 #include "Weather.h"
 #include "CommandInterface.h"
 #include "../Core/PacketInjector.h"
+#include "../Core/SettingsManager.h"
 #include "../vendor/imgui/imgui.h"
 #include "../Logger/Logger.h"
 #include <string>
 #include <algorithm>
 #include <cstdint>
 #include <vector>
-#include <fstream>
-#include <sstream>
-#include <filesystem>
 #include <chrono>
 
 using SapphireHook::LogInfo;
@@ -93,92 +91,8 @@ static constexpr WeatherEntry kWeatherMap[] = {
 };
 static constexpr int kWeatherCount = static_cast<int>(sizeof(kWeatherMap) / sizeof(kWeatherMap[0]));
 
-// ---------- Simple persistence helpers (ini) ----------
+// ---------- Helper functions ----------
 namespace {
-	const char* SettingsFile() { return "sapphirehook_settings.ini"; }
-
-	std::string Trim(std::string s) {
-		auto issp = [](unsigned char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; };
-		while (!s.empty() && issp((unsigned char)s.back())) s.pop_back();
-		size_t i = 0; while (i < s.size() && issp((unsigned char)s[i])) ++i;
-		if (i) s.erase(0, i);
-		return s;
-	}
-
-	std::vector<uint32_t> g_favorites; // persisted as comma-separated list of ids
-
-	void LoadFavoritesFromConfig() {
-		std::ifstream f(SettingsFile(), std::ios::in);
-		if (!f.is_open()) return;
-
-		std::string line;
-		while (std::getline(f, line)) {
-			if (line.empty() || line[0] == '#' || line[0] == ';') continue;
-			size_t eq = line.find('=');
-			if (eq == std::string::npos) continue;
-			std::string key = Trim(line.substr(0, eq));
-			std::string val = Trim(line.substr(eq + 1));
-			std::string lowerKey = key;
-			for (auto& c : lowerKey) c = (char)tolower((unsigned char)c);
-			if (lowerKey == "weatherfavorites") {
-				g_favorites.clear();
-				std::stringstream ss(val);
-				std::string tok;
-				while (std::getline(ss, tok, ',')) {
-					tok = Trim(tok);
-					if (tok.empty()) continue;
-					uint32_t id = (uint32_t)std::strtoul(tok.c_str(), nullptr, 10);
-					if (id != 0) {
-						// Deduplicate
-						if (std::find(g_favorites.begin(), g_favorites.end(), id) == g_favorites.end())
-							g_favorites.push_back(id);
-					}
-				}
-				break;
-			}
-		}
-	}
-
-	void SaveFavoritesToConfig() {
-		// Read whole file (if exists), replace or append our key
-		std::vector<std::string> lines;
-		{
-			std::ifstream in(SettingsFile(), std::ios::in);
-			if (in.is_open()) {
-				std::string l; while (std::getline(in, l)) lines.push_back(l);
-			}
-		}
-		std::ostringstream value;
-		for (size_t i = 0; i < g_favorites.size(); ++i) {
-			if (i) value << ",";
-			value << g_favorites[i];
-		}
-
-		bool replaced = false;
-		for (auto& l : lines) {
-			size_t eq = l.find('=');
-			if (eq == std::string::npos) continue;
-			std::string key = Trim(l.substr(0, eq));
-			std::string lowerKey = key;
-			for (auto& c : lowerKey) c = (char)tolower((unsigned char)c);
-			if (lowerKey == "weatherfavorites") {
-				l = "WeatherFavorites=" + value.str();
-				replaced = true;
-				break;
-			}
-		}
-		if (!replaced) {
-			if (!lines.empty() && !lines.back().empty()) lines.push_back("");
-			lines.push_back("# Weather favorites (comma-separated GM weather IDs)");
-			lines.push_back("WeatherFavorites=" + value.str());
-		}
-
-		std::ofstream out(SettingsFile(), std::ios::out | std::ios::trunc);
-		if (!out.is_open()) return;
-		for (auto& l : lines) out << l << "\n";
-		out.flush();
-	}
-
 	int FindIndexById(uint32_t id) {
 		for (int i = 0; i < kWeatherCount; ++i)
 			if (kWeatherMap[i].id == id) return i;
@@ -211,7 +125,7 @@ namespace SapphireHook {
 	void WeatherModule::Initialize() {
 		LogInfo("[Weather] Initialized");
 		m_weatherIdx = 0; // Clear Skies
-		LoadFavoritesFromConfig();
+		// Favorites are now managed by SettingsManager
 	}
 
 	void WeatherModule::RenderMenu() {
@@ -266,26 +180,23 @@ namespace SapphireHook {
 
 		ImGui::Separator();
 
-		// Favorites section (persisted)
+		// Favorites section (persisted via SettingsManager)
 		ImGui::TextColored(ImVec4(0.9f, 0.8f, 0.4f, 1.0f), "Favorites");
 		if (ImGui::Button("Add Current")) {
 			uint32_t id = kWeatherMap[m_weatherIdx].id;
-			if (std::find(g_favorites.begin(), g_favorites.end(), id) == g_favorites.end()) {
-				g_favorites.push_back(id);
-				SaveFavoritesToConfig();
-			}
+			SettingsManager::Instance().AddWeatherFavorite(id);
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Clear Favorites")) {
-			g_favorites.clear();
-			SaveFavoritesToConfig();
+			SettingsManager::Instance().SetWeatherFavorites({});
 		}
 
-		if (!g_favorites.empty()) {
+		const auto& favorites = SettingsManager::Instance().GetWeatherFavorites();
+		if (!favorites.empty()) {
 			ImGui::Spacing();
 			ImGui::BeginChild("##favbar", ImVec2(0, 64), true);
-			for (size_t i = 0; i < g_favorites.size(); ++i) {
-				uint32_t id = g_favorites[i];
+			for (size_t i = 0; i < favorites.size(); ++i) {
+				uint32_t id = favorites[i];
 				ImGui::PushID((int)i);
 
 				// Quick apply button
@@ -298,8 +209,7 @@ namespace SapphireHook {
 
 				// Remove small 'X'
 				if (ImGui::SmallButton("X")) {
-					g_favorites.erase(g_favorites.begin() + (long long)i);
-					SaveFavoritesToConfig();
+					SettingsManager::Instance().RemoveWeatherFavorite(id);
 					ImGui::PopID();
 					break; // layout recalculates next frame
 				}

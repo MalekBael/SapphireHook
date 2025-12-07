@@ -65,7 +65,13 @@ namespace SapphireHook::DebugVisuals {
 
         // Camera setup - must be called each frame with current camera state
         void SetViewProjection(const DirectX::XMMATRIX& view, const DirectX::XMMATRIX& projection);
+        
+        // Set pre-computed ViewProjection directly (preferred - avoids frame timing issues)
+        void SetViewProjectionDirect(const DirectX::XMMATRIX& viewProjection);
+        
         void SetScreenSize(float width, float height);
+        float GetScreenWidth() const { return m_screenWidth; }
+        float GetScreenHeight() const { return m_screenHeight; }
 
         // Manual camera matrix setup (for when we can extract from game)
         void SetCameraFromGame(const CameraData& camera);

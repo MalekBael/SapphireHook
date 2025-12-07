@@ -6,6 +6,8 @@
 #include "PacketRegistration.h"
 #include "PacketRegistration.Macros.h"
 #include "PacketTable.Zone.h"
+// ActorTracker for feeding position data to debug visuals
+#include "../Tools/ActorTracker.h"
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -613,6 +615,13 @@ namespace {
             if (l < sizeof(ServerZone::FFXIVIpcActorMove)) { emit("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorMove*>(p);
             float x = pkt->pos[0] * 0.001f, y = pkt->pos[1] * 0.001f, z = pkt->pos[2] * 0.001f;
+            float rotation = pkt->dir * (3.14159265f / 32768.0f);  // Convert to radians
+            
+            // Feed position to ActorTracker for debug visuals
+            // Note: ActorMove doesn't have actorId in packet - it uses context from IPC header
+            // We'll need to get that from the packet handler context
+            // For now, we can use the emitter to get the source actor id if available
+            
             FieldBuilder(emit)
                 .Field("Dir", pkt->dir)
                 .Field("DirBeforeSlip", pkt->dirBeforeSlip)

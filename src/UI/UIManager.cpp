@@ -16,8 +16,10 @@
 #include "../vendor/imgui/imgui.h"
 #include <algorithm>
 #include <cstring>
+#include <cmath>
 #include <unordered_map>
 #include <mutex>
+#include <DirectXMath.h>
 
 #include "../UI/UIManager.h"
 #include "../UI/UIModule.h"
@@ -39,6 +41,10 @@
 #include "../Tools/LiveTraceMonitor.h"
 // NEW: Lua GameScript scanner module
 #include "../Modules/LuaGameScriptModule.h"
+// NEW: Debug visualization module
+#include "../Modules/DebugVisualsModule.h"
+// NEW: Camera extractor for player position display
+#include "../Tools/GameCameraExtractor.h"
 
 #pragma comment(lib, "pdh.lib")
 #pragma comment(lib, "iphlpapi.lib")
@@ -581,6 +587,26 @@ void UIManager::RegisterDefaultModules()
 		LogError("Failed to register Lua GameScript: unknown exception");
 	}
 
+	// NEW: Debug Visuals module for 3D debug rendering
+	try {
+		if (GetModule("debug_visuals") == nullptr) {
+			LogInfo("Creating Debug Visuals module...");
+			RegisterModule(std::make_unique<SapphireHook::DebugVisualsModule>());
+			LogInfo("[OK] Debug Visuals module registered");
+			successCount++;
+		}
+		else {
+			LogInfo("Debug Visuals module already exists");
+			successCount++;
+		}
+	}
+	catch (const std::exception& e) {
+		LogError("Failed to register Debug Visuals: " + std::string(e.what()));
+	}
+	catch (...) {
+		LogError("Failed to register Debug Visuals: unknown exception");
+	}
+
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
 	LogInfo("Successfully registered: " + std::to_string(successCount) + " modules");
 	LogInfo("Final module count on instance " + std::to_string(reinterpret_cast<uintptr_t>(this)) +
@@ -615,7 +641,8 @@ void UIManager::VerifyDefaultModules()
 		"MemoryScanner",
 		"StringXrefAnalyzer",
 		"LiveTraceMonitor",
-		"LuaGameScriptModule"
+		"LuaGameScriptModule",
+		"debug_visuals"
 	};
 
 	LogInfo("=== DEFAULT MODULE VERIFICATION START ===");
@@ -862,6 +889,22 @@ void UIManager::RenderMainMenu()
 				}
 			}
 
+			// Debug Visuals (3D world debug rendering)
+			{
+				static UIModule* s_debugVisuals = nullptr;
+				if (!s_debugVisuals)
+					s_debugVisuals = GetModule("debug_visuals");
+
+				if (s_debugVisuals)
+				{
+					bool open = s_debugVisuals->IsWindowOpen();
+					if (ImGui::MenuItem(s_debugVisuals->GetDisplayName(), nullptr, open))
+					{
+						s_debugVisuals->SetWindowOpen(!open);
+					}
+				}
+			}
+
 			ImGui::Separator();
 
 			// Unified Network Monitor toggle
@@ -907,7 +950,7 @@ void UIManager::RenderMainMenu()
 
 		// System monitoring display on the right side of the menu bar
 		const float menuBarWidth = ImGui::GetWindowWidth();
-		const float statusWidth = 500.0f; // Adjust as needed
+		const float statusWidth = 650.0f; // Increased for player position display
 
 		ImGui::SetCursorPosX(menuBarWidth - statusWidth);
 
@@ -921,8 +964,26 @@ void UIManager::RenderMainMenu()
 		// Format network speeds
 		std::string downSpeedStr = s_systemMonitor.FormatNetworkSpeed(downSpeed);
 		std::string upSpeedStr = s_systemMonitor.FormatNetworkSpeed(upSpeed);
+		
+		// Get player position from camera extractor - use LIVE read for real-time updates
+		DirectX::XMFLOAT3 playerPos = {0.0f, 0.0f, 0.0f};
+		bool hasPlayerPos = false;
+		auto& cameraExtractor = DebugVisuals::GameCameraExtractor::GetInstance();
+		if (cameraExtractor.IsInitialized()) {
+			playerPos = cameraExtractor.GetPlayerPositionLive();
+			// Consider valid if any component is non-zero
+			hasPlayerPos = (std::abs(playerPos.x) > 0.1f || 
+			                std::abs(playerPos.y) > 0.1f || 
+			                std::abs(playerPos.z) > 0.1f);
+		}
 
-		// Display system stats
+		// Display system stats with player position
+		if (hasPlayerPos) {
+			ImGui::Text("Pos: (%.0f, %.0f, %.0f)", playerPos.x, playerPos.y, playerPos.z);
+			ImGui::SameLine();
+			ImGui::Text(" | ");
+			ImGui::SameLine();
+		}
 		ImGui::Text("FPS: %.1f", fps);
 		ImGui::SameLine();
 		ImGui::Text(" | CPU: %.1f%%", cpuUsage);

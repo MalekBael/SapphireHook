@@ -2,11 +2,19 @@
 #include "../Logger/Logger.h"
 #include "../vendor/imgui/imgui.h"
 #include "../Core/PacketInjector.h"
+#include "../Core/SettingsManager.h"
 #include <windows.h>
-#include <shellapi.h>   // NEW: for ShellExecute
+#include <shellapi.h>   // for ShellExecute
 #include <filesystem>
 
 using namespace SapphireHook;
+
+void SettingsModule::Initialize()
+{
+	// SettingsManager handles loading settings on first access
+	// Just ensure it's initialized
+	SettingsManager::Instance().Initialize();
+}
 
 void SettingsModule::RenderMenu()
 {
@@ -63,7 +71,8 @@ void SettingsModule::DrawPacketLoggingSection()
 
 	if (changed)
 	{
-		SetPacketLogMode(static_cast<PacketLogMode>(mode));
+		// Use SettingsManager which handles both runtime update and persistence
+		SettingsManager::Instance().SetPacketLogMode(mode);
 		LogInfo(std::string("[Settings] PacketLogMode => ")
 			+ (mode == 0 ? "Off" : mode == 1 ? "Summary" : "Verbose"));
 	}
@@ -75,10 +84,12 @@ void SettingsModule::DrawPacketLoggingSection()
 
 	{
 		auto& logger = Logger::Instance();
+		auto& settings = SettingsManager::Instance();
+		
 		bool consoleEnabled = logger.IsConsoleOutputEnabled();
 		if (ImGui::Checkbox("Mirror logs to Console", &consoleEnabled))
 		{
-			logger.SetConsoleOutput(consoleEnabled);
+			settings.SetConsoleOutput(consoleEnabled);
 			LogInfo(std::string("[Settings] Console mirroring => ") + (consoleEnabled ? "ON" : "OFF"));
 		}
 
@@ -87,7 +98,7 @@ void SettingsModule::DrawPacketLoggingSection()
 		ImGui::SetNextItemWidth(120);
 		if (ImGui::Combo("Minimum Level", &curLevel, kLevels, IM_ARRAYSIZE(kLevels)))
 		{
-			logger.SetMinimumLevel(static_cast<LogLevel>(curLevel));
+			settings.SetLogLevel(curLevel);
 			LogInfo(std::string("[Settings] Minimum log level => ") + kLevels[curLevel]);
 		}
 

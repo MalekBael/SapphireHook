@@ -422,3 +422,6 @@ resources/folders.csv
 vcpkg/
 project.json
 sonar-project.properties
+docs/classinformer_3.35.csv
+docs/classinformer_200.csv
+docs/classinformer.csv

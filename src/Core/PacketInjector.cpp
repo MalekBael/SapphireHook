@@ -49,166 +49,23 @@
 using namespace SapphireHook;
 
 // -------------------------------------------------------------------------------------------------
-// Packet log mode persistence (sapphirehook_settings.ini)
+// Packet log mode runtime state (persistence handled by SettingsManager)
 // -------------------------------------------------------------------------------------------------
 namespace SapphireHook {
 
-    static const char* kSettingsFile = "sapphirehook_settings.ini";
-    static std::mutex  g_settingsMutex;
-    static std::atomic<PacketLogMode> g_packetLogMode;
+    static std::atomic<PacketLogMode> g_packetLogMode{ PacketLogMode::Summary };
 
-    // Helpers for new semantics
+    // Helpers for log level checks
     static inline bool PacketLogSummary() { return PacketLogAtLeast(PacketLogMode::Summary); }  // Summary or Verbose
     static inline bool PacketLogVerbose() { return PacketLogAtLeast(PacketLogMode::Verbose); }  // Verbose only
 
-    static PacketLogMode ParseMode(const std::string& v) {
-        std::string lower = v;
-        for (auto& c : lower) c = (char)tolower((unsigned char)c);
-        if (lower == "0" || lower == "off") return PacketLogMode::Off;
-        if (lower == "1" || lower == "summary") return PacketLogMode::Summary;
-        if (lower == "2" || lower == "verbose") return PacketLogMode::Verbose;
-        return PacketLogMode::Summary;
-    }
-    static std::string ModeToString(PacketLogMode m) {
-        switch (m) {
-        case PacketLogMode::Off: return "0";
-        case PacketLogMode::Summary: return "1";
-        case PacketLogMode::Verbose: return "2";
-        }
-        return "1";
-    }
-
-    bool LoadPacketLogModeFromConfig() {
-        std::lock_guard<std::mutex> lock(g_settingsMutex);
-        namespace fs = std::filesystem;
-        if (!fs::exists(kSettingsFile)) {
-            // Create with default content; do NOT override existing Off/Verbose choice (keep current mode).
-            PacketLogMode cur = g_packetLogMode.load(std::memory_order_relaxed);
-            std::ofstream nf(kSettingsFile, std::ios::out | std::ios::trunc);
-            if (nf.is_open()) {
-                nf << "# SapphireHook settings\n";
-                nf << "# Packet logging verbosity (0=Off,1=Summary,2=Verbose)\n";
-                nf << "PacketLogMode=1\n";
-                nf.close();
-                // Keep previously detected mode; only log if not Off.
-                if (PacketLogVerbose()) {
-                    LogInfo("[Config] Created new sapphirehook_settings.ini (default PacketLogMode=1)");
-                }
-                return true;
-            }
-            return false;
-        }
-
-        std::ifstream f(kSettingsFile, std::ios::in);
-        if (!f.is_open()) return false;
-
-        std::string line;
-        bool found = false;
-        while (std::getline(f, line)) {
-            if (line.empty() || line[0] == '#' || line[0] == ';')
-                continue;
-            size_t eq = line.find('=');
-            if (eq == std::string::npos) continue;
-            std::string key = line.substr(0, eq);
-            std::string val = line.substr(eq + 1);
-            auto trim = [](std::string& s) {
-                while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) s.pop_back();
-                size_t i = 0;
-                while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) ++i;
-                if (i) s.erase(0, i);
-                };
-            trim(key); trim(val);
-            for (auto& c : key) c = (char)tolower((unsigned char)c);
-            if (key == "packetlogmode") {
-                PacketLogMode m = ParseMode(val);
-                g_packetLogMode.store(m, std::memory_order_relaxed);
-                if (PacketLogVerbose()) {
-                    LogInfo("[Config] Loaded PacketLogMode=" + ModeToString(m) + " from sapphirehook_settings.ini");
-                }
-                found = true;
-                break;
-            }
-        }
-        return found;
-    }
-
-    bool SavePacketLogModeToConfig() {
-        std::lock_guard<std::mutex> lock(g_settingsMutex);
-        PacketLogMode cur = g_packetLogMode.load(std::memory_order_relaxed);
-
-        std::vector<std::string> lines;
-        {
-            std::ifstream in(kSettingsFile, std::ios::in);
-            if (in.is_open()) {
-                std::string l;
-                while (std::getline(in, l)) lines.push_back(l);
-            }
-        }
-
-        bool replaced = false;
-        for (auto& l : lines) {
-            size_t eq = l.find('=');
-            if (eq == std::string::npos) continue;
-            std::string key = l.substr(0, eq);
-            auto trim = [](std::string& s) {
-                while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r')) s.pop_back();
-                size_t i = 0;
-                while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) ++i;
-                if (i) s.erase(0, i);
-                };
-            trim(key);
-            std::string lower = key;
-            for (auto& c : lower) c = (char)tolower((unsigned char)c);
-            if (lower == "packetlogmode") {
-                l = "PacketLogMode=" + ModeToString(cur);
-                replaced = true;
-                break;
-            }
-        }
-        if (!replaced) {
-            if (!lines.empty() && !lines.back().empty())
-                lines.push_back("");
-            lines.push_back("# Packet logging verbosity (0=Off,1=Summary,2=Verbose)");
-            lines.push_back("PacketLogMode=" + ModeToString(cur));
-        }
-
-        std::ofstream out(kSettingsFile, std::ios::out | std::ios::trunc);
-        if (!out.is_open()) return false;
-        for (auto& l : lines) out << l << "\n";
-        out.flush();
-
-        if (PacketLogVerbose()) {
-            LogInfo("[Config] Saved PacketLogMode=" + ModeToString(cur) + " to sapphirehook_settings.ini");
-        }
-        return true;
-    }
-
-    // Detect initial mode
-    static PacketLogMode DetectPacketLogMode() {
-        PacketLogMode initial = PacketLogMode::Summary;
-        if (const char* v = std::getenv("SAPPHIRE_PACKET_LOG")) {
-            int n = std::atoi(v);
-            if (n <= 0) initial = PacketLogMode::Off;
-            else if (n == 1) initial = PacketLogMode::Summary;
-            else initial = PacketLogMode::Verbose;
-        }
-        g_packetLogMode.store(initial, std::memory_order_relaxed);
-        LoadPacketLogModeFromConfig(); // may overwrite
-        return g_packetLogMode.load(std::memory_order_relaxed);
-    }
-
-    static bool g_packetLogModeInitialized = []() {
-        DetectPacketLogMode();
-        return true;
-        }();
-
     bool PacketLogAtLeast(PacketLogMode needed) {
-        return (int)g_packetLogMode.load(std::memory_order_relaxed) >= (int)needed;
+        return static_cast<int>(g_packetLogMode.load(std::memory_order_relaxed)) >= static_cast<int>(needed);
     }
 
     void SetPacketLogMode(PacketLogMode mode) {
         g_packetLogMode.store(mode, std::memory_order_relaxed);
-        SavePacketLogModeToConfig();
+        // Note: Persistence is now handled by SettingsManager
     }
 
     PacketLogMode GetPacketLogMode() {

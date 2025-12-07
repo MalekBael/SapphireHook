@@ -75,6 +75,9 @@ static bool EnableSeDebugPrivilege() {
     return ok;
 }
 
+// Forward declaration for IsProcessRunning (used by FindProcessesByPattern)
+static bool IsProcessRunning(DWORD pid);
+
 struct ProcInfo {
     DWORD pid{};
     std::wstring exe;
@@ -92,7 +95,10 @@ static std::vector<ProcInfo> FindProcessesByPattern(const std::vector<std::wstri
             std::transform(lower.begin(), lower.end(), lower.begin(), ::towlower);
             for (auto& p : patterns) {
                 if (lower.find(p) != std::wstring::npos) {
-                    result.push_back({ pe.th32ProcessID, name });
+                    // IMPORTANT: Verify the process is actually running, not a zombie
+                    if (IsProcessRunning(pe.th32ProcessID)) {
+                        result.push_back({ pe.th32ProcessID, name });
+                    }
                     break;
                 }
             }
@@ -103,12 +109,20 @@ static std::vector<ProcInfo> FindProcessesByPattern(const std::vector<std::wstri
 }
 
 static bool IsProcessRunning(DWORD pid) {
-    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE, FALSE, pid);
     if (!h) return false;
+    
+    // Check exit code
     DWORD code = 0;
-    bool ok = GetExitCodeProcess(h, &code);
+    bool hasExitCode = GetExitCodeProcess(h, &code);
+    
+    // Also check if we can wait on it (zombie processes may return WAIT_OBJECT_0 immediately)
+    DWORD waitResult = WaitForSingleObject(h, 0);
+    
     CloseHandle(h);
-    return ok && code == STILL_ACTIVE;
+    
+    // Process is running if: exit code is STILL_ACTIVE AND wait times out (process not signaled)
+    return hasExitCode && code == STILL_ACTIVE && waitResult == WAIT_TIMEOUT;
 }
 
 static std::wstring ToLower(std::wstring s) {

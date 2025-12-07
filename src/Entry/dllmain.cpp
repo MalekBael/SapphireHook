@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <atomic>
 #include <MinHook.h>
+#include <spdlog/spdlog.h>
 
 #include "../Hooking/hook_manager.h"
 #include "../UI/imgui_overlay.h"
@@ -87,6 +88,10 @@ static void PerformSafeUnload()
         SapphireHook::UIManager::Shutdown();
         LogInfo("UIManager shutdown completed");
 
+        // Shutdown HookManager (disables and removes all hooks)
+        SapphireHook::HookManager::Shutdown();
+        LogInfo("HookManager shutdown completed");
+
         // Defensive: ensure MinHook is uninitialized even if monitor was not present
         const MH_STATUS st = MH_Uninitialize();
         if (st == MH_OK) {
@@ -96,6 +101,10 @@ static void PerformSafeUnload()
         }
 
         LogInfo("=== Safe DLL Unload Complete ===");
+        
+        // Shutdown spdlog to release file handles
+        spdlog::shutdown();
+        
         Sleep(250);
     } catch (...) {
         LogError("Exception during cleanup - proceeding with unload");
@@ -174,13 +183,6 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
     }
 
     using namespace SapphireHook;
-    LogInfo("Waiting 10 seconds for game stability...");
-
-    for (int i = 10; i > 0; --i) {
-        LogInfo("Countdown: " + std::to_string(i) + " seconds remaining");
-        Sleep(1000);
-    }
-
     LogInfo("Waiting for game window...");
 
     while (true) {
