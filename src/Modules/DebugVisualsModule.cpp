@@ -9,7 +9,6 @@
 #include "../Tools/DebugRenderer.h"
 #include "../Tools/DebugVisualServer.h"
 #include "../Tools/GameCameraExtractor.h"
-#include "../Tools/ActorTracker.h"
 #include "../Logger/Logger.h"
 #include <imgui.h>
 #include <format>
@@ -397,107 +396,6 @@ namespace SapphireHook {
         if (ImGui::Button("Dump Verified Matrices")) {
             cameraExtractor.DumpVerifiedMatrices();
         }
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Position Tracking");
-        ImGui::Separator();
-
-        // Show current tracked position from ActorTracker
-        auto& tracker = ActorTracker::GetInstance();
-        auto localPlayer = tracker.GetLocalPlayer();
-        
-        if (localPlayer) {
-            ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Player Position (from packets):");
-            ImGui::Text("  Engine Coords: (%.2f, %.2f, %.2f)", 
-                       localPlayer->position.x, localPlayer->position.y, localPlayer->position.z);
-            ImGui::Text("  Rotation: %.2f rad (%.1f deg)", 
-                       localPlayer->position.rotation, 
-                       localPlayer->position.rotation * 180.0f / 3.14159f);
-            ImGui::Text("  Actor ID: 0x%X", localPlayer->actorId);
-            if (!localPlayer->name.empty()) {
-                ImGui::Text("  Name: %s", localPlayer->name.c_str());
-            }
-        } else {
-            ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "No player position tracked yet.");
-            ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), 
-                              "Position will update when movement packets are received.");
-        }
-
-        ImGui::Text("Tracked Actors: %zu", tracker.GetActorCount());
-        
-        // Clear tracking button
-        if (ImGui::Button("Clear Tracking")) {
-            tracker.Clear();
-            LogInfo("ActorTracker: Cleared all tracked actors");
-        }
-        ImGui::SameLine();
-        
-        // Manual player ID input
-        static char playerIdInput[16] = "0x00200001";
-        ImGui::SetNextItemWidth(100);
-        ImGui::InputText("##playerid", playerIdInput, sizeof(playerIdInput));
-        ImGui::SameLine();
-        if (ImGui::Button("Set Player ID")) {
-            uint32_t newPlayerId = 0;
-            if (playerIdInput[0] == '0' && (playerIdInput[1] == 'x' || playerIdInput[1] == 'X')) {
-                newPlayerId = static_cast<uint32_t>(std::strtoul(playerIdInput, nullptr, 16));
-            } else {
-                newPlayerId = static_cast<uint32_t>(std::strtoul(playerIdInput, nullptr, 10));
-            }
-            if (newPlayerId != 0) {
-                tracker.SetLocalPlayerId(newPlayerId);
-                LogInfo(std::format("ActorTracker: Set local player ID to 0x{:X}", newPlayerId));
-            }
-        }
-        
-        ImGui::Text("Current Player ID: 0x%X", tracker.GetLocalPlayerId());
-
-        // Manual position input for testing - default to typical player position
-        static float testPos[3] = { -180.0f, 5.0f, 45.0f };
-        static bool initializedPos = false;
-        
-        // If we have a player with real position, use that as default
-        if (!initializedPos) {
-            auto player = tracker.GetLocalPlayer();
-            if (player && (std::abs(player->position.x) > 0.1f || 
-                          std::abs(player->position.y) > 0.1f || 
-                          std::abs(player->position.z) > 0.1f)) {
-                testPos[0] = player->position.x;
-                testPos[1] = player->position.y;
-                testPos[2] = player->position.z;
-            }
-            initializedPos = true;
-        }
-        
-        ImGui::Spacing();
-        ImGui::Text("Manual Test Position:");
-        ImGui::InputFloat3("##testpos", testPos);
-        if (ImGui::Button("Set Test Position")) {
-            // Update existing player position or create test player
-            auto existingPlayer = tracker.GetLocalPlayer();
-            if (existingPlayer && existingPlayer->actorId != 0xDEADBEEF) {
-                // Update the real player's position
-                tracker.OnActorMove(existingPlayer->actorId, 
-                                   testPos[0], testPos[1], testPos[2], 0.0f);
-                LogInfo(std::format("Updated player 0x{:X} to ({:.2f}, {:.2f}, {:.2f})", 
-                        existingPlayer->actorId, testPos[0], testPos[1], testPos[2]));
-            } else {
-                // Create test player only if no real player exists
-                uint32_t testActorId = 0xDEADBEEF;
-                tracker.SetLocalPlayerId(testActorId);
-                tracker.OnPlayerSpawn(testActorId, "TestPlayer", 
-                                      testPos[0], testPos[1], testPos[2], 0.0f,
-                                      1, 1, 1000, 1000);
-                LogInfo(std::format("Created test player at ({:.2f}, {:.2f}, {:.2f})", 
-                        testPos[0], testPos[1], testPos[2]));
-            }
-        }
-
-        ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.7f, 0.7f, 0.7f, 1.0f), 
-                          "Note: Engine coords differ from minimap UI coords.\n"
-                          "Test primitives are drawn around the tracked position.");
     }
 
     void DebugVisualsModule::RenderPrimitiveList() {
@@ -524,7 +422,6 @@ namespace SapphireHook {
         }
 
         // Get player position from GameCameraExtractor (confirmed: lookAt at 0xE0 is player position)
-        // We've abandoned ActorTracker (packet-based) in favor of direct memory reading
         float px = 0.0f, py = 0.0f, pz = 0.0f;
         
         auto& cameraExtractor = GameCameraExtractor::GetInstance();

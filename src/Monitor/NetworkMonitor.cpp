@@ -23,8 +23,6 @@
 #include "NetworkMonitorHelper.h"
 #include "NetworkMonitorTypes.h"
 #include <nlohmann/json.hpp>
-// ActorTracker for feeding position data from packets to debug visuals
-#include "../Tools/ActorTracker.h"
 // Protocol definitions for packet structures
 #include "../ProtocolHandlers/Zone/ServerZoneDef.h"
 #include "../ProtocolHandlers/Zone/ClientZoneDef.h"
@@ -610,118 +608,6 @@ namespace {
 			}
 			outSegs.push_back(si);
 			pos += segSize;
-		}
-	}
-
-	// Process packets to feed position data to ActorTracker for debug visuals
-	static void ProcessPacketForActorTracker(const uint8_t* segData, size_t segSize, 
-	                                         uint16_t opcode, uint32_t sourceActorId, 
-	                                         bool outgoing) {
-		auto& tracker = DebugVisuals::ActorTracker::GetInstance();
-		const uint8_t* payload = segData + 0x20;  // Skip IPC header
-		size_t payloadLen = (segSize > 0x20) ? (segSize - 0x20) : 0;
-		
-		// For outgoing packets, we can extract the player's ID and position
-		if (outgoing) {
-			// ChatHandler (0x0067) - when player sends a chat message, sourceActorId is the player
-			if (opcode == 0x0067 && sourceActorId != 0) {
-				uint32_t currentLocalId = tracker.GetLocalPlayerId();
-				if (currentLocalId == 0 || currentLocalId == 0xDEADBEEF) {
-					tracker.SetLocalPlayerId(sourceActorId);
-					LogInfo(std::format("ActorTracker: Set local player ID from ChatHandler: 0x{:X}", 
-					        sourceActorId));
-				}
-			}
-			// UpdatePosition (0x01A0) - client sends own position to server
-			// This is the BEST source for local player position!
-			else if (opcode == 0x01A0 && sourceActorId != 0) {
-				using namespace PacketStructures::Client::Zone;
-				if (payloadLen >= sizeof(FFXIVIpcUpdatePosition)) {
-					auto* pkt = reinterpret_cast<const FFXIVIpcUpdatePosition*>(payload);
-					// Set local player ID if not set
-					uint32_t currentLocalId = tracker.GetLocalPlayerId();
-					if (currentLocalId == 0 || currentLocalId == 0xDEADBEEF) {
-						tracker.SetLocalPlayerId(sourceActorId);
-						LogInfo(std::format("ActorTracker: Set local player ID from UpdatePosition: 0x{:X}", 
-						        sourceActorId));
-					}
-					// Update position - this is the player's actual world position
-					tracker.OnActorMove(sourceActorId, pkt->pos.x, pkt->pos.y, pkt->pos.z, pkt->dir);
-				}
-			}
-			return;  // Don't process other outgoing packets for incoming-only handlers
-		}
-		
-		switch (opcode) {
-			case 0x0066: {  // Login - contains playerActorId
-				using namespace PacketStructures::Server::Zone;
-				if (payloadLen >= sizeof(FFXIVIpcLogin)) {
-					auto* pkt = reinterpret_cast<const FFXIVIpcLogin*>(payload);
-					if (pkt->playerActorId != 0) {
-						tracker.SetLocalPlayerId(pkt->playerActorId);
-						LogInfo(std::format("ActorTracker: Set local player ID from Login packet: 0x{:X}", 
-						        pkt->playerActorId));
-					}
-				}
-				break;
-			}
-			case 0x0192: {  // ActorMove
-				using namespace PacketStructures::Server::Zone;
-				if (payloadLen >= sizeof(FFXIVIpcActorMove)) {
-					auto* pkt = reinterpret_cast<const FFXIVIpcActorMove*>(payload);
-					float x = pkt->pos[0] * 0.001f;
-					float y = pkt->pos[1] * 0.001f;
-					float z = pkt->pos[2] * 0.001f;
-					float rot = pkt->dir * (3.14159265f / 32768.0f);
-					tracker.OnActorMove(sourceActorId, x, y, z, rot);
-				}
-				break;
-			}
-			case 0x0190: {  // PlayerSpawn
-				using namespace PacketStructures::Server::Zone;
-				if (payloadLen >= offsetof(FFXIVIpcPlayerSpawn, Pos) + sizeof(float) * 3) {
-					auto* pkt = reinterpret_cast<const FFXIVIpcPlayerSpawn*>(payload);
-					std::string name(reinterpret_cast<const char*>(pkt->Name), 
-					                 strnlen(reinterpret_cast<const char*>(pkt->Name), 32));
-					float rot = pkt->Dir * (3.14159265f / 32768.0f);
-					
-					// Check if this is the local player
-					// The first PlayerSpawn with valid position is likely the local player
-					uint32_t currentLocalId = tracker.GetLocalPlayerId();
-					bool isLocalPlayer = false;
-					
-					// If no local player set yet, or it's the test player (0xDEADBEEF), 
-					// set this as the local player
-					if (currentLocalId == 0 || currentLocalId == 0xDEADBEEF) {
-						tracker.SetLocalPlayerId(sourceActorId);
-						isLocalPlayer = true;
-					} else if (currentLocalId == sourceActorId) {
-						isLocalPlayer = true;
-					}
-					
-					tracker.OnPlayerSpawn(sourceActorId, name, 
-					                      pkt->Pos[0], pkt->Pos[1], pkt->Pos[2], rot,
-					                      pkt->Lv, pkt->ClassJob, pkt->Hp, pkt->HpMax);
-					
-					if (isLocalPlayer) {
-						LogInfo(std::format("ActorTracker: Local player '{}' (0x{:X}) at ({:.1f}, {:.1f}, {:.1f})",
-						        name, sourceActorId, pkt->Pos[0], pkt->Pos[1], pkt->Pos[2]));
-					}
-				}
-				break;
-			}
-			case 0x019A: {  // ActorSetPos / Warp
-				using namespace PacketStructures::Server::Zone;
-				if (payloadLen >= sizeof(FFXIVIpcWarp)) {
-					auto* pkt = reinterpret_cast<const FFXIVIpcWarp*>(payload);
-					float rot = pkt->Dir * (3.14159265f / 32768.0f);
-					tracker.OnActorSetPos(sourceActorId, pkt->x, pkt->y, pkt->z, rot);
-				}
-				break;
-			}
-			// NpcSpawn (0x0191) handling omitted - struct not fully defined
-			default:
-				break;
 		}
 	}
 
@@ -1944,20 +1830,6 @@ void PacketCapture::DrawImGuiEmbedded() {
 			for (const auto& op : dec.opcodes) {
 				if (op != dec.opcode)
 					UpdatePacketCorrelation(op, p.outgoing, p);
-			}
-		}
-		
-		// Process packets for ActorTracker (debug visuals position tracking)
-		// Process both incoming (for positions) and outgoing (for player ID from chat)
-		{
-			SegmentView v = GetSegmentView(p);
-			std::vector<SegmentInfo> segs;
-			ParseAllSegmentsBuffer(v.data, v.len, segs);
-			for (const auto& seg : segs) {
-				if (seg.hasIpc && seg.type == 3) {
-					ProcessPacketForActorTracker(v.data + seg.offset, seg.size, 
-					                             seg.opcode, seg.source, p.outgoing);
-				}
 			}
 		}
 		

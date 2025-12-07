@@ -218,7 +218,6 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClCompile Include="src\Tools\DebugVisualServer.cpp" />
     <ClCompile Include="src\Tools\GameCameraExtractor.cpp" />
     <ClCompile Include="src\Tools\ViewProjectionHook.cpp" />
-    <ClCompile Include="src\Tools\ActorTracker.cpp" />
     <ClCompile Include="src\Tools\D3D11MatrixCapture.cpp" />
     <ClCompile Include="src\Modules\DebugVisualsModule.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />

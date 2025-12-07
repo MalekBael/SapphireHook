@@ -21,8 +21,6 @@
 #include "../Tools/DebugRenderer.h"
 // NEW: Camera extractor for auto-detecting game camera matrices
 #include "../Tools/GameCameraExtractor.h"
-// NEW: Actor tracker for getting player position from packets
-#include "../Tools/ActorTracker.h"
 // NEW: D3D11 Matrix Capture for hooking constant buffer updates
 #include "../Tools/D3D11MatrixCapture.h"
 // NEW: ViewProjectionHook for capturing matrix from game's W2S function
@@ -393,8 +391,7 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         // Update camera matrices - try multiple sources in priority order
         // 1. D3D11MatrixCapture (directly captured from GPU)
         // 2. GameCameraExtractor (reading game memory)
-        // 3. ActorTracker (player position from packets)
-        // 4. Fallback (origin)
+        // 3. Fallback (origin)
         
         auto& matrixCapture = SapphireHook::DebugVisuals::D3D11MatrixCapture::GetInstance();
         // cameraExtractor already updated above
