@@ -58,18 +58,7 @@ static uint64_t ParseUintFlexible(const std::string& s)
     }
 }
 
-// Heuristic extractor entry type
-struct FuncEntry {
-    std::string name;
-    std::string sheetName;
-    std::string signature;
-    std::string category;
-    uint64_t address = 0; // absolute
-    uint64_t rva = 0;     // relative virtual address
-};
 
-// Extractor declaration (implementation at bottom of file)
-static std::vector<FuncEntry> ExtractFunctionsFromJSONContent(const std::string& content);
 
 FunctionDatabase::FunctionDatabase()
 {
@@ -489,17 +478,7 @@ bool FunctionDatabase::SaveJsonFile(const std::string& filepath)
     }
 }
 
-bool FunctionDatabase::LoadYamlFile(const std::string& filepath)
-{
-    LogError("YAML loading not yet implemented for: " + filepath);
-    return false;
-}
 
-bool FunctionDatabase::SaveYamlFile(const std::string& filepath)
-{
-    LogError("YAML saving not yet implemented for: " + filepath);
-    return false;
-}
 
 std::string FunctionDatabase::Trim(const std::string& str)
 {
@@ -509,16 +488,7 @@ std::string FunctionDatabase::Trim(const std::string& str)
     return str.substr(start, end - start + 1);
 }
 
-std::pair<std::string, std::string> FunctionDatabase::ParseKeyValue(const std::string& line)
-{
-    size_t colonPos = line.find(':');
-    if (colonPos == std::string::npos)
-        return { "", "" };
 
-    std::string key = Trim(line.substr(0, colonPos));
-    std::string value = Trim(line.substr(colonPos + 1));
-    return { key, value };
-}
 
 void FunctionDatabase::AddFunction(uintptr_t address, const std::string& name,
     const std::string& description, const std::string& category)
@@ -532,10 +502,7 @@ void FunctionDatabase::AddFunction(uintptr_t address, const std::string& name,
     m_functions[address] = info;
 }
 
-void FunctionDatabase::RemoveFunction(uintptr_t address)
-{
-    m_functions.erase(address);
-}
+
 
 bool FunctionDatabase::HasFunction(uintptr_t address) const
 {
@@ -558,50 +525,14 @@ std::string FunctionDatabase::GetFunctionName(uintptr_t address) const
     return "";
 }
 
-std::string FunctionDatabase::GetFunctionDescription(uintptr_t address) const
-{
-    auto it = m_functions.find(address);
-    if (it != m_functions.end())
-        return it->second.description;
-    return "";
-}
 
-std::string FunctionDatabase::GetFunctionCategory(uintptr_t address) const
-{
-    auto it = m_functions.find(address);
-    if (it != m_functions.end())
-        return it->second.category;
-    return "Unknown";
-}
-
-std::string FunctionDatabase::GetSimpleFunctionName(uintptr_t address) const
-{
-    std::string name = GetFunctionName(address);
-    if (name.empty()) return FormatHexAddress(address);
-
-    size_t pos = name.rfind("::");
-    if (pos != std::string::npos) return name.substr(pos + 2);
-
-    pos = name.find_last_of(':');
-    if (pos != std::string::npos) return name.substr(pos + 1);
-
-    return name;
-}
 
 std::map<uintptr_t, FunctionInfo> FunctionDatabase::GetAllFunctions() const
 {
     return m_functions;
 }
 
-std::map<std::string, std::string> FunctionDatabase::GetAllCategories() const
-{
-    return m_categories;
-}
 
-void FunctionDatabase::AddCategory(const std::string& name, const std::string& description)
-{
-    m_categories[name] = description;
-}
 
 std::vector<std::string> FunctionDatabase::GetFunctionsByCategory(const std::string& category) const
 {
@@ -614,21 +545,7 @@ std::vector<std::string> FunctionDatabase::GetFunctionsByCategory(const std::str
     return result;
 }
 
-bool FunctionDatabase::LoadCache() { return false; }
-bool FunctionDatabase::SaveCache() const { return false; }
-bool FunctionDatabase::IsCacheValid() const { return false; }
-std::string FunctionDatabase::CalculateModuleHash() const { return ""; }
-std::string FunctionDatabase::GetGameVersion() const { return ""; }
-void FunctionDatabase::StartTiming(const std::string& operation) const {}
-void FunctionDatabase::EndTiming(const std::string& operation) const {}
-void FunctionDatabase::SetCacheDirectory(const std::filesystem::path& cacheDir) {}
-bool FunctionDatabase::LoadFromCache() { return false; }
-bool FunctionDatabase::SaveToCache() const { return false; }
-void FunctionDatabase::InvalidateCache() {}
-std::map<std::string, std::chrono::milliseconds> FunctionDatabase::GetPerformanceMetrics() const { return {}; }
-void FunctionDatabase::ResetPerformanceMetrics() {}
-std::string FunctionDatabase::GetCachedGameVersion() const { return ""; }
-bool FunctionDatabase::IsVersionCompatible(const std::string& version) const { return true; }
+
 bool FunctionDatabase::Save(const std::string& filepath)
 {
     if (filepath.empty())
@@ -637,65 +554,7 @@ bool FunctionDatabase::Save(const std::string& filepath)
         return SaveJsonFile(filepath);
 }
 
-// --- Heuristic JSON extractor implementation (single definition) ---
-static std::vector<FuncEntry> ExtractFunctionsFromJSONContent(const std::string& content)
-{
-    std::vector<FuncEntry> result;
 
-    auto beginOf = [&](const char* key) -> size_t
-        {
-            size_t pos = content.find(key);
-            if (pos == std::string::npos) return 0;
-            size_t brace = content.find('{', pos);
-            return (brace != std::string::npos) ? brace : 0;
-        };
-
-    // Use "functions" block if it exists, else whole document
-    size_t start = beginOf("\"functions\"");
-    auto beginIt = content.begin() + static_cast<std::ptrdiff_t>(start);
-
-    // Capture "name": { ...object... }
-    std::regex entryRe("\"([^\"]+)\"\\s*:\\s*\\{([\\s\\S]*?)\\}");
-
-    auto firstMatch = [](const std::string& s, const std::regex& re) -> std::string
-        {
-            std::smatch m;
-            if (std::regex_search(s, m, re) && m.size() >= 2) return m[1].str();
-            return {};
-        };
-
-    for (auto it = std::sregex_iterator(beginIt, content.end(), entryRe), end = std::sregex_iterator();
-        it != end; ++it)
-    {
-        FuncEntry e;
-        e.name = (*it)[1].str();
-        const std::string body = (*it)[2].str();
-
-        // Must have a signature-like field
-        e.signature = firstMatch(body, std::regex("\"(?:signature|pattern|aob)\"\\s*:\\s*\"([^\"]+)\""));
-        if (e.signature.empty()) continue;
-
-        e.sheetName = firstMatch(body, std::regex("\"sheet_name\"\\s*:\\s*\"([^\"]+)\""));
-        e.category = firstMatch(body, std::regex("\"category\"\\s*:\\s*\"([^\"]+)\""));
-
-        // address/rva (string or number)
-        std::string addrStr = firstMatch(body, std::regex("\"address\"\\s*:\\s*\"([^\"]+)\""));
-        std::string rvaStr = firstMatch(body, std::regex("\"rva(?:_hex)?\"\\s*:\\s*\"([^\"]+)\""));
-        if (!addrStr.empty()) e.address = ParseUintFlexible(addrStr);
-        if (!rvaStr.empty())  e.rva = ParseUintFlexible(rvaStr);
-
-        std::string addrNum = firstMatch(body, std::regex("\"address\"\\s*:\\s*(\\d+)"));
-        std::string rvaNum = firstMatch(body, std::regex("\"rva\"\\s*:\\s*(\\d+)"));
-        if (!addrNum.empty() && e.address == 0) e.address = ParseUintFlexible(addrNum);
-        if (!rvaNum.empty() && e.rva == 0) e.rva = ParseUintFlexible(rvaNum);
-
-        if (!e.name.empty())
-            result.emplace_back(std::move(e));
-    }
-
-    LogDebug("Heuristic JSON function extract: " + std::to_string(result.size()) + " entries");
-    return result;
-}
 
 /* AUTO-INSERTED TYPE SIGNATURE DUMP (REMOVE IF RE-APPEARS)
    If a tool re-injects the "SIGNATURES OF REFERENCED TYPES" block, ensure it is

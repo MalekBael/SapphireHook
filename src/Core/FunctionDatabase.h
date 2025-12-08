@@ -54,12 +54,11 @@ namespace SapphireHook {
         // NEW: Performance tracking inspired by Dalamud's timing system
         mutable std::map<std::string, std::chrono::milliseconds> m_performanceMetrics;
 
-        // Simple YAML parsing functions
+
+
+        // Helper functions
         std::string Trim(const std::string& str);
-        std::pair<std::string, std::string> ParseKeyValue(const std::string& line);
         uintptr_t ParseAddress(const std::string& addrStr);
-        bool LoadYamlFile(const std::string& filepath);
-        bool SaveYamlFile(const std::string& filepath);
 
         // JSON parsing functions
         bool LoadJsonFile(const std::string& filepath);
@@ -72,16 +71,7 @@ namespace SapphireHook {
         bool InitializeRuntimeBase();
         uintptr_t RvaToRuntimeAddress(uintptr_t rva) const;
 
-        // NEW: Cache management inspired by Dalamud
-        bool LoadCache();
-        bool SaveCache() const;
-        bool IsCacheValid() const;
-        std::string CalculateModuleHash() const;
-        std::string GetGameVersion() const;
 
-        // NEW: Performance monitoring inspired by Dalamud's timing system
-        void StartTiming(const std::string& operation) const;
-        void EndTiming(const std::string& operation) const;
 
     public:
         FunctionDatabase();
@@ -91,31 +81,17 @@ namespace SapphireHook {
         bool Load(const std::string& filepath = "data-rva.yml");
         bool Save(const std::string& filepath = "");
 
-        // NEW: Cache operations inspired by Dalamud
-        void SetCacheDirectory(const std::filesystem::path& cacheDir);
-        bool LoadFromCache();
-        bool SaveToCache() const;
-        void InvalidateCache();
-
         // Function management
         void AddFunction(uintptr_t address, const std::string& name,
             const std::string& description = "", const std::string& category = "Unknown");
-        void RemoveFunction(uintptr_t address);
         bool HasFunction(uintptr_t address) const;
 
         // Function retrieval
         FunctionInfo GetFunction(uintptr_t address) const;
         std::string GetFunctionName(uintptr_t address) const;
-        std::string GetFunctionDescription(uintptr_t address) const;
-        std::string GetFunctionCategory(uintptr_t address) const;
-        std::string GetSimpleFunctionName(uintptr_t address) const;
 
-        // Get all functions and categories
+        // Get all functions
         std::map<uintptr_t, FunctionInfo> GetAllFunctions() const;
-        std::map<std::string, std::string> GetAllCategories() const;
-
-        // Category management
-        void AddCategory(const std::string& name, const std::string& description);
         const std::map<std::string, std::string>& GetCategories() const { return m_categories; }
 
         // Statistics
@@ -127,13 +103,7 @@ namespace SapphireHook {
         uintptr_t GetRuntimeBaseAddress() const { return m_runtimeBaseAddress; }
         uintptr_t GetIdaBaseAddress() const { return m_idaBaseAddress; }
 
-        // NEW: Performance metrics inspired by Dalamud
-        std::map<std::string, std::chrono::milliseconds> GetPerformanceMetrics() const;
-        void ResetPerformanceMetrics();
 
-        // NEW: Version tracking inspired by Dalamud
-        std::string GetCachedGameVersion() const;
-        bool IsVersionCompatible(const std::string& version) const;
     };
 
 } // namespace SapphireHook

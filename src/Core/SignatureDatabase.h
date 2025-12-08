@@ -71,17 +71,10 @@ namespace SapphireHook {
         size_t GetScanProgress() const { return m_scannedCount.load(); }
         size_t GetTotalScanCount() const { return m_totalCount.load(); }
 
-        uintptr_t GetGlobalAddress(const std::string& name) const;
-        uintptr_t GetClassFunctionAddress(const std::string& className, const std::string& functionName) const;
-
         std::vector<std::pair<uintptr_t, std::string>> GetResolvedFunctions() const;
         std::vector<std::pair<uintptr_t, SignatureInfo>> GetResolvedFunctionsWithInfo() const;
 
         std::vector<SignatureInfo> FindFunctionsByClass(const std::string& className) const;
-        std::vector<SignatureInfo> FindFunctionsByCategory(const std::string& category) const;
-        std::vector<SignatureInfo> FindFunctionsByName(const std::string& namePattern) const;
-        std::vector<SignatureInfo> FindFunctionsByReturnType(const std::string& returnType) const;
-        std::vector<SignatureInfo> FindFunctionsByParameter(const std::string& paramType) const;
 
         std::vector<std::string> GetDerivedClasses(const std::string& baseClass) const;
         std::vector<std::string> GetVirtualFunctions(const std::string& className) const;
@@ -98,9 +91,6 @@ namespace SapphireHook {
         {
             return GetResolvedFunctionsWithInfo();
         }
-
-        void AddSignature(const std::string& name, const std::string& pattern, const std::string& category);
-        int LoadClassSignatures(const std::string& className, const std::string& classData);
 
     private:
         bool LoadFromJSON(const std::string& filepath);

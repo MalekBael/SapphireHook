@@ -107,7 +107,6 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="resources\Resources.h" />
     <ClInclude Include="src\Analysis\FunctionScanner.h" />
     <ClInclude Include="src\Analysis\PatternScanner.h" />
-    <ClInclude Include="src\Analysis\SignatureScanner.h" />
     <ClInclude Include="src\Core\CommandInvoker.h" />
     <ClInclude Include="src\Core\FunctionAnalyzer.h" />
     <ClInclude Include="src\Core\FunctionDatabase.h" />
@@ -147,8 +146,6 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="src\Network\PacketDecoder.h" />
     <ClInclude Include="src\Network\PacketRegistration.h" />
     <ClInclude Include="src\Network\PacketRegistration.Macros.h" />
-    <ClInclude Include="src\Network\PacketTable.Chat.h" />
-    <ClInclude Include="src\Network\PacketTable.Lobby.h" />
     <ClInclude Include="src\Network\PacketTable.Zone.h" />
     <ClInclude Include="src\ProtocolHandlers\Chat\ServerChatDef.h" />
     <ClInclude Include="src\ProtocolHandlers\CommonTypes.h" />
@@ -161,6 +158,7 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="src\Tools\MemoryScanner.h" />
     <ClInclude Include="src\Tools\SqPackReader.h" />
     <ClInclude Include="src\Tools\StringXrefAnalyzer.h" />
+    <ClInclude Include="src\Tools\D3D11MatrixCapture.h" />
     <ClInclude Include="src\Tools\DebugVisualTypes.h" />
     <ClInclude Include="src\Tools\DebugRenderer.h" />
     <ClInclude Include="src\Tools\DebugVisualServer.h" />

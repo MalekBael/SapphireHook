@@ -128,19 +128,15 @@ namespace SapphireHook {
 
         // Core functionality
         static void Initialize();
-        static void SetSpeedMultiplier(float multiplier);
         static void Shutdown();
 
         // Hook management
         static bool RegisterHook(const std::string& name, uintptr_t address, void* original,
             const std::string& assemblyName = "");
-        static bool RemoveHook(const std::string& name);
-        static std::vector<std::string> GetHookNames();
 
         // Address validation and safety
         static bool IsAddressHooked(uintptr_t address);
         static bool ValidateHookAddress(uintptr_t address);
-        static std::optional<std::string> GetHookNameByAddress(uintptr_t address);
 
         // Cleanup
         static void CleanupAllHooks();
@@ -151,20 +147,12 @@ namespace SapphireHook {
         static size_t GetTotalCallCount();
         static std::chrono::milliseconds GetTotalExecutionTime();
 
-        // Debug information
-        static void PrintHookInformation();
-        static std::map<std::string, std::string> GetDebugInformation();
-        static std::map<std::string, uintptr_t> GetHookAddresses();
-
         // Cache management
         static void SetCacheDirectory(const std::filesystem::path& cacheDir);
         static bool LoadHookCache();
-        static bool SaveHookCache();
-        static void InvalidateCache();
 
         // Utility functions
         static uintptr_t AddressToRVA(uintptr_t address);
-        static uintptr_t RVAToAddress(uintptr_t rva);
         static bool IsValidHookTarget(uintptr_t address);
 
         // Service integration
@@ -172,20 +160,11 @@ namespace SapphireHook {
 
     private:
         // Internal hook management
-        static bool CreateHookInternal(const std::string& name, uintptr_t address,
-            void* detour, void** original, const std::string& assemblyName);
-        static bool ValidateHookInternal(uintptr_t address, const std::string& name);
         static void UpdateStatistics();
-        static std::string GenerateHookCacheKey(const std::string& name, uintptr_t address);
 
         // Safety and validation
         static bool IsMemoryExecutable(uintptr_t address, size_t size = 16);
         static bool IsAddressInValidRange(uintptr_t address);
-        static std::vector<uint8_t> BackupOriginalBytes(uintptr_t address, size_t size);
-
-        // Cache management
-        static std::string SerializeHookCache();
-        static bool DeserializeHookCache(const std::string& cacheData);
     };
 
     // Forward declarations for hook functions

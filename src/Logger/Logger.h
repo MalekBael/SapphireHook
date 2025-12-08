@@ -178,17 +178,13 @@ namespace SapphireHook {
 		void InformationF(const char* format, ...);
 		void WarningF(const char* format, ...);
 		void ErrorF(const char* format, ...);
-		void FatalF(const char* format, ...);
 
 		void InfoWithContext(const std::string& message, const LogContext& context);
 		void ErrorWithContext(const std::string& message, const LogContext& context);
 
-		void InfoCategory(LogCategory category, const std::string& message);
-		void ErrorCategory(LogCategory category, const std::string& message);
+
 
 		static std::string HexFormat(uintptr_t value);
-		static std::string FormatSocket(uint64_t socket);
-		static std::string FormatBytes(size_t bytes);
 
 		void LogException(const std::exception& ex, std::string_view context = "");
 
@@ -196,7 +192,6 @@ namespace SapphireHook {
 		void SetConsoleOutput(bool enable) { m_logToConsole = enable; }
 		void SetFileOutput(bool enable) { m_logToFile = enable; }
 		void SetAsyncLogging(bool enable);
-		void FlushAsync();
 
 		bool IsConsoleOutputEnabled() const { return m_logToConsole; }
 		bool IsFileOutputEnabled() const { return m_logToFile; }
@@ -230,10 +225,7 @@ namespace SapphireHook {
 
 		void ApplyConfig(const LoggerConfig& config);
 
-#ifdef _WIN32
-		bool EnableETW(const std::string& providerName);
-		void LogETW(LogLevel level, const std::string& message);
-#endif
+
 
 		void DebugPacketCorrelationTimeout(uint16_t requestOpcode, uint64_t connectionId, uint64_t ageMs) {
 			if (LogLevel::Debug < m_minimumLevel) return;
@@ -256,7 +248,6 @@ namespace SapphireHook {
 		void InitializeFallbackLogging();
 		std::string FormatString(const char* format, va_list args);
 		void RotateLogFile();
-		void CompressOldLog(const std::filesystem::path& logPath);
 
 		// NEW: helpers
 		static bool EnsureDir(const std::filesystem::path& dir, bool create, bool& createdFlag);

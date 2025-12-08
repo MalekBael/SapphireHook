@@ -193,12 +193,7 @@ void Logger::ErrorF(const char* fmt, ...) {
     va_end(a);
     WriteLog(LogLevel::Error, msg);
 }
-void Logger::FatalF(const char* fmt, ...) {
-    va_list a; va_start(a, fmt);
-    std::string msg = FormatString(fmt, a);
-    va_end(a);
-    WriteLog(LogLevel::Fatal, msg);
-}
+
 
 void Logger::InfoWithContext(const std::string& m, const LogContext& ctx) {
     WriteLog(LogLevel::Information, m + " [" + ctx.ToString() + "]");
@@ -206,14 +201,7 @@ void Logger::InfoWithContext(const std::string& m, const LogContext& ctx) {
 void Logger::ErrorWithContext(const std::string& m, const LogContext& ctx) {
     WriteLog(LogLevel::Error, m + " [" + ctx.ToString() + "]");
 }
-void Logger::InfoCategory(LogCategory c, const std::string& m) {
-    if (m_enabledCategories & static_cast<uint32_t>(c))
-        WriteLog(LogLevel::Information, m);
-}
-void Logger::ErrorCategory(LogCategory c, const std::string& m) {
-    if (m_enabledCategories & static_cast<uint32_t>(c))
-        WriteLog(LogLevel::Error, m);
-}
+
 
 void Logger::SetAsyncLogging(bool enable) {
     if (enable && !m_asyncRunning) {
@@ -244,21 +232,12 @@ void Logger::SetAsyncLogging(bool enable) {
     }
 }
 
-void Logger::FlushAsync() {
-    if (m_asyncRunning) m_asyncCondition.notify_all();
-}
+
 
 std::string Logger::HexFormat(uintptr_t v) {
     std::stringstream ss; ss << "0x" << std::hex << std::uppercase << v; return ss.str();
 }
-std::string Logger::FormatSocket(uint64_t s) {
-    return "socket_" + std::to_string(s);
-}
-std::string Logger::FormatBytes(size_t b) {
-    if (b < 1024) return std::to_string(b) + " B";
-    if (b < 1024 * 1024) return std::to_string(b / 1024) + " KB";
-    return std::to_string(b / (1024 * 1024)) + " MB";
-}
+
 
 void Logger::WriteLog(LogLevel level, const std::string& message) {
     if (level < m_minimumLevel) return;
@@ -336,9 +315,7 @@ void Logger::RotateLogFile() {
     m_currentFileSize = 0;
 }
 
-void Logger::CompressOldLog(const std::filesystem::path& p) {
-    (void)p;
-}
+
 
 void Logger::InitializeFallbackLogging() {
     m_fallbackMode = true;
@@ -372,12 +349,7 @@ void Logger::LogException(const std::exception& ex, std::string_view ctx) {
     else Error(std::string("Exception: ") + ex.what());
 }
 
-#ifdef _WIN32
-bool Logger::EnableETW(const std::string& providerName) {
-    (void)providerName; return false;
-}
-void Logger::LogETW(LogLevel, const std::string&) {}
-#endif
+
 
 bool BinaryLogger::Initialize(const std::string&, size_t) { return false; }
 void BinaryLogger::LogBinary(const void*, size_t, uint32_t) {}

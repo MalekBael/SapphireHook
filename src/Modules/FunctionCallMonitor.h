@@ -73,7 +73,6 @@ public:
     void ReloadDatabase();
     void ReloadSignatureDatabase();
     void LoadDatabasesWithErrorHandling();
-    void ValidateDatabase();
 
     // Memory and address utilities
     bool IsSafeMemoryAddress(const void* address, size_t size);
@@ -123,15 +122,6 @@ public:
     std::future<std::vector<uintptr_t>> StartAsyncScanWithStrings(const std::vector<std::string>& targetStrings);
     void StopScan();
 
-    // Legacy scanning helpers (thin pass-throughs to FunctionScanner)
-    void ScanAllFunctions();
-    void ScanExportedFunctions(std::vector<uintptr_t>& functions);
-    void ScanCallTargets(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions);
-    void ScanSafeRegion(uintptr_t baseAddr, size_t size, std::vector<uintptr_t>& functions);
-    void ScanForFunctionPrologues(uintptr_t moduleBase, size_t moduleSize, std::vector<uintptr_t>& functions);
-    void ScanForUIFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
-    void ScanForNetworkFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
-    void ScanForGameplayFunctions(const uint8_t* memory, size_t size, std::map<uintptr_t, std::string>& namedFunctions);
 
     // Hook system setup
     void SetupFunctionHooks();
@@ -151,20 +141,9 @@ public:
         std::shared_ptr<SapphireHook::LiveTraceMonitor> monitor);
 
 private:
-    // Render methods for UI tabs/sections
     void RenderFunctionListWithPagination();
     void RenderFunctionDatabaseBrowser();
     void RenderSignatureDatabaseBrowser();
-    void RenderManualHookSection();
-    void RenderEnhancedFunctionSearch();
-
-    // The following were defined in the cpp but not declared; add them
-    void RenderCombinedDatabaseView();
-    void RenderSignatureSection();
-    void RenderTypeAwareFunctionSearch();
-    void RenderClassHierarchyView();
-    void RenderVirtualFunctionTable();
-    void RenderPaginationControls();
 
     // Core components
     SapphireHook::FunctionDatabase m_functionDB;

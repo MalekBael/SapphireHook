@@ -291,23 +291,7 @@ std::string SignatureDatabase::Trim(const std::string& str) const
     return str.substr(start, end - start + 1);
 }
 
-void SignatureDatabase::AddSignature(const std::string& name, const std::string& pattern, const std::string& category)
-{
-    SignatureInfo info;
-    info.functionName = name;
-    info.signature = pattern;
-    info.className = "Global";
-    info.category = category;
-    info.description = "Global function: " + name;
 
-    m_globalSignatures[name] = info;
-}
-
-int SignatureDatabase::LoadClassSignatures(const std::string& className, const std::string& classData)
-{
-    LogInfo("Found class: " + className + " (nested function parsing not yet implemented)");
-    return 0;
-}
 
 bool SignatureDatabase::Load(const std::string& filepath)
 {
@@ -975,29 +959,7 @@ void SignatureDatabase::AsyncScanWorker(uintptr_t moduleBase, size_t moduleSize,
     LogInfo("Async signature worker finished");
 }
 
-uintptr_t SignatureDatabase::GetGlobalAddress(const std::string& name) const
-{
-    auto it = m_globalSignatures.find(name);
-    if (it != m_globalSignatures.end() && it->second.isResolved)
-    {
-        return it->second.resolvedAddress;
-    }
-    return 0;
-}
 
-uintptr_t SignatureDatabase::GetClassFunctionAddress(const std::string& className, const std::string& functionName) const
-{
-    auto classIt = m_classSignatures.find(className);
-    if (classIt != m_classSignatures.end())
-    {
-        auto funcIt = classIt->second.find(functionName);
-        if (funcIt != classIt->second.end() && funcIt->second.isResolved)
-        {
-            return funcIt->second.resolvedAddress;
-        }
-    }
-    return 0;
-}
 
 std::vector<std::pair<uintptr_t, std::string>> SignatureDatabase::GetResolvedFunctions() const
 {
@@ -1051,56 +1013,7 @@ std::vector<std::pair<uintptr_t, SignatureInfo>> SignatureDatabase::GetResolvedF
     return result;
 }
 
-std::vector<SignatureInfo> SignatureDatabase::FindFunctionsByReturnType(const std::string& returnType) const
-{
-    std::vector<SignatureInfo> results;
 
-    for (const auto& [className, functions] : m_classSignatures)
-    {
-        for (const auto& [funcName, info] : functions)
-        {
-            if (info.returnType == returnType && info.isResolved)
-            {
-                results.push_back(info);
-            }
-        }
-    }
-
-    for (const auto& [name, info] : m_globalSignatures)
-    {
-        if (info.returnType == returnType && info.isResolved)
-        {
-            results.push_back(info);
-        }
-    }
-
-    return results;
-}
-
-std::vector<SignatureInfo> SignatureDatabase::FindFunctionsByParameter(const std::string& paramType) const
-{
-    std::vector<SignatureInfo> results;
-
-    for (const auto& [className, functions] : m_classSignatures)
-    {
-        for (const auto& [funcName, info] : functions)
-        {
-            if (info.isResolved)
-            {
-                for (const auto& param : info.parameterTypes)
-                {
-                    if (param.find(paramType) != std::string::npos)
-                    {
-                        results.push_back(info);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    return results;
-}
 
 std::vector<SignatureInfo> SignatureDatabase::FindFunctionsByClass(const std::string& className) const
 {
@@ -1121,51 +1034,7 @@ std::vector<SignatureInfo> SignatureDatabase::FindFunctionsByClass(const std::st
     return result;
 }
 
-std::vector<SignatureInfo> SignatureDatabase::FindFunctionsByCategory(const std::string& category) const
-{
-    std::vector<SignatureInfo> result;
 
-    for (const auto& [className, functions] : m_classSignatures)
-    {
-        for (const auto& [funcName, info] : functions)
-        {
-            if (info.category == category && info.isResolved)
-            {
-                result.push_back(info);
-            }
-        }
-    }
-
-    return result;
-}
-
-std::vector<SignatureInfo> SignatureDatabase::FindFunctionsByName(const std::string& namePattern) const
-{
-    std::vector<SignatureInfo> result;
-
-    std::regex pattern(namePattern, std::regex_constants::icase);
-
-    for (const auto& [name, info] : m_globalSignatures)
-    {
-        if (std::regex_search(name, pattern) && info.isResolved)
-        {
-            result.push_back(info);
-        }
-    }
-
-    for (const auto& [className, functions] : m_classSignatures)
-    {
-        for (const auto& [funcName, info] : functions)
-        {
-            if (std::regex_search(funcName, pattern) && info.isResolved)
-            {
-                result.push_back(info);
-            }
-        }
-    }
-
-    return result;
-}
 
 std::vector<std::string> SignatureDatabase::GetDerivedClasses(const std::string& baseClass) const
 {

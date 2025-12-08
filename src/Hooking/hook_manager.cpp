@@ -434,76 +434,6 @@ namespace SapphireHook {
         return originalDispatcher(rcx);
     }
 
-    bool HookManager::CreateHookInternal(const std::string& name, uintptr_t address,
-        void* detour, void** original, const std::string& assemblyName) {
-        if (!ValidateHookInternal(address, name))
-            return false;
-        if (HookManager::GetShutdownFlag().load()) {
-            LogWarning("Cannot create hook during shutdown: " + name);
-            return false;
-        }
-
-        const uint8_t* code = reinterpret_cast<const uint8_t*>(address);
-        bool looksLikeFunction =
-            (code[0] == 0x48 && code[1] == 0x89) ||
-            (code[0] == 0x48 && code[1] == 0x83) ||
-            (code[0] == 0x48 && code[1] == 0x8B) ||
-            (code[0] == 0x55) ||
-            (code[0] >= 0x50 && code[0] <= 0x57) ||
-            (code[0] == 0x40 && code[1] >= 0x53 && code[1] <= 0x57);
-
-        if (!looksLikeFunction) {
-            std::ostringstream oss;
-            oss << "Address 0x" << std::hex << address
-                << " doesn't look like function start: " << name;
-            LogWarning(oss.str());
-        }
-
-        try {
-            if (MH_CreateHook(reinterpret_cast<void*>(address), detour, original) != MH_OK) {
-                LogError("MinHook creation failed: " + name);
-                return false;
-            }
-            if (MH_EnableHook(reinterpret_cast<void*>(address)) != MH_OK) {
-                LogError("MinHook enable failed: " + name);
-                MH_RemoveHook(reinterpret_cast<void*>(address));
-                return false;
-            }
-            HookManager::RegisterHook(name, address, *original, assemblyName);
-
-            std::ostringstream oss;
-            oss << "Successfully created hook: " << name << " at 0x" << std::hex << address;
-            LogInfo(oss.str());
-            return true;
-        }
-        catch (const std::exception& e) {
-            LogError(std::string("Exception in CreateHookInternal: ") + e.what());
-            return false;
-        }
-    }
-
-    bool HookManager::ValidateHookInternal(uintptr_t address, const std::string& name) {
-        if (!HookManager::ValidateHookAddress(address))
-            return false;
-        if (!HookManager::IsValidHookTarget(address)) {
-            LogError("Hook validation failed (invalid target) for " + name);
-            return false;
-        }
-        if (HookManager::IsAddressHooked(address)) {
-            LogWarning("Hook validation failed (already hooked) for " + name);
-            return false;
-        }
-        HMODULE hModule{};
-        if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
-            reinterpret_cast<LPCSTR>(address), &hModule)) {
-            std::ostringstream oss;
-            oss << "Hook validation warning: address 0x" << std::hex << address
-                << " not in any loaded module (" << name << ")";
-            LogWarning(oss.str());
-        }
-        return true;
-    }
-
     bool FindAndHookIPC() {
         if (IsEnvEnabled("SAPPHIRE_ONLY_WSASEND") ||
             IsEnvEnabled("SAPPHIRE_SAFE") ||
@@ -870,73 +800,12 @@ namespace SapphireHook {
         return true;
     }
 
-    std::vector<uint8_t> HookManager::BackupOriginalBytes(uintptr_t address, size_t size) {
-        std::vector<uint8_t> buf(size);
-        try { std::memcpy(buf.data(), reinterpret_cast<void*>(address), size); }
-        catch (...) { buf.clear(); }
-        return buf;
-    }
-
-    void HookManager::SetSpeedMultiplier(float multiplier) {
-        if (multiplier <= 0.f) {
-            LogWarning("SetSpeedMultiplier rejected non-positive value");
-            return;
-        }
-        g_SpeedMultiplier = multiplier;
-        LogInfo("Speed multiplier set to " + std::to_string(multiplier));
-    }
-
     void HookManager::Shutdown() {
         LogInfo("HookManager shutdown initiated");
         GetShutdownFlag().store(true, std::memory_order_relaxed);
         CleanupAllHooks();
         MH_Uninitialize();
         LogInfo("HookManager shutdown complete");
-    }
-
-    bool HookManager::RemoveHook(const std::string& name) {
-        std::lock_guard<std::mutex> guard(GetHooksMutex());
-        auto& tracked = GetTrackedHooks();
-        auto it = tracked.find(name);
-        if (it == tracked.end()) {
-            LogWarning("RemoveHook: not found: " + name);
-            return false;
-        }
-        uintptr_t addr = it->second->address;
-        MH_DisableHook(reinterpret_cast<void*>(addr));
-        MH_RemoveHook(reinterpret_cast<void*>(addr));
-        if (!it->second->original_bytes.empty()) {
-            DWORD oldProt{};
-            if (VirtualProtect(reinterpret_cast<void*>(addr), it->second->original_bytes.size(),
-                PAGE_EXECUTE_READWRITE, &oldProt)) {
-                std::memcpy(reinterpret_cast<void*>(addr),
-                    it->second->original_bytes.data(),
-                    it->second->original_bytes.size());
-                DWORD tmp; VirtualProtect(reinterpret_cast<void*>(addr),
-                    it->second->original_bytes.size(), oldProt, &tmp);
-            }
-        }
-        GetAddressToName().erase(addr);
-        tracked.erase(it);
-        LogInfo("Removed hook: " + name);
-        return true;
-    }
-
-    std::vector<std::string> HookManager::GetHookNames() {
-        std::vector<std::string> names;
-        std::lock_guard<std::mutex> guard(GetHooksMutex());
-        names.reserve(GetTrackedHooks().size());
-        for (auto& p : GetTrackedHooks())
-            names.push_back(p.first);
-        return names;
-    }
-
-    std::optional<std::string> HookManager::GetHookNameByAddress(uintptr_t address) {
-        std::lock_guard<std::mutex> guard(GetHooksMutex());
-        auto& map = GetAddressToName();
-        auto it = map.find(address);
-        if (it == map.end()) return std::nullopt;
-        return it->second;
     }
 
     void HookManager::CleanupAllHooks() {
@@ -995,110 +864,6 @@ namespace SapphireHook {
     std::chrono::milliseconds HookManager::GetTotalExecutionTime() {
         uint64_t micros = g_totalExecMicros.load(std::memory_order_relaxed);
         return std::chrono::milliseconds(micros / 1000);
-    }
-
-    void HookManager::PrintHookInformation() {
-        auto info = GetDetailedHookInfo();
-        LogInfo("==== Hook Information ====");
-        for (auto& h : info) {
-            std::ostringstream oss;
-            oss << h.name << " @0x" << std::hex << h.address
-                << " enabled=" << std::boolalpha << h.is_enabled
-                << " validated=" << h.is_validated;
-            LogInfo(oss.str());
-        }
-    }
-
-    std::map<std::string, std::string> HookManager::GetDebugInformation() {
-        std::map<std::string, std::string> dbg;
-        auto stats = GetHookStatistics();
-        dbg["TotalHooks"] = std::to_string(stats.totalHooks);
-        dbg["EnabledHooks"] = std::to_string(stats.enabledHooks);
-        dbg["FailedHooks"] = std::to_string(stats.failedHooks);
-        dbg["TotalCalls"] = std::to_string(GetTotalCallCount());
-        dbg["ExecTimeMs"] = std::to_string(GetTotalExecutionTime().count());
-        return dbg;
-    }
-
-    std::map<std::string, uintptr_t> HookManager::GetHookAddresses() {
-        std::map<std::string, uintptr_t> out;
-        std::lock_guard<std::mutex> guard(GetHooksMutex());
-        for (auto& p : GetTrackedHooks())
-            out[p.first] = p.second->address;
-        return out;
-    }
-
-    bool HookManager::SaveHookCache() {
-        auto& dir = GetCacheDirectory();
-        if (dir.empty()) return false;
-        std::error_code ec;
-        std::filesystem::create_directories(dir, ec);
-        auto file = dir / "hook_cache.txt";
-        std::ofstream f(file);
-        if (!f.is_open()) {
-            LogError("SaveHookCache: cannot open file");
-            return false;
-        }
-        std::lock_guard<std::mutex> guard(GetHooksMutex());
-        for (auto& p : GetTrackedHooks())
-            f << p.first << "=" << std::hex << p.second->address << "\n";
-        LogInfo("Hook cache saved: " + file.string());
-        return true;
-    }
-
-    void HookManager::InvalidateCache() {
-        auto& dir = GetCacheDirectory();
-        if (dir.empty()) return;
-        auto file = dir / "hook_cache.txt";
-        if (std::filesystem::exists(file)) {
-            std::error_code ec;
-            std::filesystem::remove(file, ec);
-            if (!ec) LogInfo("Hook cache invalidated");
-        }
-    }
-
-    uintptr_t HookManager::RVAToAddress(uintptr_t rva) {
-        HMODULE mainModule = GetModuleHandle(nullptr);
-        if (!mainModule) return 0;
-        return reinterpret_cast<uintptr_t>(mainModule) + rva;
-    }
-
-    std::string HookManager::GenerateHookCacheKey(const std::string& name, uintptr_t address) {
-        std::ostringstream oss;
-        oss << name << "@" << std::hex << address;
-        return oss.str();
-    }
-
-    std::string HookManager::SerializeHookCache() {
-        std::ostringstream oss;
-        std::lock_guard<std::mutex> guard(GetHooksMutex());
-        for (auto& p : GetTrackedHooks())
-            oss << p.first << "=" << std::hex << p.second->address << "\n";
-        return oss.str();
-    }
-
-    bool HookManager::DeserializeHookCache(const std::string& cacheData) {
-        std::istringstream iss(cacheData);
-        std::string line;
-        size_t loaded = 0;
-        std::lock_guard<std::mutex> guard(GetHooksMutex());
-        while (std::getline(iss, line)) {
-            if (line.empty() || line[0] == '#') continue;
-            auto eq = line.find('=');
-            if (eq == std::string::npos) continue;
-            std::string name = line.substr(0, eq);
-            std::string addrStr = line.substr(eq + 1);
-            try {
-                uintptr_t addr = std::stoull(addrStr, nullptr, 16);
-                s_cached_addresses[name] = addr;
-                ++loaded;
-            }
-            catch (...) {
-                LogWarning("DeserializeHookCache: bad line: " + line);
-            }
-        }
-        LogInfo("DeserializeHookCache loaded " + std::to_string(loaded) + " entries");
-        return loaded > 0;
     }
 
 }   
