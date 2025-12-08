@@ -1,0 +1,144 @@
+# ======================================================================
+# FFXIV 3.35 (Heavensward) Client Data - SapphireHook
+# ======================================================================
+# Compatible with ffxiv_idarename.py from FFXIVClientStructs
+# All addresses are ABSOLUTE (base 0x140000000)
+# ======================================================================
+
+version: "3.35"
+
+# ======================================================================
+# GLOBAL POINTERS
+# ======================================================================
+globals:
+  0x1415E9E78: g_RenderManager              # Graphics/Render Context (276 refs)
+  0x1415E92E0: g_DeviceContext              # Device Context
+  0x1415F6CB8: g_CameraManager              # Game Camera Manager (244 refs)
+  0x14193AE14: g_TlsIndex                   # TLS slot for shader state
+  0x1415B4BFC: g_WorldViewMatrix_Handle     # Shader handle
+  0x1415B4C00: g_WorldViewProjMatrix_Handle # Shader handle
+  0x1415B4C04: g_GeometryParam_Handle       # Shader handle
+
+# ======================================================================
+# FUNCTIONS (non-class functions)
+# ======================================================================
+functions:
+  # Matrix Operations
+  0x14017C1F0: Matrix4x4_Multiply           # float* (float* result, float* matA, float* matB)
+  0x1401810C0: Matrix4x4_Invert             # float* (float* result, float* matrix)
+  
+  # Camera/Render Setup
+  0x1403779D0: Render_SetupCameraMatrices   # Matrix write/render setup
+  0x1403942C0: RenderContext_ctor           # RenderContext constructor (0x2F6B0 bytes)
+  0x140147B20: Shader_RegisterConstantName  # Register shader constant, returns handle
+  
+  # Matrix Writer Functions
+  0x140358640: Camera_WriteViewMatrix       # Writes to offset 0x40
+  0x140352930: Camera_WriteProjMatrix       # Writes to offset 0x80
+  0x140351D30: Camera_WriteViewProjMatrix   # Writes to offset 0xC0
+
+# ======================================================================
+# CLASSES
+# ======================================================================
+# Format:
+#   ClassName:
+#     vtbls:
+#       - ea: 0xADDRESS
+#         base: OptionalBaseClassName
+#     funcs:
+#       0xADDRESS: FunctionName
+#     vfuncs:
+#       INDEX: VirtualFunctionName
+#     instances:
+#       - ea: 0xADDRESS
+#         name: OptionalInstanceName
+# ======================================================================
+
+Client::Graphics::Kernel::RenderContext:
+  instances:
+    - ea: 0x1415E9E78
+      name: g_RenderManager
+  # Size: 0x2F6B0 (194,224 bytes)
+  # Offset 0xAD28: CameraData pointer
+
+Client::Graphics::Render::CameraData:
+  # Accessed via: RenderContext + 0xAD28
+  # Fields:
+  #   0x0010: ViewMatrix (Matrix4x4)
+  #   0x0050: ProjectionMatrix (Matrix4x4)
+  #   0x0090: CameraPosition (Vector3, float indices [36,37,38])
+
+Client::Game::CameraManager:
+  instances:
+    - ea: 0x1415F6CB8
+      name: g_CameraManager
+  # Fields:
+  #   0x0020: CameraList (62 accesses)
+  #   0x0040: ActiveCamera (19 accesses)
+  #   0x0048: Camera1
+  #   0x0050: Camera2
+  #   0x0158: CameraIndex (21 accesses)
+
+Client::Game::Camera:
+  # Game layer camera - player position and parameters
+  # Fields (VERIFIED in 3.35):
+  #   0x0040: ViewMatrix (may be garbage)
+  #   0x0080: ProjectionMatrix (may be garbage)
+  #   0x00C0: ViewProjectionMatrix
+  #   0x00D8: Distance (camera distance from player)
+  #   0x00E0: LookAtTarget (Vector3)
+  #   0x0100: Position (Vector3, VERIFIED player world position)
+  #   0x0114: FovY (float, DEGREES not radians)
+  #   0x0118: NearClip
+  #   0x011C: FarClip
+  #   0x0120: AspectRatio
+  #   0x01A0: Pitch (radians, VERIFIED)
+  #   0x01A4: Yaw (radians, VERIFIED)
+
+Client::Graphics::Scene::Camera:
+  # Graphics/Scene layer camera
+  # Size: 0x100
+  # Fields:
+  #   0x0080: LookAtVector
+  #   0x00A0: ViewMatrix
+  #   0x00E0: RenderCamera pointer
+
+Client::Graphics::Render::Camera:
+  # Render layer camera
+  # Size: 0x290
+  # Fields:
+  #   0x0010: ViewMatrix
+  #   0x0050: ProjectionMatrix2
+  #   0x0090: Origin (Vector3)
+  #   0x01A0: ProjectionMatrix
+
+# ======================================================================
+# SIGNATURE PATTERNS (for reference, not used by IDA script)
+# ======================================================================
+# g_CameraManager:
+#   pattern: "4C 8B 0D ?? ?? ?? ?? 48 69 C0 E8 03 00 00"
+#   displacement: 3, length: 7
+#   resolves_to: 0x1415F6CB8
+#
+# g_RenderManager:
+#   pattern: "48 8B 0D ?? ?? ?? ?? 48 85 C9 74 05 E8"
+#   displacement: 3, length: 7
+#   resolves_to: 0x1415E9E78
+# ======================================================================
+
+# ======================================================================
+# OFFSET REFERENCE (for manual lookup)
+# ======================================================================
+# RenderContext + 0xAD28 → CameraData*
+# CameraData + 0x10 → ViewMatrix (4x4)
+# CameraData + 0x50 → ProjectionMatrix (4x4)
+# CameraData + 0x90 → CameraPosition (float3)
+#
+# CameraManager + 0x20 → CameraList
+# CameraManager + 0x40 → ActiveCamera
+#
+# GameCamera + 0x100 → PlayerPosition (VERIFIED)
+# GameCamera + 0x1A0 → Pitch (VERIFIED)
+# GameCamera + 0x1A4 → Yaw (VERIFIED)
+# GameCamera + 0x114 → FovY (DEGREES)
+# ======================================================================

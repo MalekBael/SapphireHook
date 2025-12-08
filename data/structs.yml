@@ -1,0 +1,318 @@
+# ======================================================================
+# FFXIV 3.35 (Heavensward) Client Structs - SapphireHook
+# ======================================================================
+# Compatible with ffxiv_idarename.py / ffxiv_structs.yml format
+# Verified via IDA Pro 9.1 decompilation + runtime memory dumps
+# December 2025
+# ======================================================================
+
+# ----------------------------------------------------------------------
+# Client::Graphics::Kernel::RenderContext
+# ----------------------------------------------------------------------
+# The main graphics/render context singleton
+# Global: g_RenderManager (0x1415E9E78)
+# ----------------------------------------------------------------------
+- type: Client::Graphics::Kernel::RenderContext
+  name: RenderContext
+  namespace: Client.Graphics.Kernel
+  union: False
+  size: 0x2F6B0  # 194,224 bytes
+  fields:
+  - type: void*
+    name: Vtable
+    offset: 0
+  - type: Client::Graphics::Render::CameraData*
+    name: CameraData
+    offset: 0xAD28  # 44328 decimal - VERIFIED from decompiled sub_1403779D0
+  member_functions: []
+
+# ----------------------------------------------------------------------
+# Client::Graphics::Render::CameraData
+# ----------------------------------------------------------------------
+# Camera matrices used by shader system
+# Accessed via: RenderContext + 0xAD28
+# From decompiled code: sub_14017C1F0 multiplies View * Projection
+# ----------------------------------------------------------------------
+- type: Client::Graphics::Render::CameraData
+  name: CameraData
+  namespace: Client.Graphics.Render
+  union: False
+  size: 0xA0  # Approximate
+  fields:
+  - type: byte
+    name: Unknown_0x00
+    offset: 0
+    size: 16
+    is_string: False
+  - type: Common::Math::Matrix4x4
+    name: ViewMatrix
+    offset: 0x10  # +16, VERIFIED from decomp line 641170
+  - type: Common::Math::Matrix4x4
+    name: ProjectionMatrix
+    offset: 0x50  # +80, VERIFIED from decomp line 641170
+  - type: Common::Math::Vector3
+    name: CameraPosition
+    offset: 0x90  # +144, VERIFIED from decomp lines 349183-349185 (float[36,37,38])
+  member_functions: []
+
+# ----------------------------------------------------------------------
+# Client::Game::CameraManager
+# ----------------------------------------------------------------------
+# Game layer camera manager
+# Global: g_CameraManager (0x1415F6CB8) - 244 references in IDA
+# ----------------------------------------------------------------------
+- type: Client::Game::CameraManager
+  name: CameraManager
+  namespace: Client.Game
+  union: False
+  size: 0x160
+  fields:
+  - type: void*
+    name: Vtable
+    offset: 0
+  - type: Client::Game::Camera**
+    name: CameraList
+    offset: 0x20  # 62 accesses in IDA
+  - type: Client::Game::Camera*
+    name: ActiveCamera
+    offset: 0x40  # 19 accesses in IDA - VERIFIED
+  - type: Client::Game::Camera*
+    name: Camera1
+    offset: 0x48
+  - type: Client::Game::Camera*
+    name: Camera2
+    offset: 0x50
+  - type: int
+    name: CameraIndex
+    offset: 0x158  # 21 accesses in IDA
+  member_functions: []
+
+# ----------------------------------------------------------------------
+# Client::Game::Camera
+# ----------------------------------------------------------------------
+# Game layer camera - player position and parameters
+# Note: Matrices at 0x40/0x80 may be garbage in 3.35
+# Use RenderContext path for reliable matrices
+# ----------------------------------------------------------------------
+- type: Client::Game::Camera
+  name: Camera
+  namespace: Client.Game
+  union: False
+  size: 0x200
+  fields:
+  # View Matrix (may be uninitialized in 3.35)
+  - type: Common::Math::Matrix4x4
+    name: ViewMatrix
+    offset: 0x40
+  # Projection Matrix (may be uninitialized in 3.35)
+  - type: Common::Math::Matrix4x4
+    name: ProjectionMatrix
+    offset: 0x80
+  # ViewProjection Combined
+  - type: Common::Math::Matrix4x4
+    name: ViewProjectionMatrix
+    offset: 0xC0
+  # Camera Distance
+  - type: float
+    name: Distance
+    offset: 0xD8  # Distance from player to camera
+  # Look-at target (overlaps with ViewProjection row)
+  - type: Common::Math::Vector3
+    name: LookAtTarget
+    offset: 0xE0
+  # Player Position - VERIFIED in 3.35 runtime
+  - type: Common::Math::Vector3
+    name: Position
+    offset: 0x100  # VERIFIED - player world position
+  - type: float
+    name: PositionW
+    offset: 0x10C  # Usually 1.0
+  # Camera Parameters - VERIFIED in 3.35
+  - type: float
+    name: FovY
+    offset: 0x114  # DEGREES, not radians! (e.g., 45.0)
+  - type: float
+    name: NearClip
+    offset: 0x118
+  - type: float
+    name: FarClip
+    offset: 0x11C
+  - type: float
+    name: AspectRatio
+    offset: 0x120  # Usually 16/9
+  # Rotation Angles - VERIFIED in 3.35 runtime
+  - type: float
+    name: Pitch
+    offset: 0x1A0  # Radians - VERIFIED
+  - type: float
+    name: Yaw
+    offset: 0x1A4  # Radians - VERIFIED
+  - type: float
+    name: Roll
+    offset: 0x1A8  # Radians - unverified
+  member_functions: []
+
+# ----------------------------------------------------------------------
+# Client::Graphics::Scene::Camera
+# ----------------------------------------------------------------------
+# Graphics/Scene layer camera
+# Based on FFXIVClientStructs reference, may differ in 3.35
+# ----------------------------------------------------------------------
+- type: Client::Graphics::Scene::Camera
+  name: Camera
+  namespace: Client.Graphics.Scene
+  union: False
+  size: 0x100
+  fields:
+  - type: void*
+    name: Vtable
+    offset: 0
+  - type: Common::Math::Vector3
+    name: LookAtVector
+    offset: 0x80
+  - type: Common::Math::Matrix4x4
+    name: ViewMatrix
+    offset: 0xA0  # Different from Game::Camera!
+  - type: Client::Graphics::Render::Camera*
+    name: RenderCamera
+    offset: 0xE0  # Pointer to render layer camera
+  member_functions: []
+
+# ----------------------------------------------------------------------
+# Client::Graphics::Render::Camera
+# ----------------------------------------------------------------------
+# Render layer camera
+# Based on FFXIVClientStructs reference
+# ----------------------------------------------------------------------
+- type: Client::Graphics::Render::Camera
+  name: Camera
+  namespace: Client.Graphics.Render
+  union: False
+  size: 0x290
+  fields:
+  - type: void*
+    name: Vtable
+    offset: 0
+  - type: Common::Math::Matrix4x4
+    name: ViewMatrix
+    offset: 0x10
+  - type: Common::Math::Matrix4x4
+    name: ProjectionMatrix2
+    offset: 0x50  # Alternate projection
+  - type: Common::Math::Vector3
+    name: Origin
+    offset: 0x90  # Camera origin/position
+  - type: Common::Math::Matrix4x4
+    name: ProjectionMatrix
+    offset: 0x1A0  # Primary projection
+  member_functions: []
+
+# ----------------------------------------------------------------------
+# Common::Math Types
+# ----------------------------------------------------------------------
+- type: Common::Math::Vector2
+  name: Vector2
+  namespace: Common.Math
+  union: False
+  size: 8
+  fields:
+  - type: float
+    name: X
+    offset: 0
+  - type: float
+    name: Y
+    offset: 4
+  member_functions: []
+
+- type: Common::Math::Vector3
+  name: Vector3
+  namespace: Common.Math
+  union: False
+  size: 16  # Aligned to 16 bytes
+  fields:
+  - type: float
+    name: X
+    offset: 0
+  - type: float
+    name: Y
+    offset: 4
+  - type: float
+    name: Z
+    offset: 8
+  member_functions: []
+
+- type: Common::Math::Vector4
+  name: Vector4
+  namespace: Common.Math
+  union: False
+  size: 16
+  fields:
+  - type: float
+    name: X
+    offset: 0
+  - type: float
+    name: Y
+    offset: 4
+  - type: float
+    name: Z
+    offset: 8
+  - type: float
+    name: W
+    offset: 12
+  member_functions: []
+
+- type: Common::Math::Matrix4x4
+  name: Matrix4x4
+  namespace: Common.Math
+  union: False
+  size: 64
+  fields:
+  - type: float
+    name: M11
+    offset: 0
+  - type: float
+    name: M12
+    offset: 4
+  - type: float
+    name: M13
+    offset: 8
+  - type: float
+    name: M14
+    offset: 12
+  - type: float
+    name: M21
+    offset: 16
+  - type: float
+    name: M22
+    offset: 20
+  - type: float
+    name: M23
+    offset: 24
+  - type: float
+    name: M24
+    offset: 28
+  - type: float
+    name: M31
+    offset: 32
+  - type: float
+    name: M32
+    offset: 36
+  - type: float
+    name: M33
+    offset: 40
+  - type: float
+    name: M34
+    offset: 44
+  - type: float
+    name: M41
+    offset: 48
+  - type: float
+    name: M42
+    offset: 52
+  - type: float
+    name: M43
+    offset: 56
+  - type: float
+    name: M44
+    offset: 60
+  member_functions: []
