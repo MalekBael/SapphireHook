@@ -3,8 +3,10 @@
 #include "../vendor/imgui/imgui.h"
 #include "../Core/PacketInjector.h"
 #include "../Core/SettingsManager.h"
+#include "../Core/GameDataLookup.h"
 #include <windows.h>
 #include <shellapi.h>   // for ShellExecute
+#include <shobjidl.h>   // for IFileDialog
 #include <filesystem>
 
 using namespace SapphireHook;
@@ -26,12 +28,17 @@ void SettingsModule::RenderWindow()
 	if (!m_windowOpen)
 		return;
 
-	ImGui::SetNextWindowSize(ImVec2(640, 640), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(640, 700), ImGuiCond_FirstUseEver);
 	if (!ImGui::Begin("SapphireHook Settings", &m_windowOpen,
 		ImGuiWindowFlags_NoCollapse))
 	{
 		ImGui::End();
 		return;
+	}
+
+	if (ImGui::CollapsingHeader("Game Data (sqpack)", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		DrawGameDataSection();
 	}
 
 	if (ImGui::CollapsingHeader("Packet Logging", ImGuiTreeNodeFlags_DefaultOpen))
@@ -121,5 +128,203 @@ void SettingsModule::DrawPacketLoggingSection()
 				ShellExecuteW(nullptr, L"open", logDir.wstring().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 			}
 		}
+	}
+}
+
+void SettingsModule::DrawGameDataSection()
+{
+	auto& settings = SettingsManager::Instance();
+	
+	ImGui::TextUnformatted("FFXIV sqpack Path");
+	ImGui::Separator();
+	
+	ImGui::PushTextWrapPos();
+	ImGui::TextUnformatted(
+		"The sqpack folder contains game data files (items, actions, etc.).\n"
+		"By default, the path is auto-detected from the game executable.\n"
+		"If auto-detection fails, you can set a custom path here.");
+	ImGui::PopTextWrapPos();
+	ImGui::Spacing();
+	
+	// Show current status
+	const auto& stats = GameData::GetLoadStats();
+	if (stats.initialized)
+	{
+		ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Status: Loaded");
+		ImGui::SameLine();
+		ImGui::TextDisabled("(%zu items, %zu actions, %zu statuses)",
+			stats.itemCount, stats.actionCount, stats.statusCount);
+	}
+	else
+	{
+		ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Status: Not loaded");
+		ImGui::SameLine();
+		ImGui::TextDisabled("(lookups will show IDs only)");
+	}
+	
+	ImGui::Spacing();
+	
+	// Current path display
+	std::filesystem::path currentPath = GameData::GetDataDirectory();
+	ImGui::TextUnformatted("Current Path:");
+	ImGui::SameLine();
+	if (currentPath.empty())
+	{
+		ImGui::TextDisabled("(not set)");
+	}
+	else
+	{
+		ImGui::TextDisabled("%s", currentPath.string().c_str());
+	}
+	
+	ImGui::Spacing();
+	ImGui::Separator();
+	
+	// Custom path input
+	static char s_pathBuffer[512] = {};
+	static bool s_initialized = false;
+	
+	// Initialize buffer from settings on first render
+	if (!s_initialized)
+	{
+		if (settings.HasCustomSqpackPath())
+		{
+			strncpy_s(s_pathBuffer, settings.GetSqpackPath().string().c_str(), sizeof(s_pathBuffer) - 1);
+		}
+		s_initialized = true;
+	}
+	
+	ImGui::TextUnformatted("Custom sqpack Path:");
+	ImGui::SetNextItemWidth(-120.0f);  // Leave room for buttons
+	ImGui::InputText("##sqpackPath", s_pathBuffer, sizeof(s_pathBuffer));
+	
+	ImGui::SameLine();
+	if (ImGui::Button("Browse..."))
+	{
+		// Use Windows folder picker
+		COMDLG_FILTERSPEC filterSpec = {};
+		IFileDialog* pFileDialog = nullptr;
+		HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_ALL,
+			IID_IFileDialog, reinterpret_cast<void**>(&pFileDialog));
+		
+		if (SUCCEEDED(hr))
+		{
+			DWORD options;
+			pFileDialog->GetOptions(&options);
+			pFileDialog->SetOptions(options | FOS_PICKFOLDERS);
+			pFileDialog->SetTitle(L"Select FFXIV sqpack folder");
+			
+			hr = pFileDialog->Show(nullptr);
+			if (SUCCEEDED(hr))
+			{
+				IShellItem* pItem = nullptr;
+				hr = pFileDialog->GetResult(&pItem);
+				if (SUCCEEDED(hr))
+				{
+					LPWSTR pPath = nullptr;
+					hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pPath);
+					if (SUCCEEDED(hr) && pPath)
+					{
+						std::filesystem::path selectedPath(pPath);
+						strncpy_s(s_pathBuffer, selectedPath.string().c_str(), sizeof(s_pathBuffer) - 1);
+						CoTaskMemFree(pPath);
+					}
+					pItem->Release();
+				}
+			}
+			pFileDialog->Release();
+		}
+	}
+	
+	ImGui::Spacing();
+	
+	// Apply button
+	if (ImGui::Button("Apply & Reload"))
+	{
+		std::filesystem::path newPath(s_pathBuffer);
+		if (!newPath.empty() && std::filesystem::exists(newPath))
+		{
+			settings.SetSqpackPath(newPath);
+			
+			// Reload game data with new path
+			if (GameData::Initialize(newPath))
+			{
+				const auto& newStats = GameData::GetLoadStats();
+				LogInfo("[Settings] GameData reloaded: " + std::to_string(newStats.itemCount) + " items");
+			}
+			else
+			{
+				LogWarning("[Settings] Failed to load GameData from: " + newPath.string());
+			}
+		}
+		else if (newPath.empty())
+		{
+			LogWarning("[Settings] Path is empty");
+		}
+		else
+		{
+			LogWarning("[Settings] Path does not exist: " + newPath.string());
+		}
+	}
+	
+	ImGui::SameLine();
+	if (ImGui::Button("Clear Custom Path"))
+	{
+		s_pathBuffer[0] = '\0';
+		settings.SetSqpackPath(std::filesystem::path());
+		LogInfo("[Settings] Custom sqpack path cleared. Will use auto-detection on next load.");
+	}
+	
+	ImGui::Spacing();
+	ImGui::TextDisabled("Example: K:\\Program Files\\SquareEnix\\FINAL FANTASY XIV - A Realm Reborn\\game\\sqpack");
+	
+	// Test/Diagnostic section
+	if (stats.initialized)
+	{
+		ImGui::Spacing();
+		ImGui::Separator();
+		ImGui::TextUnformatted("Test Lookups");
+		ImGui::Separator();
+		
+		// Test with some well-known IDs
+		static int s_testItemId = 4;       // Fire Shard
+		static int s_testActionId = 7;     // Attack
+		static int s_testStatusId = 2;     // Weakness
+		static int s_testMountId = 1;      // Company Chocobo
+		
+		ImGui::SetNextItemWidth(100);
+		ImGui::InputInt("Item ID", &s_testItemId);
+		ImGui::SameLine();
+		if (const char* name = GameData::LookupItemName(static_cast<uint32_t>(s_testItemId)))
+			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "-> %s", name);
+		else
+			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "-> (not found)");
+		
+		ImGui::SetNextItemWidth(100);
+		ImGui::InputInt("Action ID", &s_testActionId);
+		ImGui::SameLine();
+		if (const char* name = GameData::LookupActionName(static_cast<uint32_t>(s_testActionId)))
+			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "-> %s", name);
+		else
+			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "-> (not found)");
+		
+		ImGui::SetNextItemWidth(100);
+		ImGui::InputInt("Status ID", &s_testStatusId);
+		ImGui::SameLine();
+		if (const char* name = GameData::LookupStatusName(static_cast<uint32_t>(s_testStatusId)))
+			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "-> %s", name);
+		else
+			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "-> (not found)");
+		
+		ImGui::SetNextItemWidth(100);
+		ImGui::InputInt("Mount ID", &s_testMountId);
+		ImGui::SameLine();
+		if (const char* name = GameData::LookupMountName(static_cast<uint32_t>(s_testMountId)))
+			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "-> %s", name);
+		else
+			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "-> (not found)");
+		
+		ImGui::Spacing();
+		ImGui::TextDisabled("Try known IDs: Item 4=Fire Shard, Action 7=Attack, Status 2=Weakness");
 	}
 }

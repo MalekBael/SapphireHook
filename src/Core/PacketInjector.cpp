@@ -28,6 +28,7 @@
 #include <mutex>
 #include <atomic>
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <cstdlib>
 #include <sstream>
@@ -97,15 +98,23 @@ namespace {
     std::atomic<SOCKET> g_chatSocket{ INVALID_SOCKET };
     std::atomic<SOCKET> g_lastZoneCandidate{ INVALID_SOCKET };
     std::atomic<SOCKET> g_lastChatCandidate{ INVALID_SOCKET };
+
+    // CHANGE NOTE (2025-12-15): Replace protocol “magic numbers” with named constants.
+    // This makes packet classification easier to audit and reduces the chance of subtle offset mistakes.
+    constexpr int kFfxivHeaderSize = 0x34;
+    constexpr size_t kOpcodeOffset = 0x30;
+    constexpr uint16_t kChatIpcOpcode = 0x0067;
+    constexpr std::array<uint8_t, 4> kFfxivMagic = { 0x52, 0x52, 0xA0, 0x41 };
 }
 
 static inline bool IsFfxivHeader(const uint8_t* b, int len) {
-    return len >= 0x34 && b[0] == 0x52 && b[1] == 0x52 && b[2] == 0xA0 && b[3] == 0x41;
+    if (!b) return false;
+    return len >= kFfxivHeaderSize && b[0] == kFfxivMagic[0] && b[1] == kFfxivMagic[1] && b[2] == kFfxivMagic[2] && b[3] == kFfxivMagic[3];
 }
 static inline uint16_t ReadOpcodeLE(const uint8_t* b) {
-    return static_cast<uint16_t>(b[0x30] | (b[1 + 0x30] << 8));
+    return static_cast<uint16_t>(b[kOpcodeOffset] | (b[kOpcodeOffset + 1] << 8));
 }
-static inline bool IsChatOpcode(uint16_t op) { return op == 0x0067; }
+static inline bool IsChatOpcode(uint16_t op) { return op == kChatIpcOpcode; }
 
 void ConfigurePacketLogger() {
     // Leave existing logger configuration unchanged (not gated; global setup).
@@ -119,7 +128,7 @@ void ConfigurePacketLogger() {
 
 static void ObserveTrafficAndMaybeLearn(SOCKET s, const uint8_t* buf, int len)
 {
-    if (!buf || len < 0x34 || !IsFfxivHeader(buf, len)) return;
+	if (!buf || len < kFfxivHeaderSize || !IsFfxivHeader(buf, len)) return;
 
     const uint16_t op = ReadOpcodeLE(buf);
     if (IsChatOpcode(op)) {
@@ -142,7 +151,7 @@ static void ObserveTrafficAndMaybeLearn(SOCKET s, const uint8_t* buf, int len)
         if (g_zoneSocket.load(std::memory_order_relaxed) == INVALID_SOCKET) {
             g_zoneSocket.store(s, std::memory_order_relaxed);
             if (PacketLogSummary()) {
-                LogInfo("[PacketInjector] Learned zone socket (traffic): 0x" + std::to_string(static_cast<uintptr_t>(s)));
+                LogInfo("[PacketInjector] Learned zone socket (traffic): " + Logger::HexFormat(static_cast<uintptr_t>(s)));
             }
         }
     }
@@ -196,7 +205,7 @@ static int WSAAPI Hook_closesocket(SOCKET s)
 
 static SOCKET PickSocketForPacket(const uint8_t* buf, size_t len)
 {
-    if (buf && len >= 0x34 && IsFfxivHeader(buf, (int)len) && IsChatOpcode(ReadOpcodeLE(buf))) {
+	if (buf && len >= static_cast<size_t>(kFfxivHeaderSize) && IsFfxivHeader(buf, static_cast<int>(len)) && IsChatOpcode(ReadOpcodeLE(buf))) {
         SOCKET s = g_chatSocket.load();
         return (s != INVALID_SOCKET) ? s : g_lastChatCandidate.load();
     }
@@ -218,7 +227,7 @@ static bool SendHardenedInternal(const void* data, size_t bytes)
             const int wsa = WSAGetLastError();
             CountWsa(wsa);
             if (PacketLogSummary()) {
-                LogError("[PacketInjector] Send failed on 0x" + std::to_string(static_cast<uintptr_t>(s)) +
+                LogError("[PacketInjector] Send failed on " + Logger::HexFormat(static_cast<uintptr_t>(s)) +
                     " (WSA=" + std::to_string(wsa) + ")");
             }
             if (wsa == WSAENOTSOCK) {
@@ -240,7 +249,7 @@ static bool SendHardenedInternal(const void* data, size_t bytes)
     SOCKET fallback = isChat ? g_lastChatCandidate.load() : g_lastZoneCandidate.load();
     if (fallback != primary && trySend(fallback)) {
         if (PacketLogVerbose()) {
-            LogInfo("[PacketInjector] Retried send via fallback socket 0x" + std::to_string(static_cast<uintptr_t>(fallback)));
+            LogInfo("[PacketInjector] Retried send via fallback socket " + Logger::HexFormat(static_cast<uintptr_t>(fallback)));
         }
         return true;
     }
@@ -514,7 +523,7 @@ static int __stdcall WSASend_Detour(SOCKET s,
             else if (connType == 2) {
                 if (PacketInjector::s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET)) {
                     PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(s);
-                    if (PacketLogSummary()) LogInfo("[PacketInjector] Learned chat socket: 0x" + std::to_string(static_cast<uintptr_t>(s)));
+                    if (PacketLogSummary()) LogInfo("[PacketInjector] Learned chat socket: " + Logger::HexFormat(static_cast<uintptr_t>(s)));
                 }
                 g_lastChatSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
             }
@@ -593,7 +602,7 @@ static int __stdcall send_Detour(SOCKET s, const char* buf, int len, int flags)
             else if (connType == 2) {
                 if (PacketInjector::s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET)) {
                     PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(s);
-                    if (PacketLogSummary()) LogInfo("[PacketInjector] Learned chat socket: 0x" + std::to_string(static_cast<uintptr_t>(s)));
+                    if (PacketLogSummary()) LogInfo("[PacketInjector] Learned chat socket: " + Logger::HexFormat(static_cast<uintptr_t>(s)));
                 }
                 g_lastChatSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
             }

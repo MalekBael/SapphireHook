@@ -23,6 +23,7 @@ namespace SapphireHook {
     private:
         bool m_windowOpen = false;
 
+        void DrawGameDataSection();
         void DrawPacketLoggingSection();
     };
 

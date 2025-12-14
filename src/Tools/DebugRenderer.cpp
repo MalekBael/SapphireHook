@@ -547,6 +547,57 @@ namespace SapphireHook::DebugVisuals {
         m_lineVertices.push_back({ { end.x, end.y, end.z }, col });
     }
 
+    // Draw a thick line using quads (two triangles) - worldThickness is in world units
+    // Line is expanded horizontally (in XZ plane) for visibility from above
+    void DebugRenderer::DrawThickLine(const Vec3& start, const Vec3& end, const Color& color, float worldThickness) {
+        if (!m_inFrame) return;
+
+        DirectX::XMFLOAT4 col(color.r, color.g, color.b, color.a);
+        
+        // Calculate line direction
+        DirectX::XMVECTOR startVec = DirectX::XMVectorSet(start.x, start.y, start.z, 1.0f);
+        DirectX::XMVECTOR endVec = DirectX::XMVectorSet(end.x, end.y, end.z, 1.0f);
+        DirectX::XMVECTOR lineDir = DirectX::XMVectorSubtract(endVec, startVec);
+        lineDir = DirectX::XMVector3Normalize(lineDir);
+        
+        // Use UP vector to get horizontal perpendicular (line dir × UP = horizontal perpendicular)
+        DirectX::XMVECTOR upVec = DirectX::XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+        DirectX::XMVECTOR perpendicular = DirectX::XMVector3Cross(lineDir, upVec);
+        perpendicular = DirectX::XMVector3Normalize(perpendicular);
+        
+        // If perpendicular is zero (vertical line), fall back to X axis
+        if (DirectX::XMVector3LengthSq(perpendicular).m128_f32[0] < 0.0001f) {
+            perpendicular = DirectX::XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f);
+        }
+        
+        // Scale by half thickness
+        float halfThick = worldThickness * 0.5f;
+        DirectX::XMVECTOR offset = DirectX::XMVectorScale(perpendicular, halfThick);
+        
+        // Calculate 4 corners of the quad
+        DirectX::XMVECTOR v0 = DirectX::XMVectorSubtract(startVec, offset);
+        DirectX::XMVECTOR v1 = DirectX::XMVectorAdd(startVec, offset);
+        DirectX::XMVECTOR v2 = DirectX::XMVectorAdd(endVec, offset);
+        DirectX::XMVECTOR v3 = DirectX::XMVectorSubtract(endVec, offset);
+        
+        DirectX::XMFLOAT3 p0, p1, p2, p3;
+        DirectX::XMStoreFloat3(&p0, v0);
+        DirectX::XMStoreFloat3(&p1, v1);
+        DirectX::XMStoreFloat3(&p2, v2);
+        DirectX::XMStoreFloat3(&p3, v3);
+        
+        // Two triangles for the quad
+        // Triangle 1: v0, v1, v2
+        m_triangleVertices.push_back({ p0, col });
+        m_triangleVertices.push_back({ p1, col });
+        m_triangleVertices.push_back({ p2, col });
+        
+        // Triangle 2: v0, v2, v3
+        m_triangleVertices.push_back({ p0, col });
+        m_triangleVertices.push_back({ p2, col });
+        m_triangleVertices.push_back({ p3, col });
+    }
+
     void DebugRenderer::DrawSphere(const Vec3& center, float radius, const Color& color, 
                                     bool filled, int segments) {
         if (!m_inFrame) return;

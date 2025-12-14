@@ -1,4 +1,105 @@
 {
+  "classes": {
+    "Client::UI2::AddonCharaMakeFeatureColorL": {
+      "ctor": "40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 4C 8D 1D ? ? ? ? 4C 89 1B"
+    },
+    "Client::System::Configuration::ConfigFileOperation": {
+      "ctor": "48 8D 05 ? ? ? ? 48 89 01 C3 CC CC CC CC CC CC CC CC CC CC CC CC CC"
+    },
+    "Client::System::Resource::Handle::MaterialResourceHandle": {
+      "ctor": "40 53 48 83 EC 30 48 8B 44 24 68 48 8B D9 48 89 44 24 ? 48 8B 44 24 60"
+    },
+    "Client::System::Resource::Handle::ApricotResourceHandle": {
+      "ctor": "48 89 5C 24 ? 57 48 83 EC 30 48 8B 44 24 68 48 8B D9 48 89 44 24 ? 48"
+    },
+    "Client::UI::UIInputData": {
+      "method_0": "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC 20 48 8B FA BA F5 01 00 00 48"
+    },
+    "Client::UI2::Agent::AgentContext": {
+      "ctor": "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 54 41 55 48 83 EC 20"
+    },
+    "Client::UI2::AddonAreaText": {
+      "ctor": "40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 0F B6 8B 91 01 00 00 80 A3 93"
+    },
+    "Client::UI2::AddonTextChain": {
+      "ctor": "40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 0F B6 8B 91 01 00 00 80 A3 93"
+    },
+    "Client::UI2::AddonTitleLogo": {
+      "ctor": "40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 80 8B 91 01 00 00 84 0F B6 83"
+    },
+    "Client::UI2::AddonCharaMakeFeature": {
+      "ctor": "48 89 5C 24 ? 57 48 83 EC 20 48 8B D9 E8 ? ? ? ? 33 FF 48 8D 05 ?"
+    },
+    "Client::UI2::AddonCharaMakeProgressSubTribe": {
+      "ctor": "40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 45 33 DB C7 83 38 02 00 00 05"
+    },
+    "Client::UI2::AddonCharaMakeFeatureColorFacePaint": {
+      "ctor": "40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 80 8B 92 01 00 00 40 45 33 DB"
+    },
+    "Client::UI2::AddonCharaMakeFeatureRadioButton4": {
+      "ctor": "40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 80 8B 92 01 00 00 40 45 33 DB"
+    },
+    "Client::UI2::AddonConfigCharacterHotBar": {
+      "ctor": "48 89 5C 24 ? 57 48 83 EC 20 48 8B D9 E8 ? ? ? ? 33 FF 48 8D 05 ?"
+    },
+    "Client::UI2::AddonConfigCharacterNamePlate": {
+      "ctor": "40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 45 33 DB 4C 89 9B 28 02 00 00"
+    },
+    "Client::UI2::AddonConfigCharacterOperation": {
+      "ctor": "48 89 5C 24 ? 57 48 83 EC 20 48 8B D9 E8 ? ? ? ? 33 FF 48 8D 05 ?"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtk3": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtk4": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtk5": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtk6": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtk12": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListIconFacePaint": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListIconFaceType": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListIconHair": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListIconTail": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListIconFeature": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListIconTatoo": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListColorL": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListColorFacePaint": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListColorLip": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListColorHair": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "Client::UI2::CharaMakeFeature::OptionAtkListColorEye": {
+      "method_0": "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+    },
+    "hkDefaultError": {
+      "ctor": "B8 01 00 00 00 66 89 41 0A 48 8D 05 ? ? ? ? 48 89 01 33 C0 C7 41 1C"
+    }
+  },
   "functions": {
     "Client::ExdData::getMap::rowCount": {
       "sheet_name": "Map",

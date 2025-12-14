@@ -613,7 +613,7 @@ bool PseudoDecompilerBackend::Decompile(uintptr_t start, size_t codeSize,
 	std::vector<DisassembledInstr> instructions;
 	if (!DisassembleFunction(start, (std::min)(codeSize, size_t(0x4000)), instructions)) {
 		SapphireHook::LogError("[PseudoGen] Disassembly failed");
-		pseudoC = "// Disassembly failed at 0x" + std::to_string(start);
+		pseudoC = "// Disassembly failed at " + SapphireHook::Logger::HexFormat(start);
 		return false;
 	}
 	auto tDisEnd = std::chrono::steady_clock::now();

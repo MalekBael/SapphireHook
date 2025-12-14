@@ -22,7 +22,7 @@ namespace PacketDecoding {
 
         // Full header information
         json header;
-        header["magic"] = FormatHex64(packet.header.magic0) + " " + FormatHex64(packet.header.magic1);
+        header["magic"] = FormatHex(packet.header.magic0) + " " + FormatHex(packet.header.magic1);
         header["size"] = packet.header.size;
         header["timestamp"] = packet.header.timestamp;
         header["connectionType"] = packet.header.connType;
@@ -36,8 +36,8 @@ namespace PacketDecoding {
         }();
         header["segmentCount"] = packet.header.segCount;
         header["isCompressed"] = packet.header.isCompressed != 0;
-        header["unknown20"] = FormatHex8(packet.header.unknown20);
-        header["unknown24"] = FormatHex32(packet.header.unknown24);
+        header["unknown20"] = FormatHex(packet.header.unknown20);
+        header["unknown24"] = FormatHex(packet.header.unknown24);
         root["header"] = header;
 
         // Process segments with full decoding
@@ -54,18 +54,18 @@ namespace PacketDecoding {
             segJson["size"] = seg.header.size;
             segJson["type"] = seg.header.type;
             segJson["typeName"] = GetSegmentTypeName(seg.header.type);
-            segJson["sourceActor"] = FormatHex32(seg.header.srcId) + " (" + std::to_string(seg.header.srcId) + ")";
-            segJson["targetActor"] = FormatHex32(seg.header.tgtId) + " (" + std::to_string(seg.header.tgtId) + ")";
-            segJson["padding"] = FormatHex16(seg.header.pad);
+            segJson["sourceActor"] = FormatHex(seg.header.srcId) + " (" + std::to_string(seg.header.srcId) + ")";
+            segJson["targetActor"] = FormatHex(seg.header.tgtId) + " (" + std::to_string(seg.header.tgtId) + ")";
+            segJson["padding"] = FormatHex(seg.header.pad);
 
             if (seg.header.type == 3) { // IPC segment
                 json ipc;
-                ipc["opcode"] = FormatHex16(seg.opcode);
+                ipc["opcode"] = FormatHex(seg.opcode);
                 ipc["opcodeName"] = LookupOpcodeName(seg.opcode, packet.outgoing, packet.header.connType);
                 ipc["serverId"] = seg.serverId;
                 ipc["timestamp"] = seg.timestamp;
-                ipc["reserved"] = FormatHex16(seg.ipcReserved);
-                ipc["padding"] = FormatHex16(seg.ipcPad);
+                ipc["reserved"] = FormatHex(seg.ipcReserved);
+                ipc["padding"] = FormatHex(seg.ipcPad);
 
                 json decodedFields = json::object();
                 bool hasDecoded = false;
@@ -191,29 +191,6 @@ namespace PacketDecoding {
         }
     }
 
-    std::string PacketDecoder::FormatHex8(uint8_t value) const {
-        std::ostringstream os;
-        os << "0x" << std::hex << std::uppercase << std::setw(2) << std::setfill('0')
-            << static_cast<int>(value);
-        return os.str();
-    }
-
-    std::string PacketDecoder::FormatHex16(uint16_t value) const {
-        std::ostringstream os;
-        os << "0x" << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << value;
-        return os.str();
-    }
-
-    std::string PacketDecoder::FormatHex32(uint32_t value) const {
-        std::ostringstream os;
-        os << "0x" << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << value;
-        return os.str();
-    }
-
-    std::string PacketDecoder::FormatHex64(uint64_t value) const {
-        std::ostringstream os;
-        os << "0x" << std::hex << std::uppercase << std::setw(16) << std::setfill('0') << value;
-        return os.str();
-    }
+    // FormatHex is now a template in the header
 
 } // namespace PacketDecoding

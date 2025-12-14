@@ -142,3 +142,221 @@ Client::Graphics::Render::Camera:
 # GameCamera + 0x1A4 → Yaw (VERIFIED)
 # GameCamera + 0x114 → FovY (DEGREES)
 # ======================================================================
+
+# ======================================================================
+# DISCOVERED VTABLES (from ClassInformer cross-version analysis)
+# ======================================================================
+# These vtables were found by matching strings from 2.0 (with RTTI)
+# to 3.35 (stripped). Names are from the 2.0 RTTI data.
+# ======================================================================
+
+# --- Havok Physics ---
+hkDefaultError:
+  vtbls:
+    - ea: 0x1413E1D58
+    - ea: 0x141556D18
+    - ea: 0x141556D78
+  func_sigs:
+    ctor: "B8 01 00 00 00 66 89 41 0A 48 8D 05 ?? ?? ?? ?? 48 89 01 33 C0 C7 41 1C"
+
+# --- Client::System ---
+Client::System::Configuration::ConfigFileOperation:
+  vtbls:
+    - ea: 0x1411F3C08
+  func_sigs:
+    ctor: "48 8D 05 ?? ?? ?? ?? 48 89 01 C3 CC CC CC CC CC CC CC CC CC CC CC CC CC"
+
+Client::System::Resource::Handle::MaterialResourceHandle:
+  vtbls:
+    - ea: 0x1411FE8D0
+  func_sigs:
+    ctor: "40 53 48 83 EC 30 48 8B 44 24 68 48 8B D9 48 89 44 24 ?? 48 8B 44 24 60"
+
+Client::System::Resource::Handle::ApricotResourceHandle:
+  vtbls:
+    - ea: 0x1412002B0
+  func_sigs:
+    ctor: "48 89 5C 24 ?? 57 48 83 EC 30 48 8B 44 24 68 48 8B D9 48 89 44 24 ?? 48"
+
+# --- Client::UI ---
+Client::UI::UIInputData:
+  vtbls:
+    - ea: 0x141205E00
+  func_sigs:
+    method_0: "48 89 5C 24 ?? 48 89 74 24 ?? 57 48 83 EC 20 48 8B FA BA F5 01 00 00 48"
+
+# --- Client::UI2::Agent ---
+Client::UI2::Agent::AgentContext:
+  vtbls:
+    - ea: 0x141263E60
+  func_sigs:
+    ctor: "48 89 5C 24 ?? 48 89 6C 24 ?? 48 89 74 24 ?? 57 41 54 41 55 48 83 EC 20"
+
+# --- Client::UI2::Addon (UI Windows) ---
+Client::UI2::AddonAreaText:
+  vtbls:
+    - ea: 0x14127AEA0
+  func_sigs:
+    ctor: "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 0F B6 8B 91 01 00 00 80 A3 93"
+
+Client::UI2::AddonTextChain:
+  vtbls:
+    - ea: 0x14127B300
+  func_sigs:
+    ctor: "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 0F B6 8B 91 01 00 00 80 A3 93"
+
+Client::UI2::AddonTitleLogo:
+  vtbls:
+    - ea: 0x14129EB00
+  func_sigs:
+    ctor: "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 80 8B 91 01 00 00 84 0F B6 83"
+
+Client::UI2::AddonCharaMakeFeature:
+  vtbls:
+    - ea: 0x1412A2160
+  func_sigs:
+    ctor: "48 89 5C 24 ?? 57 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 33 FF 48 8D 05 ??"
+
+Client::UI2::AddonCharaMakeProgressSubTribe:
+  vtbls:
+    - ea: 0x1412A2B10
+  func_sigs:
+    ctor: "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 45 33 DB C7 83 38 02 00 00 05"
+
+Client::UI2::AddonCharaMakeFeatureColorFacePaint:
+  vtbls:
+    - ea: 0x1412A39C0
+  func_sigs:
+    ctor: "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 80 8B 92 01 00 00 40 45 33 DB"
+
+Client::UI2::AddonCharaMakeFeatureRadioButton4:
+  vtbls:
+    - ea: 0x1412A4810
+  func_sigs:
+    ctor: "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 80 8B 92 01 00 00 40 45 33 DB"
+
+Client::UI2::AddonCharaMakeFeatureColorL:
+  vtbls:
+    - ea: 0x1411EB070
+  func_sigs:
+    ctor: "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 4C 8D 1D ?? ?? ?? ?? 4C 89 1B"
+
+Client::UI2::AddonConfigCharacterHotBar:
+  vtbls:
+    - ea: 0x1412AA8B0
+  func_sigs:
+    ctor: "48 89 5C 24 ?? 57 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 33 FF 48 8D 05 ??"
+
+Client::UI2::AddonConfigCharacterNamePlate:
+  vtbls:
+    - ea: 0x1412AB450
+  func_sigs:
+    ctor: "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 45 33 DB 4C 89 9B 28 02 00 00"
+
+Client::UI2::AddonConfigCharacterOperation:
+  vtbls:
+    - ea: 0x1412ABC10
+  func_sigs:
+    ctor: "48 89 5C 24 ?? 57 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 33 FF 48 8D 05 ??"
+
+Client::UI2::AddonConfigCharacterHud:
+  vtbls:
+    - ea: 0x141524CF8
+    - ea: 0x141524D08
+
+# --- Client::UI2::CharaMakeFeature (Character Creation Options) ---
+Client::UI2::CharaMakeFeature::OptionAtk3:
+  vtbls:
+    - ea: 0x1412ACE40
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtk4:
+  vtbls:
+    - ea: 0x1412ACEF0
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtk5:
+  vtbls:
+    - ea: 0x1412ACFA0
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtk6:
+  vtbls:
+    - ea: 0x1412AD050
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtk12:
+  vtbls:
+    - ea: 0x1412AD100
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListIconFacePaint:
+  vtbls:
+    - ea: 0x1412AD1B0
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListIconFaceType:
+  vtbls:
+    - ea: 0x1412AD270
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListIconHair:
+  vtbls:
+    - ea: 0x1412AD320
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListIconTail:
+  vtbls:
+    - ea: 0x1412AD3D0
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListIconFeature:
+  vtbls:
+    - ea: 0x1412AD480
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListIconTatoo:
+  vtbls:
+    - ea: 0x1412AD530
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListColorL:
+  vtbls:
+    - ea: 0x1412AD5E0
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListColorFacePaint:
+  vtbls:
+    - ea: 0x1412AD690
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListColorLip:
+  vtbls:
+    - ea: 0x1412AD750
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListColorHair:
+  vtbls:
+    - ea: 0x1412AD800
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"
+
+Client::UI2::CharaMakeFeature::OptionAtkListColorEye:
+  vtbls:
+    - ea: 0x1412AD8B0
+  func_sigs:
+    method_0: "48 8B C4 4C 89 40 18 48 89 48 08 41 54 41 56 48 83 EC 78 48 83 B9 28 02"

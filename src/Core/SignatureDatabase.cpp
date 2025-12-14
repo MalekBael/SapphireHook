@@ -627,25 +627,25 @@ bool SignatureDatabase::LoadSignatureFile(const std::string& filepath)
 
 void SignatureDatabase::ResolveAllSignatures()
 {
-    LogInfo("Starting SAFE signature resolution...");
-    LogInfo("Starting safe signature resolution to prevent player disconnection");
+    LogInfo("Starting safe signature resolution...");
 
     size_t moduleSize = 0;
     uintptr_t moduleBase = GetModuleBaseAddress(L"ffxiv_dx11.exe", moduleSize);
 
     if (moduleBase == 0)
     {
-        LogError("Failed to get module base address - ABORTING");
-        LogError("Module base address not found - aborting signature resolution to prevent crash");
+        LogError("Failed to get module base address - aborting signature resolution");
         return;
     }
 
-    LogInfo("Module base: 0x" + std::to_string(moduleBase) + ", size: 0x" + std::to_string(moduleSize));
-    LogInfo("Target module: ffxiv_dx11.exe at 0x" + std::to_string(moduleBase) + " (size: 0x" + std::to_string(moduleSize) + ")");
+    char hexBuf[64];
+    std::snprintf(hexBuf, sizeof(hexBuf), "Module base: 0x%llX, size: 0x%zX", 
+        static_cast<unsigned long long>(moduleBase), moduleSize);
+    LogInfo(hexBuf);
 
     if (moduleSize > 0x50000000)
     {
-        LogError("Module size suspiciously large (0x" + std::to_string(moduleSize) + ") - aborting to prevent detection");
+        LogError("Module size suspiciously large (" + Logger::HexFormat(moduleSize) + ") - aborting");
         return;
     }
 
@@ -670,11 +670,11 @@ void SignatureDatabase::ResolveAllSignatures()
                     info.resolvedAddress = address;
                     info.isResolved = true;
                     resolved++;
-                    LogInfo("Resolved global " + name + " -> 0x" + std::to_string(address));
+                    LogInfo("Resolved global " + name + " -> " + Logger::HexFormat(address));
                 }
                 else
                 {
-                    LogWarning("Signature " + name + " resolved to invalid address 0x" + std::to_string(address));
+                    LogWarning("Signature " + name + " resolved to invalid address " + Logger::HexFormat(address));
                     failureCount++;
                 }
             }
@@ -714,7 +714,7 @@ void SignatureDatabase::ResolveAllSignatures()
                         info.resolvedAddress = address;
                         info.isResolved = true;
                         resolved++;
-                        LogInfo("Resolved " + className + "::" + funcName + " -> 0x" + std::to_string(address));
+                        LogInfo("Resolved " + className + "::" + funcName + " -> " + Logger::HexFormat(address));
                     }
                 }
                 catch (...)
@@ -735,14 +735,13 @@ void SignatureDatabase::ResolveAllSignatures()
         LogWarning("Skipping class function scanning due to global scan issues");
     }
 
-    LogInfo("SAFE resolution complete: " + std::to_string(resolved) + "/" + std::to_string(total) + " signatures resolved (" +
-        std::to_string(total > 0 ? (float)resolved / total * 100.0f : 0.0f) + "%)");
-
-    LogInfo("Safe signature resolution completed. Resolved " + std::to_string(resolved) + "/" + std::to_string(total) + " signatures");
+    float pct = total > 0 ? (static_cast<float>(resolved) / total * 100.0f) : 0.0f;
+    LogInfo("Signature resolution complete: " + std::to_string(resolved) + "/" + std::to_string(total) + 
+        " (" + std::to_string(static_cast<int>(pct)) + "%)");
 
     if (resolved < total * 0.1f)
     {
-        LogWarning("Low signature resolution rate - this may indicate an outdated database or anti-tamper interference");
+        LogWarning("Low signature resolution rate - may indicate outdated database or anti-tamper interference");
     }
 }
 
@@ -766,7 +765,6 @@ void SignatureDatabase::ResolveAllSignaturesAsync(ProgressCallback callback)
     }
     m_totalCount = totalSigs;
 
-    LogInfo("Starting ASYNC signature resolution...");
     LogInfo("Starting async signature resolution with " + std::to_string(totalSigs) + " signatures");
 
     size_t moduleSize = 0;
@@ -774,8 +772,7 @@ void SignatureDatabase::ResolveAllSignaturesAsync(ProgressCallback callback)
 
     if (moduleBase == 0)
     {
-        LogError("Failed to get module base address - ABORTING ASYNC SCAN");
-        LogError("Module base address not found - aborting async signature resolution");
+        LogError("Failed to get module base address - aborting async scan");
         m_scanInProgress = false;
         return;
     }
@@ -811,8 +808,10 @@ void SignatureDatabase::StopAsyncScanning()
 
 void SignatureDatabase::AsyncScanWorker(uintptr_t moduleBase, size_t moduleSize, ProgressCallback callback)
 {
-    LogInfo("Async signature worker started");
-    LogInfo("Async worker: Module base: 0x" + std::to_string(moduleBase) + ", size: 0x" + std::to_string(moduleSize));
+    char hexBuf[64];
+    std::snprintf(hexBuf, sizeof(hexBuf), "Async worker started - Module: 0x%llX, size: 0x%zX",
+        static_cast<unsigned long long>(moduleBase), moduleSize);
+    LogInfo(hexBuf);
 
     if (moduleSize > 0x50000000)
     {
@@ -849,7 +848,7 @@ void SignatureDatabase::AsyncScanWorker(uintptr_t moduleBase, size_t moduleSize,
                     info.resolvedAddress = address;
                     info.isResolved = true;
                     resolved++;
-                    LogInfo("[ASYNC] Resolved global " + name + " -> 0x" + std::to_string(address));
+                    LogInfo("[ASYNC] Resolved global " + name + " -> " + Logger::HexFormat(address));
                 }
                 else if (address != 0)
                 {
@@ -907,7 +906,7 @@ void SignatureDatabase::AsyncScanWorker(uintptr_t moduleBase, size_t moduleSize,
                             info.resolvedAddress = address;
                             info.isResolved = true;
                             resolved++;
-                            LogInfo("[ASYNC] Resolved " + className + "::" + funcName + " -> 0x" + std::to_string(address));
+                            LogInfo("[ASYNC] Resolved " + className + "::" + funcName + " -> " + Logger::HexFormat(address));
                         }
                     }
                     catch (...)

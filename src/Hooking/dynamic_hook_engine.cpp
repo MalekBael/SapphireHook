@@ -33,9 +33,9 @@ namespace SapphireHook {
             LogError("Detour_GetById_Slot" #N ": original is null"); \
             return 0; \
         } \
-        LogInfo(std::string("[DynHook] Enter ") + slot.name + " this=0x" + std::to_string((uint64_t)rcx) + " id=" + std::to_string(id)); \
+        LogInfo(std::string("[DynHook] Enter ") + slot.name + " this=" + Logger::HexFormat((uint64_t)rcx) + " id=" + std::to_string(id)); \
         const auto ret = slot.original(rcx, id); \
-        LogInfo(std::string("[DynHook] Leave ") + slot.name + " -> 0x" + std::to_string(ret)); \
+        LogInfo(std::string("[DynHook] Leave ") + slot.name + " -> " + Logger::HexFormat(ret)); \
         return ret; \
     }
 
@@ -80,7 +80,7 @@ namespace SapphireHook {
             LogError("Detour_RowCount_Slot" #N ": original is null"); \
             return 0; \
         } \
-        LogInfo(std::string("[DynHook] Enter ") + slot.name + " this=0x" + std::to_string((uint64_t)rcx)); \
+        LogInfo(std::string("[DynHook] Enter ") + slot.name + " this=" + Logger::HexFormat((uint64_t)rcx)); \
         const auto ret = slot.original(rcx); \
         LogInfo(std::string("[DynHook] Leave ") + slot.name + " -> " + std::to_string(ret)); \
         return ret; \
@@ -157,7 +157,7 @@ namespace SapphireHook {
                     slot.name = spec.name;
                     slot.address = spec.address;
                     HookManager::RegisterHook(spec.name, spec.address, reinterpret_cast<void*>(slot.original), "ffxiv_dx11.exe");
-                    LogInfo("DynamicHook installed [" + spec.name + "] at 0x" + std::to_string(spec.address) + " (Exd_GetById, slot " + std::to_string(i) + ")");
+                    LogInfo("DynamicHook installed [" + spec.name + "] at " + Logger::HexFormat(spec.address) + " (Exd_GetById, slot " + std::to_string(i) + ")");
                     return true;
                 }
             }
@@ -181,7 +181,7 @@ namespace SapphireHook {
                     slot.name = spec.name;
                     slot.address = spec.address;
                     HookManager::RegisterHook(spec.name, spec.address, reinterpret_cast<void*>(slot.original), "ffxiv_dx11.exe");
-                    LogInfo("DynamicHook installed [" + spec.name + "] at 0x" + std::to_string(spec.address) + " (Exd_RowCount, slot " + std::to_string(i) + ")");
+                    LogInfo("DynamicHook installed [" + spec.name + "] at " + Logger::HexFormat(spec.address) + " (Exd_RowCount, slot " + std::to_string(i) + ")");
                     return true;
                 }
             }

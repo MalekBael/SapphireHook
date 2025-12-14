@@ -455,7 +455,7 @@ namespace SapphireHook {
 			m_invisToggle ? 1u : 0u, 0, 0, 0, target);
 		LogInfo("[CharacterEdit] Sent: Invisibility toggle => " +
 			std::string(m_invisToggle ? "VISIBLE" : "INVISIBLE") +
-			" (target=0x" + std::to_string(static_cast<unsigned long long>(target)) + ")");
+			" (target=" + Logger::HexFormat(target) + ")");
 	}
 
 	void CharacterEditModule::SendGMCommand_Inv() {
@@ -471,7 +471,7 @@ namespace SapphireHook {
 			m_wireframeToggle ? 1u : 0u, 0, 0, 0, target);
 		LogInfo("[CharacterEdit] Sent: Wireframe => " +
 			std::string(m_wireframeToggle ? "ON" : "OFF") +
-			" (target=0x" + std::to_string(static_cast<unsigned long long>(target)) + ")");
+			" (target=" + Logger::HexFormat(target) + ")");
 	}
 
 	void CharacterEditModule::SendGMCommand_Orchestrion() {
@@ -482,7 +482,7 @@ namespace SapphireHook {
 			1u, static_cast<uint32_t>(m_orchestrionSongId), 0, 0, target);
 		LogInfo("[CharacterEdit] Sent: Orchestrion unlock " +
 			std::to_string(m_orchestrionSongId) +
-			" (target=0x" + std::to_string(static_cast<unsigned long long>(target)) + ")");
+			" (target=" + Logger::HexFormat(target) + ")");
 	}
 
 	// Debug senders (unchanged)

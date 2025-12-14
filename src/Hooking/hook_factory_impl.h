@@ -24,7 +24,7 @@ public:
                                               TDelegate detour,
                                               const std::string& assemblyName = {})
     {
-        LogInfo("Creating function hook: " + name + " at 0x" + std::to_string(address));
+        LogInfo("Creating function hook: " + name + " at " + Logger::HexFormat(address));
 
         if (address == 0) {
             LogError("HookFactory: address is null for " + name);

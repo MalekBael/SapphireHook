@@ -235,7 +235,9 @@ void Logger::SetAsyncLogging(bool enable) {
 
 
 std::string Logger::HexFormat(uintptr_t v) {
-    std::stringstream ss; ss << "0x" << std::hex << std::uppercase << v; return ss.str();
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "0x%llX", static_cast<unsigned long long>(v));
+    return std::string(buf);
 }
 
 

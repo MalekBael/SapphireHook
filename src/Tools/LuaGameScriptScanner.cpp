@@ -318,7 +318,7 @@ namespace SapphireHook {
 				summary.hits.emplace_back(std::move(hit));
 
 				if (luaFiles <= 3) {
-					LogInfo("*** LUA: " + name + " @0x" + std::to_string(e.GetFileOffset()) +
+					LogInfo("*** LUA: " + name + " @" + Logger::HexFormat(e.GetFileOffset()) +
 						" size=" + std::to_string(result.data.size()));
 				}
 			}

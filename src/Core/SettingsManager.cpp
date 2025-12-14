@@ -105,6 +105,17 @@ void SettingsManager::Load()
             }
         }
         
+        // Custom sqpack path
+        if (settings.contains("sqpackPath") && settings["sqpackPath"].is_string())
+        {
+            std::string pathStr = settings["sqpackPath"].get<std::string>();
+            if (!pathStr.empty())
+            {
+                m_sqpackPath = std::filesystem::path(pathStr);
+                LogInfo("[SettingsManager] Using custom sqpack path: " + pathStr);
+            }
+        }
+        
         LogInfo("[SettingsManager] Loaded from " + path.string());
     }
     catch (const std::exception& e)
@@ -139,6 +150,9 @@ void SettingsManager::Save()
         {
             settings["weatherFavorites"].push_back(id);
         }
+        
+        // Custom sqpack path
+        settings["sqpackPath"] = m_sqpackPath.string();
         
         std::filesystem::path path = GetSettingsFilePath();
         std::ofstream file(path);
@@ -214,4 +228,10 @@ void SettingsManager::RemoveWeatherFavorite(uint32_t id)
 void SettingsManager::RegisterLoadCallback(SettingsLoadedCallback callback)
 {
     m_loadCallbacks.push_back(callback);
+}
+
+void SettingsManager::SetSqpackPath(const std::filesystem::path& path)
+{
+    m_sqpackPath = path;
+    Save();
 }

@@ -304,7 +304,7 @@ namespace SapphireHook {
 
 		if (ok) {
 			LogInfo(std::string("[Weather] Applied: '") + kWeatherMap[m_weatherIdx].name +
-				"' (id=" + std::to_string(weatherId) + "), target=0x" + std::to_string(self));
+				"' (id=" + std::to_string(weatherId) + "), target=" + Logger::HexFormat(self));
 		}
 		else {
 			LogInfo("[Weather] Failed to send GM weather command");

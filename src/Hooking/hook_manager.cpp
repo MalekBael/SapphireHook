@@ -45,17 +45,6 @@ namespace {
             prot == PAGE_EXECUTE_READWRITE ||
             prot == PAGE_EXECUTE_WRITECOPY;
     }
-
-    inline bool GetMainModuleRange(uintptr_t& base, size_t& size) noexcept {
-        HMODULE hMod = GetModuleHandleW(nullptr);
-        if (!hMod) return false;
-        MODULEINFO mi{};
-        if (!GetModuleInformation(GetCurrentProcess(), hMod, &mi, sizeof(mi)))
-            return false;
-        base = reinterpret_cast<uintptr_t>(mi.lpBaseOfDll);
-        size = static_cast<size_t>(mi.SizeOfImage);
-        return true;
-    }
 }   
 
 namespace SapphireHook {
@@ -85,7 +74,6 @@ namespace SapphireHook {
     bool ValidateIPCHandler(uintptr_t address);
     bool FindIPCByOpcodeReferences(uintptr_t moduleBase, size_t moduleSize);
     bool ValidateHookTarget(uintptr_t address, const std::string& name);
-    bool InstallIPCHookSafe(uintptr_t address, const std::string& name);
 
     static bool SafeMemoryReadTest(uintptr_t address) {
         __try {
@@ -185,28 +173,12 @@ namespace SapphireHook {
         }
     }
 
-    HookInfo::HookInfo() {
-        name.clear(); module_name.clear(); assembly_name.clear();
-        address = 0; rva = 0; original_function = nullptr; detour_function = nullptr;
-        is_enabled = false; created_time = std::chrono::steady_clock::now();
-        is_validated = false; validation_error.clear(); original_bytes.clear(); hook_size = 0;
-    }
-
     HookInfo::HookInfo(const std::string& hookName, uintptr_t hookAddress,
-        const std::string& moduleName, const std::string& assemblyName) {
-        name = hookName; address = hookAddress; module_name = moduleName; assembly_name = assemblyName;
-        rva = HookManager::AddressToRVA(hookAddress);
-        original_function = nullptr; detour_function = nullptr; is_enabled = false;
-        created_time = std::chrono::steady_clock::now(); is_validated = false;
-        validation_error.clear(); hook_size = 16;
-        original_bytes = BackupOriginalBytesHelper(hookAddress, 16);
-    }
-
-    HookStatistics::HookStatistics() {
-        totalHooks = enabledHooks = disabledHooks = failedHooks = 0;
-        lastUpdate = std::chrono::system_clock::time_point{};
-        hooksByModule.clear(); hooksByAssembly.clear();
-    }
+        const std::string& moduleName, const std::string& assemblyName)
+        : name(hookName), module_name(moduleName), assembly_name(assemblyName),
+          address(hookAddress), rva(HookManager::AddressToRVA(hookAddress)),
+          hook_size(16), original_bytes(BackupOriginalBytesHelper(hookAddress, 16)),
+          created_time(std::chrono::steady_clock::now()) {}
 
     void HookStatistics::Update(const std::vector<HookInfo>& hooks) {
         totalHooks = hooks.size();
@@ -250,37 +222,6 @@ namespace SapphireHook {
     }
 
     bool InstallIPCHookSafe(uintptr_t address, const std::string& name) {
-        if (!ValidateHookTarget(address, name))
-            return false;
-
-        SafeMemoryRegion region(address, 16);
-        if (!region.IsValid()) {
-            LogError("Cannot create safe memory region for: " + name);
-            return false;
-        }
-
-        try {
-            if (MH_CreateHook(reinterpret_cast<void*>(address), &HookedHandleIPC,
-                reinterpret_cast<void**>(&originalHandleIPC)) != MH_OK) {
-                LogError("MinHook creation failed for: " + name);
-                return false;
-            }
-            if (MH_EnableHook(reinterpret_cast<void*>(address)) != MH_OK) {
-                LogError("MinHook enable failed for: " + name);
-                MH_RemoveHook(reinterpret_cast<void*>(address));
-                return false;
-            }
-            HookManager::RegisterHook(name, address, originalHandleIPC, "");
-            LogInfo("Successfully installed hook: " + name);
-            return true;
-        }
-        catch (const std::exception& ex) {
-            LogError("Exception during hook installation: " + std::string(ex.what()));
-            return false;
-        }
-    }
-
-    bool InstallIPCHookSafeV2(uintptr_t address, const std::string& name) {
         {
             std::ostringstream oss; oss << "Starting safe hook installation for " << name
                 << " at 0x" << std::hex << address;
@@ -444,7 +385,7 @@ namespace SapphireHook {
 
         uintptr_t moduleBase{};
         size_t moduleSize{};
-        if (!GetMainModuleRange(moduleBase, moduleSize)) {
+        if (!GetMainModuleInfo(moduleBase, moduleSize)) {
             LogError("Failed to get main module information");
             return false;
         }
@@ -496,7 +437,7 @@ namespace SapphireHook {
         }
 
         LogInfo("Installing IPC hook...");
-        return InstallIPCHookSafeV2(ipcHandlerAddr, "IPC_Handler");
+        return InstallIPCHookSafe(ipcHandlerAddr, "IPC_Handler");
     }
 
     bool FindAndHookDispatcher() {
@@ -509,7 +450,7 @@ namespace SapphireHook {
 
         uintptr_t moduleBase{};
         size_t moduleSize{};
-        if (!GetMainModuleRange(moduleBase, moduleSize))
+        if (!GetMainModuleInfo(moduleBase, moduleSize))
             return false;
 
         LogInfo("Scanning for dispatcher...");
@@ -655,7 +596,7 @@ namespace SapphireHook {
             return false;
         }
         uintptr_t base{}; size_t size{};
-        if (!GetMainModuleRange(base, size)) {
+        if (!GetMainModuleInfo(base, size)) {
             LogWarning("[HookManager] Falling back to VirtualQuery only");
             return QueryExecRange(address);
         }

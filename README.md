@@ -4,14 +4,13 @@ A modern C++20 native hook library for Final Fantasy XIV, designed with safety-f
 
 ## Overview
 
-SapphireHook aims to be an  reverse engineering and analysis toolkit for Final Fantasy XIV. It provides runtime inspection, memory analysis, network monitoring, and game modification capabilities with a focus on safety and maintainability.
+SapphireHook aims to be an toolkit for Project Sapphire . It provides runtime inspection, memory analysis, network monitoring
 
 ### Key Features
 
 #### Network Analysis
 - **181+ Packet Decoders**: Coverage of FFXIV's zone protocol
 - **Real-time Packet Monitor**: Live capture with filtering, search, and export capabilities
-- **Template Family Support**: Efficient handling of variable-length array packets
 
 #### Memory & Code Analysis
 - **Function Scanner**: Automated signature scanning with caching and pattern matching
@@ -73,8 +72,6 @@ SapphireHook aims to be an  reverse engineering and analysis toolkit for Final F
 
 **WeatherModule**: Environmental control
 - Override current weather
-
-
 
 ### Dependencies
 - **MinHook**: Function hooking

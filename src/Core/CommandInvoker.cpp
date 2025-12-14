@@ -262,7 +262,7 @@ bool CommandInvoker::SendIPC(uint16_t opcode, const void* payload, uint32_t leng
     try
     {
         bool ok = m_sendIpc(m_networkThis, opcode, payload, length);
-        LogInfo(std::string("CommandInvoker: SendIPC ") + (ok ? "OK" : "FAIL") + " opcode=0x" + std::to_string(opcode));
+        LogInfo(std::string("CommandInvoker: SendIPC ") + (ok ? "OK" : "FAIL") + " opcode=" + Logger::HexFormat(static_cast<uintptr_t>(opcode)));
         return ok;
     }
     catch (...)

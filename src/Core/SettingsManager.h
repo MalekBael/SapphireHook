@@ -42,6 +42,12 @@ namespace SapphireHook {
         void AddWeatherFavorite(uint32_t id);
         void RemoveWeatherFavorite(uint32_t id);
 
+        // ===== Game Data Settings =====
+        // Custom sqpack path (empty = auto-detect from game executable)
+        const std::filesystem::path& GetSqpackPath() const { return m_sqpackPath; }
+        void SetSqpackPath(const std::filesystem::path& path);
+        bool HasCustomSqpackPath() const { return !m_sqpackPath.empty(); }
+
         // Register a callback to be notified when settings are loaded
         // This allows modules to react to setting changes
         using SettingsLoadedCallback = std::function<void()>;
@@ -61,6 +67,7 @@ namespace SapphireHook {
         bool m_consoleOutput = true;
         int m_packetLogMode = 1;      // PacketLogMode::Summary
         std::vector<uint32_t> m_weatherFavorites;
+        std::filesystem::path m_sqpackPath;  // Custom sqpack path (empty = auto-detect)
 
         bool m_initialized = false;
         std::vector<SettingsLoadedCallback> m_loadCallbacks;

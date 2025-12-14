@@ -24,26 +24,26 @@ namespace SapphireHook {
 
     // Simplified Hook information structure
     struct HookInfo {
-        std::string name;
-        std::string module_name;
-        std::string assembly_name;
-        uintptr_t address;
-        uintptr_t rva;
-        void* original_function;
-        void* detour_function;
-        bool is_enabled;
-        std::chrono::time_point<std::chrono::steady_clock> created_time;
+        std::string name{};
+        std::string module_name{};
+        std::string assembly_name{};
+        uintptr_t address = 0;
+        uintptr_t rva = 0;
+        void* original_function = nullptr;
+        void* detour_function = nullptr;
+        bool is_enabled = false;
+        std::chrono::time_point<std::chrono::steady_clock> created_time = std::chrono::steady_clock::now();
 
         // Hook validation
-        bool is_validated;
-        std::string validation_error;
+        bool is_validated = false;
+        std::string validation_error{};
 
         // Debugging support
-        std::vector<uint8_t> original_bytes;
-        size_t hook_size;
+        std::vector<uint8_t> original_bytes{};
+        size_t hook_size = 0;
 
         // Constructors
-        HookInfo();
+        HookInfo() = default;
         HookInfo(const std::string& hookName, uintptr_t hookAddress,
             const std::string& moduleName = "", const std::string& assemblyName = "");
     };
@@ -63,15 +63,15 @@ namespace SapphireHook {
 
     // Simplified Hook statistics
     struct HookStatistics {
-        size_t totalHooks;
-        size_t enabledHooks;
-        size_t disabledHooks;
-        size_t failedHooks;
-        std::chrono::system_clock::time_point lastUpdate;
-        std::map<std::string, size_t> hooksByModule;
-        std::map<std::string, size_t> hooksByAssembly;
+        size_t totalHooks = 0;
+        size_t enabledHooks = 0;
+        size_t disabledHooks = 0;
+        size_t failedHooks = 0;
+        std::chrono::system_clock::time_point lastUpdate{};
+        std::map<std::string, size_t> hooksByModule{};
+        std::map<std::string, size_t> hooksByAssembly{};
 
-        HookStatistics();
+        HookStatistics() = default;
         void Update(const std::vector<HookInfo>& hooks);
         std::string ToDebugString() const;
     };
@@ -171,6 +171,9 @@ namespace SapphireHook {
     bool FindAndHookIPC();
     bool FindAndHookDispatcher();
     const char* GetOpcodeName(uint16_t opcode); // now resolved through centralized OpcodeNames
+    
+    // Module information utility
+    bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize);
 
     // IPC Hook type definitions
     typedef void(__fastcall* HandleIPC_t)(void* thisPtr, uint16_t opcode, void* data);

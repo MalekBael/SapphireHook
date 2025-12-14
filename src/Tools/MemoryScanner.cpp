@@ -21,6 +21,7 @@
 
 // Real scanning via FunctionScanner
 #include "../Analysis/FunctionScanner.h"
+#include "../Hooking/hook_manager.h"
 
 using namespace SapphireHook;
 
@@ -102,24 +103,6 @@ void MemoryScanner::StopScan()
 
 	m_scanState.status = "Scan stopped by user";
 	LogInfo("Memory scan cancelled");
-}
-
-static bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize)
-{
-	baseAddress = 0;
-	moduleSize = 0;
-
-	HMODULE hModule = ::GetModuleHandleW(nullptr);
-	if (!hModule)
-		return false;
-
-	MODULEINFO moduleInfo{};
-	if (!::GetModuleInformation(::GetCurrentProcess(), hModule, &moduleInfo, sizeof(moduleInfo)))
-		return false;
-
-	baseAddress = reinterpret_cast<uintptr_t>(moduleInfo.lpBaseOfDll);
-	moduleSize = static_cast<size_t>(moduleInfo.SizeOfImage);
-	return true;
 }
 
 void MemoryScanner::UpdateScanAsync()

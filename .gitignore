@@ -366,6 +366,8 @@ FodyWeavers.xsd
 build/
 temp_data.yml
 
+docs/
+
 # External dependencies (if not using submodules)
 external/*/build/
 external/*/lib/
@@ -425,3 +427,4 @@ sonar-project.properties
 docs/classinformer_3.35.csv
 docs/classinformer_200.csv
 docs/classinformer.csv
+docs/classinformer_comparison.json

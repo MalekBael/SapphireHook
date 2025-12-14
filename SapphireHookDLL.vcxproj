@@ -37,12 +37,12 @@
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <!-- Include paths -->
   <PropertyGroup>
-    <IncludePath>$(ProjectDir)src\Core;$(ProjectDir)src\Modules;$(ProjectDir)src\UI;$(ProjectDir)src\Hooking;$(ProjectDir)data;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook;$(ProjectDir)vendor\capstone\include;$(IncludePath)</IncludePath>
+    <IncludePath>$(ProjectDir)src\Core;$(ProjectDir)src\Modules;$(ProjectDir)src\UI;$(ProjectDir)src\Hooking;$(ProjectDir)data;$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook;$(ProjectDir)vendor\capstone\include;$(ProjectDir)vendor\datReader;$(ProjectDir)vcpkg\installed\x64-windows\include;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <!-- Debug: static capstone + minhook (/MDd) -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook;$(ProjectDir)vendor\capstone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook;$(ProjectDir)vendor\capstone\include;$(ProjectDir)vendor\datReader;$(ProjectDir)vcpkg\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
@@ -57,8 +57,8 @@
     </ClCompile>
     <Link>
       <!-- Link static libs (adjust paths/names if your built static libs differ) -->
-      <AdditionalDependencies>capstone.lib;libMinHook.x64.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(ProjectDir)vendor\capstone;$(ProjectDir)vendor\minhook;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>capstone.lib;libMinHook.x64.lib;Detour-d.lib;Recast-d.lib;DebugUtils-d.lib;DetourCrowd-d.lib;DetourTileCache-d.lib;zlibd.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)vendor\capstone;$(ProjectDir)vendor\minhook;$(ProjectDir)vcpkg\installed\x64-windows\debug\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>
       </IgnoreSpecificDefaultLibraries>
       <OptimizeReferences>true</OptimizeReferences>
@@ -76,7 +76,7 @@ echo [BUILD] Copied data folder to output directory</Command>
   <!-- Release: same /MDd runtime for now & static libs -->
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook;$(ProjectDir)vendor\capstone\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)vendor\imgui;$(ProjectDir)vendor\imgui\backends;$(ProjectDir)vendor\minhook;$(ProjectDir)vendor\capstone\include;$(ProjectDir)vendor\datReader;$(ProjectDir)vcpkg\installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
       <EnableModules>false</EnableModules>
@@ -85,10 +85,11 @@ echo [BUILD] Copied data folder to output directory</Command>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>capstone.lib;libMinHook.x64.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>capstone.lib;libMinHook.x64.lib;Detour.lib;Recast.lib;DebugUtils.lib;DetourCrowd.lib;DetourTileCache.lib;zlib.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>
 				$(ProjectDir)vendor\capstone;
 				$(ProjectDir)vendor\minhook;
+				$(ProjectDir)vcpkg\installed\x64-windows\lib;
 				%(AdditionalLibraryDirectories)
 			</AdditionalLibraryDirectories>
       <OptimizeReferences>true</OptimizeReferences>
@@ -110,7 +111,8 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="src\Core\CommandInvoker.h" />
     <ClInclude Include="src\Core\FunctionAnalyzer.h" />
     <ClInclude Include="src\Core\FunctionDatabase.h" />
-    <ClInclude Include="src\Core\GameData.h" />
+    <ClInclude Include="src\Core\GameDataLookup.h" />
+    <ClInclude Include="src\Core\ZoneLayoutManager.h" />
     <ClInclude Include="src\Core\PacketInjector.h" />
     <ClInclude Include="src\Core\ResourceLoader.h" />
     <ClInclude Include="src\Core\RttiVTableFinder.h" />
@@ -165,6 +167,10 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="src\Tools\GameCameraExtractor.h" />
     <ClInclude Include="src\Tools\ViewProjectionHook.h" />
     <ClInclude Include="src\Modules\DebugVisualsModule.h" />
+    <ClInclude Include="src\Modules\CollisionOverlayModule.h" />
+    <ClInclude Include="src\Modules\ZoneLayoutViewerModule.h" />
+    <ClInclude Include="src\Tools\CollisionMeshLoader.h" />
+    <ClInclude Include="src\Tools\NavMeshLoader.h" />
     <ClInclude Include="src\UI\imgui_overlay.h" />
     <ClInclude Include="src\UI\UIManager.h" />
     <ClInclude Include="src\UI\UIModule.h" />
@@ -198,10 +204,39 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="vendor\implot\implot_internal.h" />
     <ClInclude Include="vendor\minhook\MinHook.h" />
     <ClInclude Include="vendor\miniz\miniz.h" />
+    <!-- datReader headers -->
+    <ClInclude Include="vendor\datReader\bparse.h" />
+    <ClInclude Include="vendor\datReader\conv.h" />
+    <ClInclude Include="vendor\datReader\crc32.h" />
+    <ClInclude Include="vendor\datReader\Dat.h" />
+    <ClInclude Include="vendor\datReader\DatCat.h" />
+    <ClInclude Include="vendor\datReader\DatZlib.h" />
+    <ClInclude Include="vendor\datReader\Exd.h" />
+    <ClInclude Include="vendor\datReader\ExdCat.h" />
+    <ClInclude Include="vendor\datReader\ExdData.h" />
+    <ClInclude Include="vendor\datReader\Exh.h" />
+    <ClInclude Include="vendor\datReader\File.h" />
+    <ClInclude Include="vendor\datReader\GameData.h" />
+    <ClInclude Include="vendor\datReader\Index.h" />
+    <ClInclude Include="vendor\datReader\SqPack.h" />
+    <ClInclude Include="vendor\datReader\stream.h" />
+    <ClInclude Include="vendor\datReader\Exd\Common.h" />
+    <ClInclude Include="vendor\datReader\Exd\Structs.h" />
+    <ClInclude Include="vendor\datReader\DatCategories\DatCommon.h" />
+    <ClInclude Include="vendor\datReader\DatCategories\InstanceObject.h" />
+    <ClInclude Include="vendor\datReader\DatCategories\InstanceObjectParser.h" />
+    <ClInclude Include="vendor\datReader\DatCategories\Layer.h" />
+    <ClInclude Include="vendor\datReader\DatCategories\bg\lgb.h" />
+    <ClInclude Include="vendor\datReader\DatCategories\bg\LgbTypes.h" />
+    <ClInclude Include="vendor\datReader\DatCategories\bg\matrix4.h" />
+    <ClInclude Include="vendor\datReader\DatCategories\bg\pcb.h" />
+    <ClInclude Include="vendor\datReader\DatCategories\bg\sgb.h" />
+    <ClInclude Include="vendor\datReader\DatCategories\bg\vec3.h" />
   </ItemGroup>
   <!-- Sources -->
   <ItemGroup>
-    <ClCompile Include="src\Core\GameData.cpp" />
+    <ClCompile Include="src\Core\GameDataLookup.cpp" />
+    <ClCompile Include="src\Core\ZoneLayoutManager.cpp" />
     <ClCompile Include="src\Core\RttiVTableFinder.cpp" />
     <ClCompile Include="src\Modules\CharacterEdit.cpp" />
     <ClCompile Include="src\Modules\LuaGameScriptModule.cpp" />
@@ -218,6 +253,10 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClCompile Include="src\Tools\ViewProjectionHook.cpp" />
     <ClCompile Include="src\Tools\D3D11MatrixCapture.cpp" />
     <ClCompile Include="src\Modules\DebugVisualsModule.cpp" />
+    <ClCompile Include="src\Modules\CollisionOverlayModule.cpp" />
+    <ClCompile Include="src\Modules\ZoneLayoutViewerModule.cpp" />
+    <ClCompile Include="src\Tools\CollisionMeshLoader.cpp" />
+    <ClCompile Include="src\Tools\NavMeshLoader.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />
     <ClCompile Include="src\Analysis\FunctionScanner.cpp" />
@@ -274,6 +313,22 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClCompile Include="vendor\implot\implot.cpp" />
     <ClCompile Include="vendor\implot\implot_items.cpp" />
     <ClCompile Include="vendor\miniz\miniz.c" />
+    <!-- datReader sources -->
+    <ClCompile Include="vendor\datReader\bparse.cpp" />
+    <ClCompile Include="vendor\datReader\conv.cpp" />
+    <ClCompile Include="vendor\datReader\crc32.cpp" />
+    <ClCompile Include="vendor\datReader\Dat.cpp" />
+    <ClCompile Include="vendor\datReader\DatCat.cpp" />
+    <ClCompile Include="vendor\datReader\DatZlib.cpp" />
+    <ClCompile Include="vendor\datReader\Exd.cpp" />
+    <ClCompile Include="vendor\datReader\ExdCat.cpp" />
+    <ClCompile Include="vendor\datReader\ExdData.cpp" />
+    <ClCompile Include="vendor\datReader\Exh.cpp" />
+    <ClCompile Include="vendor\datReader\File.cpp" />
+    <ClCompile Include="vendor\datReader\GameData.cpp" />
+    <ClCompile Include="vendor\datReader\Index.cpp" />
+    <ClCompile Include="vendor\datReader\SqPack.cpp" />
+    <ClCompile Include="vendor\datReader\stream.cpp" />
   </ItemGroup>
   <!-- Non-compilable -->
   <ItemGroup>

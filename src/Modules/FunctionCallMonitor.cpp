@@ -40,28 +40,13 @@
 
 #include "../Helper/WindowsAPIWrapper.h"
 #include "../Tools/LiveTraceMonitor.h"
+#include "../Hooking/hook_manager.h"
 
 #ifdef _MSC_VER
 #pragma intrinsic(_ReturnAddress)
 #endif
 
 using namespace SapphireHook;
-
-static bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize)
-{
-	baseAddress = 0;
-	moduleSize = 0;
-	HMODULE hModule = ::GetModuleHandleW(nullptr);
-	if (!hModule) return false;
-
-	MODULEINFO moduleInfo{};
-	if (!::GetModuleInformation(::GetCurrentProcess(), hModule, &moduleInfo, sizeof(moduleInfo)))
-		return false;
-
-	baseAddress = reinterpret_cast<uintptr_t>(moduleInfo.lpBaseOfDll);
-	moduleSize = static_cast<size_t>(moduleInfo.SizeOfImage);
-	return true;
-}
 
 namespace SapphireHook {
 	class AdvancedHookManager {
@@ -139,7 +124,7 @@ namespace SapphireHook {
 			rec.enabled = true;
 			m_hooks.emplace(target, std::move(rec));
 
-			LogInfo("AdvancedHookManager: INT3 hook placed at 0x" + std::to_string(target) + " for " + name + " [" + config.context + "]");
+			LogInfo("AdvancedHookManager: INT3 hook placed at " + Logger::HexFormat(target) + " for " + name + " [" + config.context + "]");
 			return true;
 		}
 
@@ -320,57 +305,35 @@ static void GenericHookTrampoline(Args... /*args*/) {
 		FunctionCallMonitor::GetInstance()->AddFunctionCall(name, s_currentHookAddr, "MinHook");
 
 		LogDebug("MinHook intercepted: " + name +
-			" at 0x" + std::to_string(s_currentHookAddr) +
-			" called from 0x" + std::to_string(calledFrom));
+			" at " + Logger::HexFormat(s_currentHookAddr) +
+			" called from " + Logger::HexFormat(calledFrom));
 	}
 }
 
-static std::string GetExecutableDirectory()
+// Unified directory resolution: pass nullptr for process exe, or a function address for DLL directory
+static std::string GetModuleDirectory(HMODULE hMod = nullptr)
 {
+	// If no module specified, try to get our DLL's module first
+	if (!hMod) {
+		HMODULE selfMod = nullptr;
+		if (::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+			GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+			reinterpret_cast<LPCWSTR>(&GetModuleDirectory), &selfMod) && selfMod) {
+			hMod = selfMod;
+		}
+	}
+
 	wchar_t wpath[MAX_PATH] = { 0 };
-	DWORD len = ::GetModuleFileNameW(nullptr, wpath, MAX_PATH);
+	DWORD len = ::GetModuleFileNameW(hMod, wpath, MAX_PATH);
 	if (len == 0) return "";
 
 	std::wstring wstr(wpath);
 	size_t pos = wstr.find_last_of(L"\\/");
-
 	std::wstring wdir = (pos == std::wstring::npos) ? wstr : wstr.substr(0, pos);
 	if (wdir.empty()) return "";
 
 	int needed = WideCharToMultiByte(CP_UTF8, 0, wdir.c_str(), -1, nullptr, 0, nullptr, nullptr);
 	if (needed <= 0) return "";
-
-	std::string dir(needed, '\0');
-	WideCharToMultiByte(CP_UTF8, 0, wdir.c_str(), -1, &dir[0], needed, nullptr, nullptr);
-
-	if (!dir.empty() && dir.back() == '\0') dir.pop_back();
-	return dir;
-}
-
-// Add this helper near GetExecutableDirectory()
-static std::string GetThisModuleDirectory()
-{
-	HMODULE hMod = nullptr;
-	// Use this function's address to resolve our own module handle
-	if (!::GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-		GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-		reinterpret_cast<LPCWSTR>(&GetThisModuleDirectory),
-		&hMod)) {
-		// Fallback to process exe directory if resolution fails
-		return GetExecutableDirectory();
-	}
-
-	wchar_t wpath[MAX_PATH] = { 0 };
-	DWORD len = ::GetModuleFileNameW(hMod, wpath, MAX_PATH);
-	if (len == 0) return GetExecutableDirectory();
-
-	std::wstring wstr(wpath);
-	size_t pos = wstr.find_last_of(L"\\/");
-	std::wstring wdir = (pos == std::wstring::npos) ? wstr : wstr.substr(0, pos);
-	if (wdir.empty()) return GetExecutableDirectory();
-
-	int needed = WideCharToMultiByte(CP_UTF8, 0, wdir.c_str(), -1, nullptr, 0, nullptr, nullptr);
-	if (needed <= 0) return GetExecutableDirectory();
 
 	std::string dir(needed, '\0');
 	WideCharToMultiByte(CP_UTF8, 0, wdir.c_str(), -1, &dir[0], needed, nullptr, nullptr);
@@ -382,7 +345,7 @@ std::string LoadResourceData(const std::string& resourceName)
 {
 	LogInfo("LoadResourceData: looking for '" + resourceName + "' next to executable");
 
-	std::string exeDir = GetExecutableDirectory();
+	std::string exeDir = GetModuleDirectory();
 	if (exeDir.empty())
 	{
 		LogError("Could not determine executable directory; expecting " + resourceName + " next to ffxiv_dx11.exe");
@@ -405,20 +368,20 @@ std::string LoadResourceData(const std::string& resourceName)
 
 FunctionCallMonitor* FunctionCallMonitor::s_instance = nullptr;
 
-struct HookInfo {
+struct LocalHookInfo {
 	std::string name;
 	std::string context;
 	void* originalFunction;
 	uintptr_t address;
 
-	HookInfo() : name(""), context(""), originalFunction(nullptr), address(0) {}
-	HookInfo(const std::string& n, const std::string& c, void* orig, uintptr_t addr)
+	LocalHookInfo() : name(""), context(""), originalFunction(nullptr), address(0) {}
+	LocalHookInfo(const std::string& n, const std::string& c, void* orig, uintptr_t addr)
 		: name(n), context(c), originalFunction(orig), address(addr)
 	{
 	}
 };
 
-static std::map<uintptr_t, HookInfo> g_hookMap;
+static std::map<uintptr_t, LocalHookInfo> g_hookMap;
 static std::set<uintptr_t> g_attemptedHooks;
 static uintptr_t g_moduleBase = 0;
 static size_t g_moduleSize = 0;
@@ -1232,7 +1195,7 @@ void FunctionCallMonitor::Initialize()
 	}
 	else
 	{
-		LogInfo("Module base: 0x" + std::to_string(g_moduleBase) + ", size: 0x" + std::to_string(g_moduleSize));
+		LogInfo("Module base: " + Logger::HexFormat(g_moduleBase) + ", size: " + Logger::HexFormat(g_moduleSize));
 	}
 
 	LoadDatabasesWithErrorHandling();
@@ -1272,7 +1235,7 @@ void FunctionCallMonitor::Initialize()
 void FunctionCallMonitor::LoadDatabasesWithErrorHandling()
 {
 	// Always prefer the DLL directory (i.e., injector’s folder if DLL sits next to injector.exe)
-	const std::string dllDir = GetThisModuleDirectory();
+	const std::string dllDir = GetModuleDirectory();
 
 	// Optional override via env var (only if you explicitly set it inside the target process)
 	std::string dbDir = dllDir;
@@ -1342,7 +1305,7 @@ void FunctionCallMonitor::LoadDatabasesWithErrorHandling()
 
 void FunctionCallMonitor::ReloadDatabase()
 {
-	const std::string dbDir = GetThisModuleDirectory();
+	const std::string dbDir = GetModuleDirectory();
 	LogInfo("Reloading function database from DLL directory: " + dbDir);
 
 	bool loaded = false;
@@ -1361,7 +1324,7 @@ void FunctionCallMonitor::ReloadDatabase()
 
 void FunctionCallMonitor::ReloadSignatureDatabase()
 {
-	const std::string dbDir = GetThisModuleDirectory();
+	const std::string dbDir = GetModuleDirectory();
 	LogInfo("Reloading signature database from DLL directory: " + dbDir);
 
 	m_signatureDatabaseLoaded = false;
@@ -1392,7 +1355,7 @@ void FunctionCallMonitor::AddFunctionCall(const std::string& name, uintptr_t add
 	if (m_useFunctionDatabase && m_functionDatabaseLoaded && m_functionDB.HasFunction(address))
 	{
 		call.functionName = m_functionDB.GetFunctionName(address);
-		LogDebug("Using database name: " + call.functionName + " for address 0x" + std::to_string(address));
+		LogDebug("Using database name: " + call.functionName + " for address " + Logger::HexFormat(address));
 	}
 	else if (!name.empty() && name.find("sub_") != 0)
 	{
@@ -1440,7 +1403,7 @@ void FunctionCallMonitor::SetDiscoveredFunctions(const std::vector<uintptr_t>& f
 
 				if (namedFunctions <= 10)
 				{
-					LogInfo("Database function: " + dbName + " at 0x" + std::to_string(addr));
+					LogInfo("Database function: " + dbName + " at " + Logger::HexFormat(addr));
 				}
 			}
 		}
@@ -1476,7 +1439,7 @@ std::string FunctionCallMonitor::ResolveFunctionName(uintptr_t address) const
 		std::string dbName = m_functionDB.GetFunctionName(address);
 		if (!dbName.empty() && dbName.find("sub_") != 0)
 		{
-			LogDebug("Database resolved 0x" + std::to_string(address) + " to: " + dbName);
+			LogDebug("Database resolved " + Logger::HexFormat(address) + " to: " + dbName);
 			return dbName;
 		}
 	}
@@ -1484,7 +1447,7 @@ std::string FunctionCallMonitor::ResolveFunctionName(uintptr_t address) const
 	auto tempIt = m_detectedFunctionNames.find(address);
 	if (tempIt != m_detectedFunctionNames.end() && !tempIt->second.empty())
 	{
-		LogDebug("Memory scan resolved 0x" + std::to_string(address) + " to: " + tempIt->second);
+		LogDebug("Memory scan resolved " + Logger::HexFormat(address) + " to: " + tempIt->second);
 		return tempIt->second;
 	}
 
@@ -1498,40 +1461,35 @@ std::string FunctionCallMonitor::ResolveFunctionName(uintptr_t address) const
 			});
 		if (sigIt != resolvedFunctions.end() && !sigIt->second.empty())
 		{
-			LogDebug("Signature resolved 0x" + std::to_string(address) + " to: " + sigIt->second);
+			LogDebug("Signature resolved " + Logger::HexFormat(address) + " to: " + sigIt->second);
 			return sigIt->second;
 		}
 	}
 
-	std::stringstream ss;
-	ss << "sub_" << std::hex << std::uppercase << address;
-
-	if (g_moduleBase != 0 && address >= g_moduleBase && address < g_moduleBase + g_moduleSize)
-	{
+	// Generate sub_ADDR format using efficient formatting
+	char buf[64];
+	if (g_moduleBase != 0 && address >= g_moduleBase && address < g_moduleBase + g_moduleSize) {
 		uintptr_t offset = address - g_moduleBase;
-		ss << "_+" << std::hex << offset;
+		std::snprintf(buf, sizeof(buf), "sub_%llX_+%llX",
+			static_cast<unsigned long long>(address),
+			static_cast<unsigned long long>(offset));
+	} else {
+		std::snprintf(buf, sizeof(buf), "sub_%llX", static_cast<unsigned long long>(address));
 	}
-
-	return ss.str();
+	return std::string(buf);
 }
 
 bool FunctionCallMonitor::CreateFunctionHook(uintptr_t address, const std::string& name, const std::string& context)
 {
-	if (m_enableRealHooking)
-	{
-		return CreateRealLoggingHook(address, name, context);
-	}
-	else
-	{
-		return CreateSafeLoggingHook(address, name, context);
-	}
+	return m_enableRealHooking 
+		? CreateRealLoggingHook(address, name, context)
+		: CreateSafeLoggingHook(address, name, context);
 }
 
 bool FunctionCallMonitor::CreateSafeLoggingHook(uintptr_t address, const std::string& name, const std::string& context)
 {
 	const uintptr_t target = RelocateIfIDA(address);
-	std::stringstream ss; ss << std::hex << std::uppercase << target;
-	LogInfo("Creating SAFE logging hook for " + name + " at 0x" + ss.str());
+	LogInfo("Creating SAFE logging hook for " + name + " at " + Hex64(target));
 
 	if (g_attemptedHooks.find(target) != g_attemptedHooks.end())
 	{
@@ -1555,8 +1513,7 @@ bool FunctionCallMonitor::CreateSafeLoggingHook(uintptr_t address, const std::st
 bool FunctionCallMonitor::CreateRealLoggingHook(uintptr_t address, const std::string& name, const std::string& context)
 {
 	const uintptr_t target = RelocateIfIDA(address);
-	std::stringstream ss; ss << std::hex << std::uppercase << target;
-	LogInfo("Creating REAL MinHook for " + name + " at 0x" + ss.str());
+	LogInfo("Creating REAL MinHook for " + name + " at " + Hex64(target));
 
 	if (g_attemptedHooks.find(target) != g_attemptedHooks.end()) {
 		LogWarning("Address already hooked, skipping");
@@ -1574,7 +1531,7 @@ bool FunctionCallMonitor::CreateRealLoggingHook(uintptr_t address, const std::st
 		return false;
 	}
 	if (!looksLikeFunction) {
-		LogWarning("Address 0x" + std::to_string(address) + " may not be a function start");
+		LogWarning("Address " + Logger::HexFormat(address) + " may not be a function start");
 	}
 
 	// Ensure MinHook is initialized once
@@ -1602,14 +1559,14 @@ bool FunctionCallMonitor::CreateRealLoggingHook(uintptr_t address, const std::st
 		reinterpret_cast<LPVOID>(g_mhDetourTable[slot]),
 		&pOriginal);
 	if (status != MH_OK) {
-		LogError("Failed to create MinHook at 0x" + std::to_string(target) + ": " + std::to_string(status));
+		LogError("Failed to create MinHook at " + Logger::HexFormat(target) + ": " + std::to_string(static_cast<int>(status)));
 		ReleaseMHSlot(target);
 		return false;
 	}
 
 	status = MH_EnableHook(reinterpret_cast<LPVOID>(target));
 	if (status != MH_OK) {
-		LogError("Failed to enable MinHook at 0x" + std::to_string(target) + ": " + std::to_string(status));
+		LogError("Failed to enable MinHook at " + Logger::HexFormat(target) + ": " + std::to_string(static_cast<int>(status)));
 		MH_RemoveHook(reinterpret_cast<LPVOID>(target));
 		ReleaseMHSlot(target);
 		return false;
@@ -1617,7 +1574,7 @@ bool FunctionCallMonitor::CreateRealLoggingHook(uintptr_t address, const std::st
 
 	// Store hook bookkeeping
 	g_attemptedHooks.insert(target);
-	g_hookMap[target] = HookInfo(name, context, pOriginal, target);
+	g_hookMap[target] = LocalHookInfo(name, context, pOriginal, target);
 	g_originalFunctions[target] = pOriginal;
 	g_mhCtx[slot].original = pOriginal;
 
@@ -1711,7 +1668,7 @@ std::string FunctionCallMonitor::ScanForNearbyStrings(uintptr_t address, size_t 
 			") may impact performance");
 	}
 
-	LogDebug("Scanning for strings near 0x" + std::to_string(address) +
+	LogDebug("Scanning for strings near " + Logger::HexFormat(address) +
 		" with radius " + std::to_string(searchRadius));
 
 	return m_functionScanner->ScanForNearbyStrings(address, searchRadius);
@@ -1988,7 +1945,7 @@ void FunctionCallMonitor::UnhookAllFunctions() {
 			MH_STATUS status = MH_DisableHook(reinterpret_cast<LPVOID>(addr));
 			if (status == MH_OK) {
 				MH_RemoveHook(reinterpret_cast<LPVOID>(addr));
-				LogInfo("Removed MinHook at 0x" + std::to_string(addr));
+				LogInfo("Removed MinHook at " + Logger::HexFormat(addr));
 			}
 			ReleaseMHSlot(addr);
 		}

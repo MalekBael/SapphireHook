@@ -76,20 +76,33 @@ namespace SapphireHook {
     // Memory validation functions implementation
     bool IsValidMemoryAddress(uintptr_t address, size_t size)
     {
-        if (address == 0) return false;
+		// CHANGE NOTE (2025-12-15): Strengthen range validation.
+		// - Reject PAGE_GUARD/PAGE_NOACCESS, and require an actually-readable page protection.
+		// - Use overflow-safe end computation before comparing against region bounds.
+        if (address == 0 || size == 0) return false;
 
-        MEMORY_BASIC_INFORMATION mbi;
+        MEMORY_BASIC_INFORMATION mbi{};
         if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)) == 0)
-        {
             return false;
-        }
 
-        // Check if memory is committed and accessible
         if (mbi.State != MEM_COMMIT) return false;
-        if (mbi.Protect == PAGE_NOACCESS) return false;
+        if (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) return false;
 
-        // Check if the entire range is valid
-        return (address + size <= reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize);
+        const DWORD acc = (mbi.Protect & 0xFF);
+        const bool readable =
+            acc == PAGE_READONLY || acc == PAGE_READWRITE ||
+            acc == PAGE_WRITECOPY ||
+            acc == PAGE_EXECUTE_READ || acc == PAGE_EXECUTE_READWRITE ||
+            acc == PAGE_EXECUTE_WRITECOPY;
+        if (!readable) return false;
+
+        const uintptr_t regionBase = reinterpret_cast<uintptr_t>(mbi.BaseAddress);
+        const uintptr_t regionEnd = regionBase + static_cast<uintptr_t>(mbi.RegionSize);
+        if (address < regionBase) return false;
+        if (address > regionEnd) return false;
+        const uintptr_t end = address + static_cast<uintptr_t>(size);
+        if (end < address) return false; // overflow
+        return end <= regionEnd;
     }
 
     bool IsExecutableMemory(uintptr_t address)

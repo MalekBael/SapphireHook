@@ -43,6 +43,10 @@
 #include "../Modules/LuaGameScriptModule.h"
 // NEW: Debug visualization module
 #include "../Modules/DebugVisualsModule.h"
+// NEW: Collision/NavMesh overlay module
+#include "../Modules/CollisionOverlayModule.h"
+// NEW: Zone Layout Viewer for LGB data inspection
+#include "../Modules/ZoneLayoutViewerModule.h"
 // NEW: Camera extractor for player position display
 #include "../Tools/GameCameraExtractor.h"
 
@@ -325,6 +329,34 @@ UIModule* UIManager::GetModule(const char* name)
 	return result;
 }
 
+// Helper template to reduce boilerplate in RegisterDefaultModules
+// Returns true if module was registered or already exists, false on error
+template<typename T>
+bool UIManager::TryRegisterModule(const char* moduleId, const char* displayName, int& successCount)
+{
+	try {
+		if (GetModule(moduleId) == nullptr) {
+			LogInfo(std::string("Creating ") + displayName + " module...");
+			RegisterModule(std::make_unique<T>());
+			LogInfo(std::string("[OK] ") + displayName + " module registered");
+			successCount++;
+		}
+		else {
+			LogInfo(std::string(displayName) + " module already exists");
+			successCount++;
+		}
+		return true;
+	}
+	catch (const std::exception& e) {
+		LogError(std::string("Failed to register ") + displayName + ": " + e.what());
+		return false;
+	}
+	catch (...) {
+		LogError(std::string("Failed to register ") + displayName + ": unknown exception");
+		return false;
+	}
+}
+
 void UIManager::RegisterDefaultModules()
 {
 	LogInfo("=== RegisterDefaultModules() called on instance: " +
@@ -333,279 +365,24 @@ void UIManager::RegisterDefaultModules()
 
 	int successCount = 0;
 
-	try
-	{
-		if (GetModule("debug_commands") == nullptr)
-		{
-			LogInfo("Creating Debug Commands module...");
-			auto debugModule = std::make_unique<DebugCommandsModule>();
-			RegisterModule(std::move(debugModule));
-			LogInfo("[OK] Debug Commands module registered");
-			successCount++;
-		}
-		else
-		{
-			LogInfo("Debug Commands module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register Debug Commands: " + std::string(e.what()));
-	}
-	catch (...)
-	{
-		LogError("Failed to register Debug Commands: unknown exception");
-	}
+	// Core feature modules
+	TryRegisterModule<DebugCommandsModule>("debug_commands", "Debug Commands", successCount);
+	TryRegisterModule<FunctionCallMonitor>("function_monitor", "Function Call Monitor", successCount);
+	TryRegisterModule<MemoryViewerModule>("memory_viewer", "Memory Viewer", successCount);
+	TryRegisterModule<GMCommandsModule>("gm_commands", "GM Commands", successCount);
+	TryRegisterModule<NetDiagnosticsModule>("net_diagnostics", "Net Diagnostics", successCount);
+	TryRegisterModule<SettingsModule>("settings", "Settings", successCount);
 
-	try
-	{
-		if (GetModule("function_monitor") == nullptr)
-		{
-			LogInfo("Creating Function Call Monitor module...");
-			auto functionModule = std::make_unique<FunctionCallMonitor>();
-			RegisterModule(std::move(functionModule));
-			LogInfo("[OK] Function Call Monitor module registered");
-			successCount++;
-		}
-		else
-		{
-			LogInfo("Function Call Monitor module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register Function Call Monitor: " + std::string(e.what()));
-	}
-	catch (...)
-	{
-		LogError("Failed to register Function Call Monitor: unknown exception");
-	}
-
-	try
-	{
-		if (GetModule("memory_viewer") == nullptr)
-		{
-			LogInfo("Creating Memory Viewer module...");
-			auto memView = std::make_unique<MemoryViewerModule>();
-			RegisterModule(std::move(memView));
-			LogInfo("[OK] Memory Viewer module registered");
-			successCount++;
-		}
-		else
-		{
-			LogInfo("Memory Viewer module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register Memory Viewer: " + std::string(e.what()));
-	}
-	catch (...)
-	{
-		LogError("Failed to register Memory Viewer: unknown exception");
-	}
-
-	try
-	{
-		if (GetModule("gm_commands") == nullptr)
-		{
-			LogInfo("Creating GM Commands module...");
-			auto gm = std::make_unique<GMCommandsModule>();
-			RegisterModule(std::move(gm));
-			LogInfo("[OK] GM Commands module registered");
-			successCount++;
-		}
-		else
-		{
-			LogInfo("GM Commands module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register GM Commands: " + std::string(e.what()));
-	}
-	catch (...)
-	{
-		LogError("Failed to register GM Commands: unknown exception");
-	}
-
-	// Unified Network Monitor (packets + graphs)
-	try
-	{
-		if (GetModule("net_diagnostics") == nullptr)
-		{
-			LogInfo("Creating Net Diagnostics module...");
-			auto net = std::make_unique<NetDiagnosticsModule>();
-			RegisterModule(std::move(net));
-			LogInfo("[OK] Net Diagnostics module registered");
-			successCount++;
-		}
-		else
-		{
-			LogInfo("Net Diagnostics module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register Net Diagnostics: " + std::string(e.what()));
-	}
-	catch (...)
-	{
-		LogError("Failed to register Net Diagnostics: unknown exception");
-	}
-
-	try
-	{
-		if (GetModule("settings") == nullptr)
-		{
-			LogInfo("Creating Settings module...");
-			auto settings = std::make_unique<SettingsModule>();
-			RegisterModule(std::move(settings));
-			LogInfo("[OK] Settings module registered");
-			successCount++;
-		}
-		else
-		{
-			LogInfo("Settings module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register Settings module: " + std::string(e.what()));
-	}
-	catch (...)
-	{
-		LogError("Failed to register Settings module: unknown exception");
-	}
-
-	// NEW: Register tool modules (explicit upcast to base unique_ptr to avoid template confusion)
-	try
-	{
-		if (GetModule("MemoryScanner") == nullptr)  // Original casing
-		{
-			LogInfo("Creating Memory Scanner tool module...");
-			RegisterModule(std::make_unique<SapphireHook::MemoryScanner>());
-			LogInfo("[OK] Memory Scanner tool registered");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register Memory Scanner: " + std::string(e.what()));
-	}
-
-	try
-	{
-		if (GetModule("StringXrefAnalyzer") == nullptr)  // Original casing
-		{
-			LogInfo("Creating String XREF Analyzer tool module...");
-			RegisterModule(std::make_unique<SapphireHook::StringXrefAnalyzer>());
-			LogInfo("[OK] String XREF Analyzer tool registered");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register String XREF Analyzer: " + std::string(e.what()));
-	}
-
-	try {
-		if (GetModule("CharacterEdit") == nullptr) {
-			LogInfo("Creating Character Edit module...");
-			RegisterModule(std::make_unique<SapphireHook::CharacterEditModule>());
-			LogInfo("[OK] Character Edit module registered");
-			successCount++;
-		}
-		else {
-			LogInfo("Character Edit module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e) {
-		LogError("Failed to register Character Edit: " + std::string(e.what()));
-	}
-	catch (...) {
-		LogError("Failed to register Character Edit: unknown exception");
-	}
-
-	try {
-		if (GetModule("Weather") == nullptr) {
-			LogInfo("Creating Weather module...");
-			RegisterModule(std::make_unique<SapphireHook::WeatherModule>());
-			LogInfo("[OK] Weather module registered");
-			successCount++;
-		}
-		else {
-			LogInfo("Weather module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e) {
-		LogError("Failed to register Weather: " + std::string(e.what()));
-	}
-	catch (...) {
-		LogError("Failed to register Weather: unknown exception");
-	}
-
-	try
-	{
-		if (GetModule("LiveTraceMonitor") == nullptr)  // Original casing
-		{
-			LogInfo("Creating Live Trace Monitor tool module...");
-			RegisterModule(std::make_unique<SapphireHook::LiveTraceMonitor>());
-			LogInfo("[OK] Live Trace Monitor tool registered");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e)
-	{
-		LogError("Failed to register Live Trace Monitor: " + std::string(e.what()));
-	}
-
-	try {
-		if (GetModule("LuaGameScriptModule") == nullptr) {
-			LogInfo("Creating Lua GameScript module...");
-			RegisterModule(std::make_unique<SapphireHook::LuaGameScriptModule>());
-			LogInfo("[OK] Lua GameScript module registered");
-			successCount++;
-		}
-		else {
-			LogInfo("Lua GameScript module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e) {
-		LogError("Failed to register Lua GameScript: " + std::string(e.what()));
-	}
-	catch (...) {
-		LogError("Failed to register Lua GameScript: unknown exception");
-	}
-
-	// NEW: Debug Visuals module for 3D debug rendering
-	try {
-		if (GetModule("debug_visuals") == nullptr) {
-			LogInfo("Creating Debug Visuals module...");
-			RegisterModule(std::make_unique<SapphireHook::DebugVisualsModule>());
-			LogInfo("[OK] Debug Visuals module registered");
-			successCount++;
-		}
-		else {
-			LogInfo("Debug Visuals module already exists");
-			successCount++;
-		}
-	}
-	catch (const std::exception& e) {
-		LogError("Failed to register Debug Visuals: " + std::string(e.what()));
-	}
-	catch (...) {
-		LogError("Failed to register Debug Visuals: unknown exception");
-	}
+	// Tool modules
+	TryRegisterModule<SapphireHook::MemoryScanner>("MemoryScanner", "Memory Scanner", successCount);
+	TryRegisterModule<SapphireHook::StringXrefAnalyzer>("StringXrefAnalyzer", "String XREF Analyzer", successCount);
+	TryRegisterModule<SapphireHook::CharacterEditModule>("CharacterEdit", "Character Edit", successCount);
+	TryRegisterModule<SapphireHook::WeatherModule>("Weather", "Weather", successCount);
+	TryRegisterModule<SapphireHook::LiveTraceMonitor>("LiveTraceMonitor", "Live Trace Monitor", successCount);
+	TryRegisterModule<SapphireHook::LuaGameScriptModule>("LuaGameScriptModule", "Lua GameScript", successCount);
+	TryRegisterModule<SapphireHook::DebugVisualsModule>("debug_visuals", "Debug Visuals", successCount);
+	TryRegisterModule<SapphireHook::CollisionOverlayModule>("collision_overlay", "Collision Overlay", successCount);
+	TryRegisterModule<SapphireHook::ZoneLayoutViewerModule>("zone_layout_viewer", "Zone Layout Viewer", successCount);
 
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
 	LogInfo("Successfully registered: " + std::to_string(successCount) + " modules");
@@ -642,7 +419,9 @@ void UIManager::VerifyDefaultModules()
 		"StringXrefAnalyzer",
 		"LiveTraceMonitor",
 		"LuaGameScriptModule",
-		"debug_visuals"
+		"debug_visuals",
+		"collision_overlay",
+		"zone_layout_viewer"
 	};
 
 	LogInfo("=== DEFAULT MODULE VERIFICATION START ===");
@@ -901,6 +680,38 @@ void UIManager::RenderMainMenu()
 					if (ImGui::MenuItem(s_debugVisuals->GetDisplayName(), nullptr, open))
 					{
 						s_debugVisuals->SetWindowOpen(!open);
+					}
+				}
+			}
+
+			// Collision Overlay (collision mesh & navmesh visualization)
+			{
+				static UIModule* s_collisionOverlay = nullptr;
+				if (!s_collisionOverlay)
+					s_collisionOverlay = GetModule("collision_overlay");
+
+				if (s_collisionOverlay)
+				{
+					bool open = s_collisionOverlay->IsWindowOpen();
+					if (ImGui::MenuItem(s_collisionOverlay->GetDisplayName(), nullptr, open))
+					{
+						s_collisionOverlay->SetWindowOpen(!open);
+					}
+				}
+			}
+
+			// Zone Layout Viewer (LGB data inspection)
+			{
+				static UIModule* s_zoneLayoutViewer = nullptr;
+				if (!s_zoneLayoutViewer)
+					s_zoneLayoutViewer = GetModule("zone_layout_viewer");
+
+				if (s_zoneLayoutViewer)
+				{
+					bool open = s_zoneLayoutViewer->IsWindowOpen();
+					if (ImGui::MenuItem(s_zoneLayoutViewer->GetDisplayName(), nullptr, open))
+					{
+						s_zoneLayoutViewer->SetWindowOpen(!open);
 					}
 				}
 			}

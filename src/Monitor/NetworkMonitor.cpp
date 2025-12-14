@@ -1,4 +1,5 @@
 #include "NetworkMonitor.h"
+#include "PacketEvents.h"
 #include <cstring>
 #include "../vendor/imgui/imgui.h"
 #include "../vendor/imgui/imgui_internal.h"
@@ -28,6 +29,12 @@
 #include "../ProtocolHandlers/Zone/ClientZoneDef.h"
 
 using namespace SapphireHook;
+
+// Namespace aliases for packet structures
+namespace ServerZone = PacketStructures::Server::Zone;
+
+// Forward declaration for packet event processing (defined later in anonymous namespace)
+namespace { static void ProcessPacketEvents(const HookPacket& hp); }
 
 // Singleton
 PacketCapture& PacketCapture::Instance() {
@@ -363,6 +370,11 @@ bool PacketCapture::TryEnqueueFromHook(const void* data, size_t len,
 			slot.packet.ts = std::chrono::system_clock::now();
 			slot.packet.len = (uint32_t)tocopy;
 			std::memcpy(slot.packet.buf.data(), data, tocopy);
+			
+			// Process packet events immediately (for ActorMove tracking etc.)
+			// This ensures events are dispatched even when Network Monitor UI isn't open
+			ProcessPacketEvents(slot.packet);
+			
 			slot.state.store(uint8_t(SlotState::READY), std::memory_order_release);
 			LogDebug("PacketCapture: Packet enqueued (" + std::to_string(tocopy) + " bytes, " +
 				(outgoing ? "outgoing" : "incoming") + ")");
@@ -380,6 +392,7 @@ void PacketCapture::DrainToVector(std::vector<HookPacket>& out) {
 		if (slots_[i].state.compare_exchange_strong(expected, uint8_t(SlotState::READING),
 			std::memory_order_acquire,
 			std::memory_order_relaxed)) {
+			// Events are already processed in TryEnqueueFromHook
 			out.push_back(slots_[i].packet);
 			slots_[i].state.store(uint8_t(SlotState::EMPTY), std::memory_order_release);
 		}
@@ -388,21 +401,45 @@ void PacketCapture::DrainToVector(std::vector<HookPacket>& out) {
 
 void PacketCapture::DumpHexAscii(const HookPacket& hp) {
 	const uint8_t* d = hp.buf.data();
-	for (size_t off = 0; off < hp.len; off += 16) {
-		size_t len = (hp.len - off < 16) ? hp.len - off : 16;
-		char line[256];
+	// CHANGE NOTE (2025-12-15): This used to build each line with repeated `sprintf` into a moving pointer.
+	// That pattern is fragile (easy to overrun `line`) and can become a security bug if formatting ever changes.
+	// We now use bounded appends (`snprintf`) plus named constants to make the max line size explicit.
+	constexpr size_t kBytesPerLine = 16;
+	constexpr size_t kLineBufSize = 256;
+	for (size_t off = 0; off < hp.len; off += kBytesPerLine) {
+		size_t len = (hp.len - off < kBytesPerLine) ? hp.len - off : kBytesPerLine;
+		char line[kLineBufSize] = {};
 		char* p = line;
-		p += std::sprintf(p, "%04zx: ", off);
-		for (size_t j = 0; j < 16; ++j) {
-			if (j < len) p += std::sprintf(p, "%02x ", d[off + j]);
-			else p += std::sprintf(p, "   ");
+		size_t remaining = kLineBufSize;
+
+		auto append = [&](const char* fmt, auto... args) {
+			if (remaining == 0) return;
+			const int n = std::snprintf(p, remaining, fmt, args...);
+			if (n <= 0) return;
+			const size_t wrote = static_cast<size_t>(n);
+			if (wrote >= remaining) {
+				p += (remaining - 1);
+				remaining = 1;
+				*p = 0;
+				return;
+			}
+			p += wrote;
+			remaining -= wrote;
+		};
+
+		append("%04zx: ", off);
+		for (size_t j = 0; j < kBytesPerLine; ++j) {
+			if (j < len) append("%02x ", d[off + j]);
+			else append("   ");
 		}
-		*p++ = ' ';
+		append(" ");
 		for (size_t j = 0; j < len; ++j) {
-			unsigned char c = d[off + j];
-			*p++ = (c >= 32 && c < 127) ? (char)c : '.';
+			if (remaining <= 1) break;
+			const unsigned char c = d[off + j];
+			*p++ = (c >= 32 && c < 127) ? static_cast<char>(c) : '.';
+			--remaining;
 		}
-		*p = 0;
+		if (remaining > 0) *p = 0;
 		ImGui::TextUnformatted(line);
 	}
 }
@@ -719,6 +756,53 @@ namespace {
 		}
 		return d;
 	}
+
+	// Forward declaration for DispatchActorMoveEvent
+	static void DispatchActorMoveEvent(uint16_t opcode, bool outgoing,
+		uint32_t sourceActor, uint32_t targetActor,
+		const uint8_t* payload, size_t payloadLen,
+		std::chrono::system_clock::time_point timestamp);
+
+	// Forward declaration for DispatchPlayerSpawnEvent
+	static void DispatchPlayerSpawnEvent(uint16_t opcode, bool outgoing,
+		uint32_t actorId,
+		const uint8_t* payload, size_t payloadLen,
+		std::chrono::system_clock::time_point timestamp);
+
+	// Process packet for event dispatching (ActorMove, PlayerSpawn, etc.)
+	// Called from the main packet processing loop
+	static void ProcessPacketEvents(const HookPacket& hp) {
+		if (hp.outgoing) return; // Only process server-to-client for now
+		
+		auto P = ParsePacket(hp);
+		SegmentView v = GetSegmentView(hp);
+		std::vector<SegmentInfo> segs;
+		ParseAllSegmentsBuffer(v.data, v.len, segs);
+		
+		// Process each segment
+		for (const auto& seg : segs) {
+			if (!seg.hasIpc) continue;
+			
+			// Calculate payload offset: segment offset + 0x10 (segment header) + 0x10 (IPC header)
+			size_t payloadOffset = seg.offset + 0x20;
+			size_t payloadLen = seg.size >= 0x20 ? seg.size - 0x20 : 0;
+			
+			if (payloadOffset + payloadLen > v.len) continue;
+			const uint8_t* payload = v.data + payloadOffset;
+			
+			// PlayerSpawn (0x0190) - real float world positions
+			if (seg.opcode == 0x0190 && payloadLen >= sizeof(ServerZone::FFXIVIpcPlayerSpawn)) {
+				DispatchPlayerSpawnEvent(seg.opcode, hp.outgoing,
+					seg.source, payload, payloadLen, hp.ts);
+			}
+			// ActorMove (0x0192) - packed relative positions (not useful alone)
+			else if (seg.opcode == 0x0192 && payloadLen >= sizeof(ServerZone::FFXIVIpcActorMove)) {
+				DispatchActorMoveEvent(seg.opcode, hp.outgoing, 
+					seg.source, seg.target, 
+					payload, payloadLen, hp.ts);
+			}
+		}
+	}
 }
 
 // --------------------------------- Registry decoding & analyzer --------------------------
@@ -760,6 +844,68 @@ namespace {
 		else if (!outgoing && (opcode == 0x0146 || opcode == 0x0147) && payloadLen >= 0x18) {
 			(void)rd32(payload + 0x10);
 		}
+	}
+
+	// Dispatch ActorMove events to subscribers (for path visualization)
+	// Position encoding: (raw - 32768) / 32.0f gives world coordinates
+	static void DispatchActorMoveEvent(uint16_t opcode, bool outgoing,
+		uint32_t sourceActor, uint32_t targetActor,
+		const uint8_t* payload, size_t payloadLen,
+		std::chrono::system_clock::time_point timestamp)
+	{
+		if (outgoing || opcode != 0x0192) return;
+		if (!payload || payloadLen < sizeof(ServerZone::FFXIVIpcActorMove)) return;
+		
+		auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcActorMove*>(payload);
+		
+		// Decode position using the correct formula: (raw - 32768) / 32.0f
+		DirectX::XMFLOAT3 worldPos = PacketEventDispatcher::DecodeActorMovePosition(pkt->pos);
+		
+		// Debug: log decoded position
+		LogDebug(std::format("ActorMove: actor=0x{:08X} rawPos=({},{},{}) worldPos=({:.2f},{:.2f},{:.2f}) speed={}",
+			sourceActor, pkt->pos[0], pkt->pos[1], pkt->pos[2],
+			worldPos.x, worldPos.y, worldPos.z, pkt->speed));
+		
+		ActorMoveEvent event{};
+		event.sourceActorId = sourceActor;
+		event.targetActorId = targetActor;
+		event.position = worldPos;
+		event.direction = PacketEventDispatcher::DecodeDirection8(pkt->dir);
+		event.speed = pkt->speed;
+		event.flags = pkt->flag;
+		event.timestamp = static_cast<uint64_t>(
+			std::chrono::duration_cast<std::chrono::milliseconds>(
+				timestamp.time_since_epoch()).count());
+		
+		PacketEventDispatcher::Instance().DispatchActorMove(event);
+	}
+
+	// Dispatch PlayerSpawn events - these have REAL float world coordinates!
+	static void DispatchPlayerSpawnEvent(uint16_t opcode, bool outgoing,
+		uint32_t actorId,
+		const uint8_t* payload, size_t payloadLen,
+		std::chrono::system_clock::time_point timestamp)
+	{
+		if (outgoing || opcode != 0x0190) return;
+		if (!payload || payloadLen < sizeof(ServerZone::FFXIVIpcPlayerSpawn)) return;
+		
+		auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcPlayerSpawn*>(payload);
+		
+		// Log spawn with real world coordinates
+		LogDebug(std::format("PlayerSpawn: actor=0x{:08X} pos=({:.2f},{:.2f},{:.2f}) objKind={} npcId={}",
+			actorId, pkt->Pos[0], pkt->Pos[1], pkt->Pos[2], pkt->ObjKind, pkt->NpcId));
+		
+		PlayerSpawnEvent event{};
+		event.actorId = actorId;
+		event.position = { pkt->Pos[0], pkt->Pos[1], pkt->Pos[2] };
+		event.direction = PacketEventDispatcher::DecodeDirection16(pkt->Dir);
+		event.objKind = pkt->ObjKind;
+		event.npcId = pkt->NpcId;
+		event.timestamp = static_cast<uint64_t>(
+			std::chrono::duration_cast<std::chrono::milliseconds>(
+				timestamp.time_since_epoch()).count());
+		
+		PacketEventDispatcher::Instance().DispatchPlayerSpawn(event);
 	}
 
 	static bool DecodeWithRegistry(uint16_t resolvedConnType,
@@ -1821,6 +1967,9 @@ void PacketCapture::DrawImGuiEmbedded() {
 
 	display.reserve(display.size() + ui_batch.size());
 	for (auto& p : ui_batch) {
+		// Dispatch packet events (ActorMove, etc.) for subscribers
+		ProcessPacketEvents(p);
+		
 		auto dec = DecodeForList(p);
 		if (dec.valid) {
 			recentOpcodes.push_back(dec.opcode);

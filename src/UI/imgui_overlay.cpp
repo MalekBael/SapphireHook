@@ -79,13 +79,13 @@ void CreateRenderTarget(IDXGISwapChain* pSwapChain)
         }
         else
         {
-            LogError("Failed to create render target view: 0x" + std::to_string(hr));
+            LogError("Failed to create render target view: " + Logger::HexFormat(static_cast<uint32_t>(hr)));
             g_renderTargetValid = false;
         }
     }
     else
     {
-        LogError("Failed to get back buffer: 0x" + std::to_string(hr));
+        LogError("Failed to get back buffer: " + Logger::HexFormat(static_cast<uint32_t>(hr)));
         g_renderTargetValid = false;
     }
 }
@@ -355,7 +355,7 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         }
         else
         {
-            LogError("Device is actually lost: 0x" + std::to_string(deviceState));
+            LogError("Device is actually lost: " + Logger::HexFormat(static_cast<uint32_t>(deviceState)));
             return oPresent(pSwapChain, SyncInterval, Flags);
         }
     }

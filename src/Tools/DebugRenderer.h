@@ -78,6 +78,7 @@ namespace SapphireHook::DebugVisuals {
 
         // Immediate-mode rendering (drawn this frame only)
         void DrawLine(const Vec3& start, const Vec3& end, const Color& color, float thickness = 2.0f);
+        void DrawThickLine(const Vec3& start, const Vec3& end, const Color& color, float worldThickness);  // Uses quads for actual thick lines
         void DrawSphere(const Vec3& center, float radius, const Color& color, bool filled = false, int segments = 16);
         void DrawBox(const Vec3& center, const Vec3& halfExtents, const Color& color, bool filled = false);
         void DrawCircle(const Vec3& center, float radius, const Color& color, int segments = 32, bool filled = false);

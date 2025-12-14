@@ -14,6 +14,9 @@
 #include "../Analysis/PatternScanner.h"
 #include "../Hooking/MatrixCaptureHooks.h"  // Matrix capture hooks for real-time matrix capture
 // Note: SignatureScanner.h has no implementation - using PatternScanner directly
+#// CHANGE NOTE (2025-12-15): Prefer our SafeMemory validation helpers over `IsBadReadPtr`.
+#// `IsBadReadPtr` is deprecated/unreliable; `IsValidMemoryAddress` gives us a VirtualQuery-based check.
+#include "../Core/SafeMemory.h"
 #include "../Logger/Logger.h"
 
 #include <cstring>
@@ -675,10 +678,17 @@ namespace SapphireHook::DebugVisuals {
         // ripOffset is where the 4-byte displacement starts within the instruction
         // The final address is: instruction_address + instruction_length + signed_offset
         
+        // CHANGE NOTE (2025-12-15): Avoid `IsBadReadPtr` and avoid unaligned `*reinterpret_cast<int32_t*>` reads.
+        // We validate the address, then memcpy into a local int32_t (alignment-safe).
         int32_t offset = 0;
-        if (!IsBadReadPtr(reinterpret_cast<void*>(instructionAddress + ripOffset), sizeof(int32_t))) {
-            offset = *reinterpret_cast<int32_t*>(instructionAddress + ripOffset);
-        } else {
+        const uintptr_t dispAddr = instructionAddress + static_cast<uintptr_t>(ripOffset);
+        if (!SapphireHook::IsValidMemoryAddress(dispAddr, sizeof(int32_t))) {
+            return 0;
+        }
+        __try {
+            std::memcpy(&offset, reinterpret_cast<const void*>(dispAddr), sizeof(offset));
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
             return 0;
         }
 
@@ -694,11 +704,13 @@ namespace SapphireHook::DebugVisuals {
             return false;
         }
 
+        // CHANGE NOTE (2025-12-15): Use VirtualQuery-backed validation instead of `IsBadReadPtr`.
+        // We still keep SEH as a last-resort guard because game memory can change concurrently.
         __try {
-            if (IsBadReadPtr(reinterpret_cast<void*>(address), sizeof(T))) {
+            if (!SapphireHook::IsValidMemoryAddress(address, sizeof(T))) {
                 return false;
             }
-            outValue = *reinterpret_cast<T*>(address);
+            std::memcpy(&outValue, reinterpret_cast<const void*>(address), sizeof(T));
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
@@ -711,42 +723,24 @@ namespace SapphireHook::DebugVisuals {
             return false;
         }
 
-        __try {
-            if (IsBadReadPtr(reinterpret_cast<void*>(address), sizeof(float) * 16)) {
-                return false;
-            }
-            
-            float* matrixData = reinterpret_cast<float*>(address);
-            outMatrix = DirectX::XMMATRIX(
-                matrixData[0], matrixData[1], matrixData[2], matrixData[3],
-                matrixData[4], matrixData[5], matrixData[6], matrixData[7],
-                matrixData[8], matrixData[9], matrixData[10], matrixData[11],
-                matrixData[12], matrixData[13], matrixData[14], matrixData[15]
-            );
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+        std::array<float, 16> m{};
+        if (!SafeRead(address, m)) return false;
+        outMatrix = DirectX::XMMATRIX(
+            m[0], m[1], m[2], m[3],
+            m[4], m[5], m[6], m[7],
+            m[8], m[9], m[10], m[11],
+            m[12], m[13], m[14], m[15]);
+        return true;
     }
 
     bool GameCameraExtractor::SafeReadFloat3(uintptr_t address, DirectX::XMFLOAT3& outVec) const {
         if (address == 0) {
             return false;
         }
-
-        __try {
-            if (IsBadReadPtr(reinterpret_cast<void*>(address), sizeof(float) * 3)) {
-                return false;
-            }
-            
-            float* vecData = reinterpret_cast<float*>(address);
-            outVec = DirectX::XMFLOAT3(vecData[0], vecData[1], vecData[2]);
-            return true;
-        }
-        __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+        std::array<float, 3> v{};
+        if (!SafeRead(address, v)) return false;
+        outVec = DirectX::XMFLOAT3(v[0], v[1], v[2]);
+        return true;
     }
 
     bool GameCameraExtractor::SafeReadFloat(uintptr_t address, float& outValue) const {

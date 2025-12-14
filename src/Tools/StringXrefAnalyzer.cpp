@@ -15,6 +15,7 @@
 #include <fstream>
 #include <iomanip>
 #include <sstream> // NEW
+#include <cstring>
 
 // Windows + psapi for module/sections
 #ifndef WIN32_LEAN_AND_MEAN
@@ -36,6 +37,47 @@
 using namespace SapphireHook;
 
 namespace {
+	// Helper to build timestamped filename like "prefix.20251209.001234.ext"
+	static std::string BuildTimestampedFilename(const std::string& prefix, const std::string& ext) {
+		const auto now = std::chrono::system_clock::now();
+		const auto tt = std::chrono::system_clock::to_time_t(now);
+		std::tm tm{};
+#if defined(_WIN32)
+		localtime_s(&tm, &tt);
+#else
+		tm = *std::localtime(&tt);
+#endif
+		std::ostringstream name;
+		name << prefix << "." << std::put_time(&tm, "%Y%m%d.%H%M%S") << "." << ext;
+		return name.str();
+	}
+
+	// CHANGE NOTE (2025-12-15): Clipboard writes were previously repeating the same pattern:
+	// GlobalAlloc -> GlobalLock -> memcpy -> GlobalUnlock -> SetClipboardData.
+	// This helper centralizes the logic, checks GlobalLock/SetClipboardData failures, and avoids leaking HGLOBAL.
+	static bool CopyTextToClipboard(const std::string& text) {
+		if (!OpenClipboard(nullptr)) return false;
+		struct ClipboardCloser {
+			~ClipboardCloser() { CloseClipboard(); }
+		} closer;
+		EmptyClipboard();
+		HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1);
+		if (!hg) return false;
+		void* mem = GlobalLock(hg);
+		if (!mem) {
+			GlobalFree(hg);
+			return false;
+		}
+		std::memcpy(mem, text.c_str(), text.size() + 1);
+		GlobalUnlock(hg);
+		if (!SetClipboardData(CF_TEXT, hg)) {
+			GlobalFree(hg);
+			return false;
+		}
+		// On success, clipboard owns hg.
+		return true;
+	}
+
 	// Load .rdata section range
 	static bool GetSectionRange(HMODULE mod, const char* name, uint8_t*& begin, size_t& size) {
 		auto base = reinterpret_cast<uint8_t*>(mod);
@@ -138,18 +180,7 @@ namespace {
 		std::error_code ec;
 		std::filesystem::create_directories(baseDir, ec);
 
-		const auto now = std::chrono::system_clock::now();
-		const auto tt = std::chrono::system_clock::to_time_t(now);
-		std::tm tm{};
-#if defined(_WIN32)
-		localtime_s(&tm, &tt);
-#else
-		tm = *std::localtime(&tt);
-#endif
-		std::ostringstream name;
-		name << "ida_xref_comments." << std::put_time(&tm, "%Y%m%d.%H%M%S") << ".py";
-
-		std::filesystem::path out = baseDir / name.str();
+		std::filesystem::path out = baseDir / BuildTimestampedFilename("ida_xref_comments", "py");
 		std::ofstream ofs(out, std::ios::out | std::ios::trunc);
 		if (!ofs.is_open()) {
 			LogError(std::string("Export failed: could not open file: ") + out.string());
@@ -504,17 +535,7 @@ void StringXrefAnalyzer::RenderWindow()
 						std::ostringstream ss;
 						for (const auto& h : hits)
 							ss << "0x" << std::hex << h.addr << "\n";
-						auto text = ss.str();
-						if (OpenClipboard(nullptr)) {
-							EmptyClipboard();
-							HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1);
-							if (hg) {
-								memcpy(GlobalLock(hg), text.c_str(), text.size() + 1);
-								GlobalUnlock(hg);
-								SetClipboardData(CF_TEXT, hg);
-							}
-							CloseClipboard();
-						}
+						CopyTextToClipboard(ss.str());
 					}
 					ImGui::SameLine();
 					if (ImGui::Button("Copy RVAs")) {
@@ -522,17 +543,7 @@ void StringXrefAnalyzer::RenderWindow()
 						const uintptr_t imageBase2 = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
 						for (const auto& h : hits)
 							ss << "0x" << std::hex << (h.addr - imageBase2) << "\n";
-						auto text = ss.str();
-						if (OpenClipboard(nullptr)) {
-							EmptyClipboard();
-							HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, text.size() + 1);
-							if (hg) {
-								memcpy(GlobalLock(hg), text.c_str(), text.size() + 1);
-								GlobalUnlock(hg);
-								SetClipboardData(CF_TEXT, hg);
-							}
-							CloseClipboard();
-						}
+						CopyTextToClipboard(ss.str());
 					}
 				}
 			}
@@ -588,17 +599,7 @@ void StringXrefAnalyzer::RenderWindow()
 			std::string path;
 			if (ExportToIDAPython(path)) {
 				LogInfo("IDA script exported to: " + path);
-				// Copy to clipboard
-				if (OpenClipboard(nullptr)) {
-					EmptyClipboard();
-					HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, path.size() + 1);
-					if (hg) {
-						memcpy(GlobalLock(hg), path.c_str(), path.size() + 1);
-						GlobalUnlock(hg);
-						SetClipboardData(CF_TEXT, hg);
-					}
-					CloseClipboard();
-				}
+					CopyTextToClipboard(path);
 			}
 		}
 		ImGui::SetItemTooltip("Generate IDA Python script to add string comments");
@@ -627,16 +628,7 @@ void StringXrefAnalyzer::RenderWindow()
 			for (const auto& r : m_state.rows) {
 				ss << "0x" << std::hex << r.addr << "\n";
 			}
-			std::string addresses = ss.str();
-			if (OpenClipboard(nullptr)) {
-				EmptyClipboard();
-				HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, addresses.size() + 1);
-				if (hg) {
-					memcpy(GlobalLock(hg), addresses.c_str(), addresses.size() + 1);
-					GlobalUnlock(hg);
-					SetClipboardData(CF_TEXT, hg);
-				}
-				CloseClipboard();
+			if (CopyTextToClipboard(ss.str())) {
 				LogInfo("Copied " + std::to_string(m_state.rows.size()) + " addresses to clipboard");
 			}
 		}
@@ -791,18 +783,7 @@ bool StringXrefAnalyzer::ExportResultsToText(std::string& outPath) const
 	std::error_code ec;
 	std::filesystem::create_directories(baseDir, ec);
 
-	const auto now = std::chrono::system_clock::now();
-	const auto tt = std::chrono::system_clock::to_time_t(now);
-	std::tm tm{};
-#if defined(_WIN32)
-	localtime_s(&tm, &tt);
-#else
-	tm = *std::localtime(&tt);
-#endif
-	std::ostringstream name;
-	name << "xref_results." << std::put_time(&tm, "%Y%m%d.%H%M%S") << ".txt";
-
-	std::filesystem::path out = baseDir / name.str();
+	std::filesystem::path out = baseDir / BuildTimestampedFilename("xref_results", "txt");
 
 	std::ofstream ofs(out, std::ios::out | std::ios::trunc);
 	if (!ofs.is_open()) {
@@ -858,15 +839,7 @@ bool StringXrefAnalyzer::ExportToIDAPython(std::string& outPath) const
 	std::error_code ec;
 	std::filesystem::create_directories(baseDir, ec);
 
-	const auto now = std::chrono::system_clock::now();
-	const auto tt = std::chrono::system_clock::to_time_t(now);
-	std::tm tm{};
-	localtime_s(&tm, &tt);
-
-	std::ostringstream name;
-	name << "ida_xref_comments." << std::put_time(&tm, "%Y%m%d.%H%M%S") << ".py";
-
-	std::filesystem::path out = baseDir / name.str();
+	std::filesystem::path out = baseDir / BuildTimestampedFilename("ida_xref_comments", "py");
 	std::ofstream ofs(out, std::ios::out | std::ios::trunc);
 	if (!ofs.is_open()) return false;
 
@@ -924,20 +897,18 @@ bool StringXrefAnalyzer::ExportEnhancedResults(std::string& outPath) const
 	std::error_code ec;
 	std::filesystem::create_directories(baseDir, ec);
 
-	const auto now = std::chrono::system_clock::now();
-	const auto tt = std::chrono::system_clock::to_time_t(now);
-	std::tm tm{};
-	localtime_s(&tm, &tt);
-
-	std::ostringstream name;
-	name << "xref_enhanced." << std::put_time(&tm, "%Y%m%d.%H%M%S") << ".txt";
-
-	std::filesystem::path out = baseDir / name.str();
+	std::filesystem::path out = baseDir / BuildTimestampedFilename("xref_enhanced", "txt");
 	std::ofstream ofs(out, std::ios::out | std::ios::trunc);
 	if (!ofs.is_open()) {
 		LogError(std::string("Export failed: could not open file: ") + out.string());
 		return false;
 	}
+
+	// Get current time for display
+	const auto now = std::chrono::system_clock::now();
+	const auto tt = std::chrono::system_clock::to_time_t(now);
+	std::tm tm{};
+	localtime_s(&tm, &tt);
 
 	HMODULE hMod = GetModuleHandleW(nullptr);
 	uintptr_t imageBase = reinterpret_cast<uintptr_t>(hMod);
@@ -1018,15 +989,7 @@ bool StringXrefAnalyzer::ExportToCSV(std::string& outPath) const
 	std::error_code ec;
 	std::filesystem::create_directories(baseDir, ec);
 
-	const auto now = std::chrono::system_clock::now();
-	const auto tt = std::chrono::system_clock::to_time_t(now);
-	std::tm tm{};
-	localtime_s(&tm, &tt);
-
-	std::ostringstream name;
-	name << "xref_results." << std::put_time(&tm, "%Y%m%d.%H%M%S") << ".csv";
-
-	std::filesystem::path out = baseDir / name.str();
+	std::filesystem::path out = baseDir / BuildTimestampedFilename("xref_results", "csv");
 	std::ofstream ofs(out, std::ios::out | std::ios::trunc);
 	if (!ofs.is_open()) return false;
 

@@ -23,7 +23,7 @@
 #include "PacketRegistration.h" // for Net::ConnectionType
 #include "OpcodeNames.h"        // updated signatures
 #include "GameEnums.h"          // for enum lookups
-#include "../Core/GameData.h"   // for item/action/etc lookups
+#include "../Core/GameDataLookup.h"   // for item/action/etc lookups
 
 namespace PacketDecoding {
     using RowEmitter = std::function<void(const char*, const std::string&)>;
@@ -1499,10 +1499,14 @@ namespace PacketDecoding {
         std::string BytesToHex(const std::vector<uint8_t>& data, size_t maxBytes = 0) const;
         std::string FormatTimestamp(std::chrono::steady_clock::time_point tp) const;
         const char* GetSegmentTypeName(uint16_t type) const;
-        std::string FormatHex8(uint8_t value) const;
-        std::string FormatHex16(uint16_t value) const;
-        std::string FormatHex32(uint32_t value) const;
-        std::string FormatHex64(uint64_t value) const;
+        template<typename T>
+        std::string FormatHex(T value) const {
+            std::ostringstream os;
+            os << "0x" << std::hex << std::uppercase 
+               << std::setw(sizeof(T) * 2) << std::setfill('0') 
+               << static_cast<uint64_t>(value);
+            return os.str();
+        }
 
         bool includeRawData_ = false;
     };

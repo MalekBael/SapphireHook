@@ -17,11 +17,10 @@
 using namespace SapphireHook;
 #include "../Hooking/hook_factory_impl.h"
 
-static std::string FormatHexAddress(uintptr_t address)
-{
-    std::stringstream ss;
-    ss << "0x" << std::hex << std::uppercase << address;
-    return ss.str();
+static std::string FormatHexAddress(uintptr_t address) {
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "0x%llX", static_cast<unsigned long long>(address));
+    return std::string(buf);
 }
 
 // --- Heuristic JSON helpers (declared before use) ---
