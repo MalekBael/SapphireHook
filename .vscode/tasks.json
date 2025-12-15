@@ -3,9 +3,17 @@
   "tasks": [
     {
       "label": "Generate Doxygen (HTML)",
-      "type": "shell",
-      "command": "doxygen",
-      "args": ["Doxyfile"],
+      // CHANGE NOTE (2025-12-15): Switched to a process task to avoid VS Code shell
+      // quoting issues with nested PowerShell -Command strings.
+      "type": "process",
+      "command": "powershell",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        "$ErrorActionPreference='Stop'; Set-Location '${workspaceFolder}'; $doxygen=(Get-Command doxygen -ErrorAction SilentlyContinue).Source; if (-not $doxygen) { $candidate = Join-Path $env:ProgramFiles 'doxygen\\bin\\doxygen.exe'; if (Test-Path $candidate) { $doxygen = $candidate } }; if ($doxygen) { & $doxygen 'Doxyfile' } else { Write-Host 'Doxygen not found; skipping (install: winget install DimitriVanHeesch.Doxygen)'; exit 0 }"
+      ],
       "options": {
         "cwd": "${workspaceFolder}"
       },

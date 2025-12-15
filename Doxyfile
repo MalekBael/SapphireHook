@@ -10,10 +10,9 @@ OUTPUT_DIRECTORY       = docs/doxygen
 CREATE_SUBDIRS         = NO
 
 # Input
-INPUT                  = src docs
+INPUT                  = src docs docs/README.md
 RECURSIVE              = YES
-FILE_PATTERNS          = *.h *.hpp *.cpp *.c
-EXTENSION_MAPPING      = md=Markdown
+FILE_PATTERNS          = *.h *.hpp *.cpp *.c *.md
 USE_MDFILE_AS_MAINPAGE = docs/README.md
 
 # Keep vendor and build outputs out of the generated docs
