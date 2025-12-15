@@ -3,13 +3,14 @@
 # CHANGE NOTE (2025-12-15): Added an automated GitHub Pages deployment workflow.
 # This generates Doxygen HTML on CI and publishes it to Pages (without committing
 # generated artifacts back into the repository).
+# CHANGE NOTE (2025-12-15): Restrict workflow trigger to `master` only to match
+# this repo's default branch and avoid duplicate runs.
 
 name: Doxygen Pages
 
 on:
   push:
     branches:
-      - main
       - master
   workflow_dispatch:
 
