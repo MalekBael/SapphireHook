@@ -1,0 +1,61 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Generate Doxygen (HTML)",
+      "type": "shell",
+      "command": "doxygen",
+      "args": ["Doxyfile"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Build SapphireHook DLL (MSBuild)",
+      "type": "process",
+      "command": "K:/Program Files/Microsoft Visual Studio/18/Insiders/MSBuild/Current/Bin/MSBuild.exe",
+      "args": [
+        "SapphireHookDLL.vcxproj",
+        "/t:Build",
+        "/p:Configuration=Debug",
+        "/p:Platform=x64"
+      ],
+      "problemMatcher": ["$msCompile"]
+    },
+    {
+      "label": "Build Injector EXE (MSBuild)",
+      "type": "process",
+      "command": "K:/Program Files/Microsoft Visual Studio/18/Insiders/MSBuild/Current/Bin/MSBuild.exe",
+      "args": [
+        "SapphireHookInjector/SapphireHookInjector.vcxproj",
+        "/t:Build",
+        "/p:Configuration=Debug",
+        "/p:Platform=x64"
+      ],
+      "problemMatcher": ["$msCompile"]
+    },
+    {
+      "label": "Build All (MSBuild)",
+      "dependsOn": [
+        "Build SapphireHook DLL (MSBuild)",
+        "Build Injector EXE (MSBuild)",
+        "Generate Doxygen (HTML)"
+      ],
+      "dependsOrder": "sequence",
+      "type": "process",
+      "command": "K:/Program Files/Microsoft Visual Studio/18/Insiders/MSBuild/Current/Bin/MSBuild.exe",
+      "args": [
+        "SapphireHookDLL.vcxproj",
+        "/t:Build",
+        "/p:Configuration=Debug",
+        "/p:Platform=x64"
+      ],
+      "problemMatcher": ["$msCompile"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      }
+    }
+  ]
+}

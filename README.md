@@ -6,6 +6,10 @@ A modern C++20 native hook library for Final Fantasy XIV, designed with safety-f
 
 SapphireHook aims to be an toolkit for Project Sapphire . It provides runtime inspection, memory analysis, network monitoring
 
+For a more detailed codebase guide (architecture, modules/classes, safety), see `docs/README.md`.
+
+API docs: see `docs/DOXYGEN.md` (generates HTML locally via Doxygen).
+
 ### Key Features
 
 #### Network Analysis

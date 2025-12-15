@@ -1,0 +1,49 @@
+# Doxygen configuration for SapphireHook
+#
+# CHANGE NOTE (2025-12-15): Added a minimal Doxygen config so developers can generate
+# API documentation locally (HTML) without committing generated artifacts.
+
+DOXYFILE_ENCODING      = UTF-8
+PROJECT_NAME           = "SapphireHook"
+PROJECT_BRIEF          = "C++20 native hook DLL for FFXIV (SapphireHook)"
+OUTPUT_DIRECTORY       = docs/doxygen
+CREATE_SUBDIRS         = NO
+
+# Input
+INPUT                  = src docs
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.hpp *.cpp *.c
+EXTENSION_MAPPING      = md=Markdown
+USE_MDFILE_AS_MAINPAGE = docs/README.md
+
+# Keep vendor and build outputs out of the generated docs
+EXCLUDE                = vendor vcpkg packages x64 SapphireHookDLL SapphireHookInjector backups notes tools
+EXCLUDE_PATTERNS       = */x64/* */Debug/* */Release/* */*.generated.*
+
+# Extraction (tune later as the codebase accumulates Doxygen comments)
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+
+# Output formats
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+
+# Warnings (keep noise manageable initially)
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+
+# Sources
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+STRIP_CODE_COMMENTS    = NO
+
+# Misc
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+QUIET                  = YES

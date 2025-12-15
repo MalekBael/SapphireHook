@@ -300,7 +300,7 @@ node_modules/
 **/*.DesktopClient/ModelManifest.xml
 **/*.Server/GeneratedArtifacts
 **/*.Server/ModelManifest.xml
-_Pvt_Extensions
+_Pvt_Extensionsf
 
 # Paket dependency manager
 .paket/paket.exe
@@ -366,7 +366,19 @@ FodyWeavers.xsd
 build/
 temp_data.yml
 
-docs/
+# Local snapshots / working notes (not source)
+/backups/
+/notes/
+
+# Documentation artifacts (keep Markdown docs tracked)
+/docs/**/*.json
+/docs/**/*.csv
+/docs/**/*.txt
+/docs/navmesh/
+/docs/doxygen/
+
+# CHANGE NOTE (2025-12-15): Keep vendored datReader sources tracked, but ignore local/built artifacts.
+/vendor/datReader/*.lib
 
 # External dependencies (if not using submodules)
 external/*/build/
@@ -375,6 +387,9 @@ external/*/bin/
 
 # IDE specific
 .vscode/
+
+# CHANGE NOTE (2025-12-15): Share build tasks (MSBuild + Doxygen) via git.
+!.vscode/tasks.json
 .idea/
 
 # Project specific temp files
@@ -384,47 +399,26 @@ external/*/bin/
 /packet.txt
 /gmcommands.txt
 /prompt.txt
+
+# Local-only instruction files
 /copilot-instructions.md
-/copilot-instructions.md
-/copilot-instructions.md
-/copilot-instructions.md
+/.github/copilot-instructions.md
+
+# VS Code C++ configuration (local)
+CppProperties.json
+
+# Local developer scratch docs (moved under notes/; notes/ is ignored)
 /PseudocodeGenerator.md
 
-# VS Code C++ configuration
-CppProperties.json
-/notes/cbt.txt
-CppProperties.json
-/notes/hook-log.txt
-/notes/NetworkMonitor.cpp
-/notes/packet-notes.txt
-/notes/packet.txt
-/notes/prompt.txt
-/notes/prompts.txt
-/notes/PseudocodeGenerator.md
-/notes/suspected_opcodes.txt
-/docs/BACKLOG.md
-/docs/MAPPING_GUIDE.md
-/docs/MIGRATION_PROGRESS.md
-/docs/PACKET_MIGRATION_GUIDE.md
-/docs/QUEST_OPCODE_STATUS.md
-/docs/STRUCT_OPCODE_VERIFICATION.md
-/tools/list_missing_decoders.py
+# Tool outputs / local artifacts
+/tools/
 /tools/unmigrated.txt
-*.txt
-/tools/Find-StalePragmas.ps1
-/tools/Scan-MsbuildLibs.ps1
-/tools
-/.github/copilot-instructions.md
-/docs/REFACTOR.md
-docs/refactor-18-11.md
-docs/TEMPLATE_FAMILY_STRATEGY.md
-docs/Weather.csv
+
+# External/local data that should not be committed
 resources/filenames.csv
 resources/folders.csv
+
+# Local dependency folders / analyzer configs
 vcpkg/
 project.json
 sonar-project.properties
-docs/classinformer_3.35.csv
-docs/classinformer_200.csv
-docs/classinformer.csv
-docs/classinformer_comparison.json
