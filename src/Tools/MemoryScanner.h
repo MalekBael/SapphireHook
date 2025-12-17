@@ -119,7 +119,8 @@ namespace SapphireHook {
 		std::shared_ptr<FunctionScanner> m_scanner;
 		std::shared_ptr<FunctionDatabase> m_functionDB;
 
-		// Merged results
+		// Merged results - protected by m_resultsMutex
+		mutable std::mutex m_resultsMutex;
 		std::vector<uintptr_t> m_mergedFunctions;
 		std::unordered_map<uintptr_t, std::vector<std::string>> m_functionTags;
 		bool m_resultsDirty = true;

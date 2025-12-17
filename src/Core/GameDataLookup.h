@@ -70,6 +70,84 @@ std::string FormatTerritory(uint32_t territoryId);
 const char* LookupTerritoryBgPath(uint32_t territoryId) noexcept;
 
 // ============================================================================
+// Map Lookups
+// ============================================================================
+
+// Map info structure with coordinate conversion data
+struct MapInfo {
+    uint32_t mapId = 0;
+    uint16_t territoryType = 0;
+    uint16_t sizeFactor = 100;  // Default 100 = 1.0 scale
+    int16_t offsetX = 0;
+    int16_t offsetY = 0;
+    std::string path;
+    
+    // Convert world X/Z coordinate to map 2D coordinate
+    // Based on Saint Coinach: ToMapCoordinate3d
+    double WorldToMap(double worldCoord, int offset) const {
+        double c = sizeFactor / 100.0;
+        double offsetValue = (worldCoord + offset) * c;
+        return ((41.0 / c) * ((offsetValue + 1024.0) / 2048.0)) + 1.0;
+    }
+    
+    // Convert map 2D coordinate back to world X/Z coordinate
+    // Inverse of WorldToMap
+    double MapToWorld(double mapCoord, int offset) const {
+        double c = sizeFactor / 100.0;
+        // Reverse: mapCoord = ((41.0 / c) * ((offsetValue + 1024.0) / 2048.0)) + 1.0
+        // (mapCoord - 1.0) * c / 41.0 = (offsetValue + 1024.0) / 2048.0
+        // (mapCoord - 1.0) * c * 2048.0 / 41.0 = offsetValue + 1024.0
+        // offsetValue = (mapCoord - 1.0) * c * 2048.0 / 41.0 - 1024.0
+        // worldCoord = offsetValue / c - offset
+        double offsetValue = (mapCoord - 1.0) * c * 2048.0 / 41.0 - 1024.0;
+        return offsetValue / c - offset;
+    }
+    
+    // Convenience: Convert world position to map position using this map's offsets
+    double WorldXToMapX(double worldX) const { return WorldToMap(worldX, offsetX); }
+    double WorldZToMapY(double worldZ) const { return WorldToMap(worldZ, offsetY); }
+    double MapXToWorldX(double mapX) const { return MapToWorld(mapX, offsetX); }
+    double MapYToWorldZ(double mapY) const { return MapToWorld(mapY, offsetY); }
+};
+
+// Lookup map path by ID
+const char* LookupMapPath(uint32_t mapId) noexcept;
+
+// Lookup full map info by ID
+const MapInfo* LookupMapInfo(uint32_t mapId) noexcept;
+
+// Lookup map info by territory type (convenience)
+const MapInfo* LookupMapInfoByTerritory(uint32_t territoryType) noexcept;
+
+// ============================================================================
+// Weather Lookups
+// ============================================================================
+
+const char* LookupWeatherName(uint32_t weatherId) noexcept;
+std::string FormatWeather(uint32_t weatherId);
+
+// ============================================================================
+// World (Server) Lookups
+// ============================================================================
+
+const char* LookupWorldName(uint32_t worldId) noexcept;
+std::string FormatWorld(uint32_t worldId);
+
+// ============================================================================
+// Aetheryte Lookups
+// ============================================================================
+
+const char* LookupAetheryteName(uint32_t aetheryteId) noexcept;
+std::string FormatAetheryte(uint32_t aetheryteId);
+
+// ============================================================================
+// InstanceContent (Duty) Lookups
+// ============================================================================
+
+const char* LookupInstanceContentName(uint32_t instanceContentId) noexcept;
+std::string FormatInstanceContent(uint32_t instanceContentId);
+
+// ============================================================================
 // Raw File Access
 // ============================================================================
 
@@ -146,6 +224,11 @@ struct LoadStats {
     size_t bnpcCount = 0;
     size_t enpcCount = 0;
     size_t placeNameCount = 0;
+    size_t mapCount = 0;
+    size_t weatherCount = 0;
+    size_t worldCount = 0;
+    size_t aetheryteCount = 0;
+    size_t instanceContentCount = 0;
     bool initialized = false;
 };
 

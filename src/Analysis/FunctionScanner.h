@@ -58,6 +58,9 @@ namespace SapphireHook {
 
         // Progress callback for long-running operations
         using ProgressCallback = std::function<void(size_t processed, size_t total, const std::string& phase)>;
+        
+        // Result callback for streaming results as they're found
+        using ResultCallback = std::function<void(uintptr_t address)>;
 
         FunctionScanner();
         ~FunctionScanner();
@@ -89,7 +92,8 @@ namespace SapphireHook {
 
         std::vector<uintptr_t> ScanForAllInterestingFunctions(
             const ScanConfig& config = ScanConfig{},
-            ProgressCallback progress = nullptr) const;
+            ProgressCallback progress = nullptr,
+            ResultCallback onResult = nullptr) const;
 
         std::vector<uintptr_t> ScanForAllFunctions(
             const ScanConfig& config = ScanConfig{},

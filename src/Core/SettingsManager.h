@@ -48,6 +48,12 @@ namespace SapphireHook {
         void SetSqpackPath(const std::filesystem::path& path);
         bool HasCustomSqpackPath() const { return !m_sqpackPath.empty(); }
 
+        // ===== NavMesh Settings =====
+        // Path to the folder containing NavMesh files (organized by zone ID or bg name)
+        const std::filesystem::path& GetNavMeshPath() const { return m_navMeshPath; }
+        void SetNavMeshPath(const std::filesystem::path& path);
+        bool HasNavMeshPath() const { return !m_navMeshPath.empty(); }
+
         // Register a callback to be notified when settings are loaded
         // This allows modules to react to setting changes
         using SettingsLoadedCallback = std::function<void()>;
@@ -68,6 +74,7 @@ namespace SapphireHook {
         int m_packetLogMode = 1;      // PacketLogMode::Summary
         std::vector<uint32_t> m_weatherFavorites;
         std::filesystem::path m_sqpackPath;  // Custom sqpack path (empty = auto-detect)
+        std::filesystem::path m_navMeshPath; // Path to NavMesh folder
 
         bool m_initialized = false;
         std::vector<SettingsLoadedCallback> m_loadCallbacks;

@@ -24,6 +24,8 @@ namespace SapphireHook {
         bool m_windowOpen = false;
 
         void DrawGameDataSection();
+        void DrawExdTestLookupsSection();
+        void DrawNavMeshSection();
         void DrawPacketLoggingSection();
     };
 

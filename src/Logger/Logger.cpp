@@ -3,9 +3,17 @@
 #include <iomanip>
 #include <cstdarg>
 #include <filesystem>
-#include <fstream>
-#include <algorithm>
 #include <sstream>
+#include <chrono>
+#include <iostream>
+
+// spdlog includes - SPDLOG_USE_STD_FORMAT is defined by the NuGet package
+#include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/sinks/rotating_file_sink.h>
+#include <spdlog/async.h>
+#include <spdlog/sinks/msvc_sink.h>
+#include <spdlog/sinks/wincolor_sink.h>
 
 namespace {
 
@@ -43,18 +51,79 @@ bool Logger::EnsureDir(const std::filesystem::path& dir, bool create, bool& crea
     }
 }
 
+Logger::Logger() {
+    m_metrics.Reset();
+}
+
 Logger::~Logger() {
-    if (m_asyncRunning) {
-        SetAsyncLogging(false);
+    if (m_logger) {
+        m_logger->info("Logger shutdown");
+        m_logger->flush();
     }
-    if (m_logFile.is_open()) {
-        Information("Logger shutdown");
-        m_logFile.close();
+    spdlog::shutdown();
+}
+
+void Logger::RecreateLogger() {
+    std::vector<spdlog::sink_ptr> sinks;
+
+    // Windows colored console sink - works better for DLL injection scenarios
+    if (m_logToConsole) {
+        auto console_sink = std::make_shared<spdlog::sinks::wincolor_stdout_sink_mt>();
+        console_sink->set_level(ToSpdlogLevel(m_minimumLevel));
+        
+        // Configure colors for each level
+        // Colors: BLACK=0, BLUE=1, GREEN=2, CYAN=3, RED=4, MAGENTA=5, YELLOW=6, WHITE=7
+        // Add BOLD (8) or BACKGROUND (16*color) as needed
+        console_sink->set_color(spdlog::level::trace,    FOREGROUND_INTENSITY);                                      // Gray
+        console_sink->set_color(spdlog::level::debug,    FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY); // Cyan
+        console_sink->set_color(spdlog::level::info,     FOREGROUND_GREEN | FOREGROUND_INTENSITY);                   // Bright Green
+        console_sink->set_color(spdlog::level::warn,     FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);  // Yellow
+        console_sink->set_color(spdlog::level::err,      FOREGROUND_RED | FOREGROUND_INTENSITY);                     // Bright Red
+        console_sink->set_color(spdlog::level::critical, BACKGROUND_RED | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY); // White on Red
+        
+        sinks.push_back(console_sink);
     }
+
+    // MSVC debug output sink
+#ifdef _DEBUG
+    auto msvc_sink = std::make_shared<spdlog::sinks::msvc_sink_mt>();
+    msvc_sink->set_level(ToSpdlogLevel(m_minimumLevel));
+    sinks.push_back(msvc_sink);
+#endif
+
+    // Rotating file sink
+    if (m_logToFile && !m_logFilePath.empty()) {
+        try {
+            auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+                m_logFilePath.string(),
+                m_maxFileSize,
+                m_maxFiles
+            );
+            file_sink->set_level(ToSpdlogLevel(m_minimumLevel));
+            sinks.push_back(file_sink);
+        } catch (const std::exception& ex) {
+            // Fallback: just use console if file fails
+            if (m_logToConsole) {
+                std::cerr << "[SapphireHook] Failed to create log file: " << ex.what() << std::endl;
+            }
+        }
+    }
+
+    // Create the multi-sink logger
+    m_logger = std::make_shared<spdlog::logger>("sapphire", sinks.begin(), sinks.end());
+    m_logger->set_level(ToSpdlogLevel(m_minimumLevel));
+
+    // Set pattern: timestamp [LEVEL] message
+    m_logger->set_pattern("%Y-%m-%d %H:%M:%S.%e [%l] %v");
+
+    // Flush on warning and above
+    m_logger->flush_on(spdlog::level::warn);
+
+    // Register as default
+    spdlog::set_default_logger(m_logger);
 }
 
 static bool IsLikelyFilePath(const std::filesystem::path& p) {
-    // Heuristic: if has extension OR ends with known log-ish extension, treat as file
     return p.has_extension();
 }
 
@@ -72,7 +141,7 @@ bool Logger::Initialize(const std::filesystem::path& pathOrFile,
     s_instance->m_minimumLevel = minLevel;
     s_instance->m_metrics.Reset();
 
-    // Environment variable override (takes precedence)
+    // Environment variable override
     const char* envDir = std::getenv("SAPPHIREHOOK_LOG_DIR");
     bool envNoCreate = std::getenv("SAPPHIREHOOK_LOG_NOCREATE") != nullptr;
 
@@ -84,7 +153,6 @@ bool Logger::Initialize(const std::filesystem::path& pathOrFile,
         baseDir = std::filesystem::path(envDir);
         custom = true;
         if (!EnsureDir(baseDir, !envNoCreate, created)) {
-            // fallback
             baseDir = GetDefaultTempDir();
             EnsureDir(baseDir, true, created);
             custom = false;
@@ -98,7 +166,6 @@ bool Logger::Initialize(const std::filesystem::path& pathOrFile,
             custom = false;
         }
     } else {
-        // pathOrFile intended as filename -> always use default temp SapphireHook dir
         baseDir = GetDefaultTempDir();
         EnsureDir(baseDir, true, created);
     }
@@ -107,6 +174,7 @@ bool Logger::Initialize(const std::filesystem::path& pathOrFile,
     s_instance->m_customDirectory = custom;
     s_instance->m_createdDirectory = created;
 
+    // Generate timestamped log filename
     auto now = std::chrono::system_clock::now();
     auto tt = std::chrono::system_clock::to_time_t(now);
     auto tm = *std::localtime(&tt);
@@ -114,8 +182,6 @@ bool Logger::Initialize(const std::filesystem::path& pathOrFile,
     std::string fileBase;
     if (!treatAsDirectory && !custom && IsLikelyFilePath(pathOrFile))
         fileBase = pathOrFile.stem().string();
-    else if (treatAsDirectory || custom)
-        fileBase = "SapphireHook";
     else
         fileBase = "SapphireHook";
 
@@ -124,28 +190,16 @@ bool Logger::Initialize(const std::filesystem::path& pathOrFile,
          << std::put_time(&tm, "%Y%m%d.%H%M%S")
          << "." << GetCurrentProcessId() << ".log";
 
-    std::filesystem::path runLogPath = baseDir / name.str();
+    s_instance->m_logFilePath = baseDir / name.str();
 
-    try {
-        s_instance->m_fallbackPath = runLogPath;
-        s_instance->m_logFile.open(runLogPath, std::ios::out | std::ios::app);
-        if (!s_instance->m_logFile.is_open()) {
-            s_instance->InitializeFallbackLogging();
-        } else {
-            s_instance->Information("Using log file: " + runLogPath.string());
-            if (custom)
-                s_instance->Information("Custom log directory in use");
-        }
-    } catch (const std::exception& ex) {
-        s_instance->InitializeFallbackLogging();
-        s_instance->LogException(ex, "Failed to open run log file");
-    }
+    // Create the spdlog-based logger
+    s_instance->RecreateLogger();
 
-    s_instance->Information("=== SapphireHook Logger Initialized ===");
+    s_instance->Information("=== SapphireHook Logger Initialized (spdlog backend) ===");
+    s_instance->Information("Log file: " + s_instance->m_logFilePath.string());
     s_instance->Information("Console output: " + std::string(enableConsole ? "enabled" : "disabled"));
     s_instance->Information("Log level: " + std::string(LogLevelToString(minLevel)));
-    s_instance->Information(std::string("Directory created: ") + (s_instance->m_createdDirectory ? "yes" : "no"));
-    s_instance->Information(std::string("Directory path: ") + s_instance->m_logDirectory.string());
+    s_instance->Information("Directory path: " + s_instance->m_logDirectory.string());
     return true;
 }
 
@@ -153,8 +207,22 @@ Logger& Logger::Instance() {
     std::lock_guard<std::mutex> lock(s_mutex);
     if (!s_instance) {
         s_instance = std::make_unique<Logger>();
-        s_instance->InitializeFallbackLogging();
-        s_instance->m_metrics.Reset();
+        s_instance->m_logDirectory = GetDefaultTempDir();
+        bool created = false;
+        EnsureDir(s_instance->m_logDirectory, true, created);
+        s_instance->m_createdDirectory = created;
+
+        // Generate fallback log path
+        auto now = std::chrono::system_clock::now();
+        auto t = std::chrono::system_clock::to_time_t(now);
+        auto tm = *std::localtime(&t);
+        std::ostringstream name;
+        name << "SapphireHook."
+             << std::put_time(&tm, "%Y%m%d.%H%M%S")
+             << "." << GetCurrentProcessId() << ".log";
+        s_instance->m_logFilePath = s_instance->m_logDirectory / name.str();
+
+        s_instance->RecreateLogger();
     }
     return *s_instance;
 }
@@ -172,6 +240,7 @@ void Logger::DebugF(const char* fmt, ...) {
     va_end(a);
     WriteLog(LogLevel::Debug, msg);
 }
+
 void Logger::InformationF(const char* fmt, ...) {
     if (LogLevel::Information < m_minimumLevel) return;
     va_list a; va_start(a, fmt);
@@ -179,6 +248,7 @@ void Logger::InformationF(const char* fmt, ...) {
     va_end(a);
     WriteLog(LogLevel::Information, msg);
 }
+
 void Logger::WarningF(const char* fmt, ...) {
     if (LogLevel::Warning < m_minimumLevel) return;
     va_list a; va_start(a, fmt);
@@ -186,6 +256,7 @@ void Logger::WarningF(const char* fmt, ...) {
     va_end(a);
     WriteLog(LogLevel::Warning, msg);
 }
+
 void Logger::ErrorF(const char* fmt, ...) {
     if (LogLevel::Error < m_minimumLevel) return;
     va_list a; va_start(a, fmt);
@@ -194,45 +265,31 @@ void Logger::ErrorF(const char* fmt, ...) {
     WriteLog(LogLevel::Error, msg);
 }
 
-
 void Logger::InfoWithContext(const std::string& m, const LogContext& ctx) {
     WriteLog(LogLevel::Information, m + " [" + ctx.ToString() + "]");
 }
+
 void Logger::ErrorWithContext(const std::string& m, const LogContext& ctx) {
     WriteLog(LogLevel::Error, m + " [" + ctx.ToString() + "]");
 }
 
-
 void Logger::SetAsyncLogging(bool enable) {
-    if (enable && !m_asyncRunning) {
-        m_asyncRunning = true;
-        m_asyncThread = std::thread([this]() {
-            while (m_asyncRunning) {
-                std::unique_lock<std::mutex> lock(m_asyncMutex);
-                m_asyncCondition.wait(lock, [this] {
-                    return !m_asyncQueue.empty() || !m_asyncRunning;
-                });
-                while (!m_asyncQueue.empty()) {
-                    std::string msg = m_asyncQueue.front();
-                    m_asyncQueue.pop();
-                    lock.unlock();
-                    if (m_logToFile && m_logFile.is_open()) {
-                        m_logFile << msg << std::endl;
-                        m_logFile.flush();
-                    }
-                    if (m_logToConsole) std::cout << msg << std::endl;
-                    lock.lock();
-                }
-            }
-        });
-    } else if (!enable && m_asyncRunning) {
-        m_asyncRunning = false;
-        m_asyncCondition.notify_all();
-        if (m_asyncThread.joinable()) m_asyncThread.join();
+    if (enable != m_asyncEnabled) {
+        m_asyncEnabled = enable;
+        if (enable) {
+            // Initialize spdlog thread pool for async logging
+            spdlog::init_thread_pool(8192, 1);
+        }
+        // Note: spdlog handles async internally, no need to recreate logger
     }
 }
 
-
+void Logger::SetMinimumLevel(LogLevel level) {
+    m_minimumLevel = level;
+    if (m_logger) {
+        m_logger->set_level(ToSpdlogLevel(level));
+    }
+}
 
 std::string Logger::HexFormat(uintptr_t v) {
     char buf[24];
@@ -240,52 +297,29 @@ std::string Logger::HexFormat(uintptr_t v) {
     return std::string(buf);
 }
 
-
 void Logger::WriteLog(LogLevel level, const std::string& message) {
     if (level < m_minimumLevel) return;
-    auto start = std::chrono::high_resolution_clock::now();
-    std::lock_guard<std::mutex> lock(m_logMutex);
-
-    const std::string timestamp = GetTimestamp();
-    std::ostringstream oss;
-    oss << timestamp << " [" << LogLevelToString(level) << "] " << message;
-    std::string logLine = oss.str();
+    if (!m_logger) return;
 
     m_metrics.totalMessages.fetch_add(1, std::memory_order_relaxed);
 
-    if (m_asyncRunning && m_asyncQueue.size() < MAX_ASYNC_QUEUE_SIZE) {
-        std::lock_guard<std::mutex> aLock(m_asyncMutex);
-        m_asyncQueue.push(logLine);
-        m_asyncCondition.notify_one();
-    } else {
-        if (m_logToConsole) {
-            if (level >= LogLevel::Error) std::cerr << logLine << std::endl;
-            else std::cout << logLine << std::endl;
-        }
-        if (m_logToFile && m_logFile.is_open()) {
-            m_logFile << logLine << std::endl;
-            m_logFile.flush();
-            m_currentFileSize += logLine.length() + 1;
-            if (m_currentFileSize > m_maxFileSize) RotateLogFile();
-        }
+    switch (level) {
+    case LogLevel::Debug:
+        m_logger->debug("{}", message);
+        break;
+    case LogLevel::Information:
+        m_logger->info("{}", message);
+        break;
+    case LogLevel::Warning:
+        m_logger->warn("{}", message);
+        break;
+    case LogLevel::Error:
+        m_logger->error("{}", message);
+        break;
+    case LogLevel::Fatal:
+        m_logger->critical("{}", message);
+        break;
     }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    uint64_t durationNs = (uint64_t)std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count();
-    uint64_t oldMax = m_metrics.maxWriteTimeNs.load();
-    while (durationNs > oldMax && !m_metrics.maxWriteTimeNs.compare_exchange_weak(oldMax, durationNs)) {}
-    uint64_t oldAvg = m_metrics.avgWriteTimeNs.load();
-    m_metrics.avgWriteTimeNs.store((oldAvg + durationNs) / 2, std::memory_order_relaxed);
-}
-
-std::string Logger::GetTimestamp() const {
-    auto now = std::chrono::system_clock::now();
-    auto time_t = std::chrono::system_clock::to_time_t(now);
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
-    std::ostringstream oss;
-    oss << std::put_time(std::localtime(&time_t), "%Y-%m-%d %H:%M:%S");
-    oss << '.' << std::setfill('0') << std::setw(3) << ms.count();
-    return oss.str();
 }
 
 std::string Logger::FormatString(const char* format, va_list args) {
@@ -299,59 +333,22 @@ std::string Logger::FormatString(const char* format, va_list args) {
     return result;
 }
 
-void Logger::RotateLogFile() {
-    if (!m_logFile.is_open()) return;
-    m_logFile.close();
-    for (int i = (int)m_maxFiles - 1; i >= 1; --i) {
-        std::filesystem::path oldFile = m_fallbackPath.string() + "." + std::to_string(i);
-        std::filesystem::path newFile = m_fallbackPath.string() + "." + std::to_string(i + 1);
-        if (std::filesystem::exists(oldFile)) {
-            std::filesystem::rename(oldFile, newFile);
-        }
-    }
-    if (std::filesystem::exists(m_fallbackPath)) {
-        std::filesystem::path backup = m_fallbackPath.string() + ".1";
-        std::filesystem::rename(m_fallbackPath, backup);
-    }
-    m_logFile.open(m_fallbackPath, std::ios::out | std::ios::app);
-    m_currentFileSize = 0;
-}
-
-
-
-void Logger::InitializeFallbackLogging() {
-    m_fallbackMode = true;
-    std::filesystem::path dir = GetDefaultTempDir();
-    bool created = false;
-    EnsureDir(dir, true, created);
-    m_logDirectory = dir;
-    auto now = std::chrono::system_clock::now();
-    auto t = std::chrono::system_clock::to_time_t(now);
-    auto tm = *std::localtime(&t);
-    std::wostringstream woss;
-    woss << L"SapphireHook."
-         << std::put_time(&tm, L"%Y%m%d.%H%M%S")
-         << L"." << GetCurrentProcessId() << L".log";
-    m_fallbackPath = dir / woss.str();
-    try {
-        m_logFile.open(m_fallbackPath, std::ios::out | std::ios::app);
-        if (m_logFile.is_open()) {
-            Information("Using fallback log file: " + m_fallbackPath.string());
-        }
-    } catch (const std::exception& ex) {
-        m_logToFile = false;
-        if (m_logToConsole) {
-            std::cerr << "[SapphireHook] FATAL: Could not create fallback log: " << ex.what() << std::endl;
-        }
-    }
-}
-
 void Logger::LogException(const std::exception& ex, std::string_view ctx) {
-    if (!ctx.empty()) Error(std::string("Exception in ") + std::string(ctx) + ": " + ex.what());
-    else Error(std::string("Exception: ") + ex.what());
+    if (!ctx.empty()) 
+        Error(std::string("Exception in ") + std::string(ctx) + ": " + ex.what());
+    else 
+        Error(std::string("Exception: ") + ex.what());
 }
 
-
+void Logger::DebugPacketCorrelationTimeout(uint16_t requestOpcode, uint64_t connectionId, uint64_t ageMs) {
+    if (LogLevel::Debug < m_minimumLevel) return;
+    std::ostringstream oss;
+    oss << "[CorrelationTimeout] conn=" << connectionId
+        << " opcode=0x" << std::uppercase << std::hex << std::setw(4)
+        << std::setfill('0') << requestOpcode
+        << std::dec << " age=" << ageMs << "ms without response";
+    WriteLog(LogLevel::Debug, oss.str());
+}
 
 bool BinaryLogger::Initialize(const std::string&, size_t) { return false; }
 void BinaryLogger::LogBinary(const void*, size_t, uint32_t) {}
@@ -373,23 +370,18 @@ void Logger::ReattachConsole() {
     std::ios::sync_with_stdio(true);
     std::cout.clear();
     std::cerr.clear();
+    
+    // Recreate the logger to get fresh console handles for colored output
+    RecreateLogger();
 }
 
 void Logger::AnnounceLogFileLocation(bool force) {
     static std::atomic<bool> announced{ false };
     if (!(force || !announced.exchange(true))) return;
-    Information("Log file created: " + m_fallbackPath.string());
+    Information("Log file created: " + m_logFilePath.string());
     Information("Log directory: " + m_logDirectory.string());
     Information(std::string("Custom directory: ") + (m_customDirectory ? "yes" : "no"));
     Information(std::string("Directory created this run: ") + (m_createdDirectory ? "yes" : "no"));
-    wchar_t tempPathW[MAX_PATH];
-    if (GetTempPathW(MAX_PATH, tempPathW)) {
-        std::filesystem::path tempDir(tempPathW);
-        std::string tempDirStr = tempDir.string();
-        if (m_logDirectory.string().rfind(tempDirStr, 0) == 0) {
-            Information("Log directory resides under %TEMP% (" + tempDirStr + ")");
-        }
-    }
 }
 
 } // namespace SapphireHook

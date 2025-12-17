@@ -3,9 +3,9 @@
 #include "../vendor/imgui/imgui.h"
 #include "../Monitor/NetworkMonitor.h" // for embedded packet view and hex access
 
-#if __has_include("../vendor/implot/implot.h")
+#if __has_include("../../vendor/implot/implot.h")
     #define SH_HAVE_IMPLOT 1
-    #include "../vendor/implot/implot.h"
+    #include "../../vendor/implot/implot.h"
 #else
     #define SH_HAVE_IMPLOT 0
 #endif

@@ -49,6 +49,13 @@ namespace {
     std::unordered_map<uint32_t, std::string> s_enpcs;
     std::unordered_map<uint32_t, std::string> s_placeNames;
     std::unordered_map<uint32_t, std::string> s_territoryBgPaths;
+    std::unordered_map<uint32_t, std::string> s_maps;  // Just paths for backwards compat
+    std::unordered_map<uint32_t, MapInfo> s_mapInfos;  // Full map info
+    std::unordered_map<uint32_t, uint32_t> s_territoryToMap;  // TerritoryType -> MapId
+    std::unordered_map<uint32_t, std::string> s_weathers;
+    std::unordered_map<uint32_t, std::string> s_worlds;
+    std::unordered_map<uint32_t, std::string> s_aetherytes;
+    std::unordered_map<uint32_t, std::string> s_instanceContents;
 
     // Helper to load a sheet into a cache map
     template<typename StructT, typename ExtractName>
@@ -94,6 +101,13 @@ namespace {
         s_enpcs.clear();
         s_placeNames.clear();
         s_territoryBgPaths.clear();
+        s_maps.clear();
+        s_mapInfos.clear();
+        s_territoryToMap.clear();
+        s_weathers.clear();
+        s_worlds.clear();
+        s_aetherytes.clear();
+        s_instanceContents.clear();
         s_stats = LoadStats{};
     }
     
@@ -174,6 +188,108 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             size_t lvbCount = 0;
             LoadSheet<Excel::TerritoryType>("TerritoryType", s_territoryBgPaths, lvbCount,
                 [](const auto& row) { return row->getString(row->_data.LVB); });
+        }
+        
+        // Map: Try to load using the simple LoadSheet first
+        // The Map struct might have issues with get_sheet_rows, so we'll just load paths for now
+        // and add full MapInfo support later if needed
+        LoadSheet<Excel::Map>("Map", s_maps, s_stats.mapCount,
+            [](const auto& row) { return row->getString(row->_data.Path); });
+        
+        // Build MapInfo by reading TerritoryType first, then fetching Map data per-row
+        // We avoid get_sheet_rows<Excel::Map> since it can crash with large sheets
+        try {
+            auto& terrCat = s_exdData->get_category("TerritoryType");
+            auto& terrExd = terrCat.get_data(XivLanguage::en);
+            auto terrRows = terrExd.get_sheet_rows<Excel::TerritoryType>();
+            
+            // Get the Map exd for individual row lookups
+            auto& mapCat = s_exdData->get_category("Map");
+            auto& mapExd = mapCat.get_data(XivLanguage::en);
+            
+            size_t mapDataReadCount = 0;
+            for (const auto& [terrId, row] : terrRows) {
+                uint16_t mapId = row->_data.Map;
+                if (mapId == 0) continue;
+                
+                MapInfo info;
+                info.mapId = mapId;
+                info.territoryType = static_cast<uint16_t>(terrId);
+                info.sizeFactor = 100;  // Default
+                info.offsetX = 0;
+                info.offsetY = 0;
+                
+                // Try to read actual Map data using get_row (non-templated, returns Fields)
+                // Map columns based on EXD schema:
+                // Index 3: SizeFactor (UInt16)
+                // Index 7: OffsetX (Int16)
+                // Index 8: OffsetY (Int16)
+                try {
+                    auto fields = mapExd.get_row(mapId);
+                    if (fields.size() > 8) {
+                        // SizeFactor at index 3 (UInt16)
+                        if (auto* sf = std::get_if<uint16_t>(&fields[3])) {
+                            info.sizeFactor = *sf;
+                        }
+                        // OffsetX at index 7 (Int16)
+                        if (auto* ox = std::get_if<int16_t>(&fields[7])) {
+                            info.offsetX = *ox;
+                        }
+                        // OffsetY at index 8 (Int16)
+                        if (auto* oy = std::get_if<int16_t>(&fields[8])) {
+                            info.offsetY = *oy;
+                        }
+                        mapDataReadCount++;
+                    }
+                }
+                catch (...) {
+                    // Could not read this Map row, keep defaults
+                }
+                
+                s_mapInfos[mapId] = info;
+                s_territoryToMap[terrId] = mapId;
+            }
+            LogInfo("[GameData] Built " + std::to_string(s_mapInfos.size()) + " MapInfo entries (" 
+                + std::to_string(mapDataReadCount) + " with Map data)");
+        }
+        catch (const std::exception& e) {
+            LogWarning("[GameData] Could not build MapInfo from TerritoryType: " + std::string(e.what()));
+        }
+        
+        // Weather: Text.Name
+        LogInfo("[GameData] Loading Weather...");
+        try {
+            LoadSheet<Excel::Weather>("Weather", s_weathers, s_stats.weatherCount,
+                [](const auto& row) { return row->getString(row->_data.Text.Name); });
+        } catch (const std::exception& e) {
+            LogWarning("[GameData] Weather loading failed: " + std::string(e.what()));
+        }
+        
+        // World: InternalName (the actual world name string)
+        LogInfo("[GameData] Loading World...");
+        try {
+            LoadSheet<Excel::World>("World", s_worlds, s_stats.worldCount,
+                [](const auto& row) { return row->getString(row->_data.InternalName); });
+        } catch (const std::exception& e) {
+            LogWarning("[GameData] World loading failed: " + std::string(e.what()));
+        }
+        
+        // Aetheryte: Text.SGL
+        LogInfo("[GameData] Loading Aetheryte...");
+        try {
+            LoadSheet<Excel::Aetheryte>("Aetheryte", s_aetherytes, s_stats.aetheryteCount,
+                [](const auto& row) { return row->getString(row->_data.Text.SGL); });
+        } catch (const std::exception& e) {
+            LogWarning("[GameData] Aetheryte loading failed: " + std::string(e.what()));
+        }
+        
+        // InstanceContent: Text.Name
+        LogInfo("[GameData] Loading InstanceContent...");
+        try {
+            LoadSheet<Excel::InstanceContent>("InstanceContent", s_instanceContents, s_stats.instanceContentCount,
+                [](const auto& row) { return row->getString(row->_data.Text.Name); });
+        } catch (const std::exception& e) {
+            LogWarning("[GameData] InstanceContent loading failed: " + std::string(e.what()));
         }
         
         s_stats.initialized = true;
@@ -338,6 +454,72 @@ std::string FormatPlaceName(uint32_t placeNameId) {
         return std::format("{} ({})", name, placeNameId);
     }
     return std::to_string(placeNameId);
+}
+
+const char* LookupMapPath(uint32_t mapId) noexcept {
+    auto it = s_maps.find(mapId);
+    return (it != s_maps.end()) ? it->second.c_str() : nullptr;
+}
+
+const MapInfo* LookupMapInfo(uint32_t mapId) noexcept {
+    auto it = s_mapInfos.find(mapId);
+    return (it != s_mapInfos.end()) ? &it->second : nullptr;
+}
+
+const MapInfo* LookupMapInfoByTerritory(uint32_t territoryType) noexcept {
+    auto mapIt = s_territoryToMap.find(territoryType);
+    if (mapIt == s_territoryToMap.end()) return nullptr;
+    
+    auto infoIt = s_mapInfos.find(mapIt->second);
+    return (infoIt != s_mapInfos.end()) ? &infoIt->second : nullptr;
+}
+
+const char* LookupWeatherName(uint32_t weatherId) noexcept {
+    auto it = s_weathers.find(weatherId);
+    return (it != s_weathers.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatWeather(uint32_t weatherId) {
+    if (auto* name = LookupWeatherName(weatherId)) {
+        return std::format("{} ({})", name, weatherId);
+    }
+    return std::to_string(weatherId);
+}
+
+const char* LookupWorldName(uint32_t worldId) noexcept {
+    auto it = s_worlds.find(worldId);
+    return (it != s_worlds.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatWorld(uint32_t worldId) {
+    if (auto* name = LookupWorldName(worldId)) {
+        return std::format("{} ({})", name, worldId);
+    }
+    return std::to_string(worldId);
+}
+
+const char* LookupAetheryteName(uint32_t aetheryteId) noexcept {
+    auto it = s_aetherytes.find(aetheryteId);
+    return (it != s_aetherytes.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatAetheryte(uint32_t aetheryteId) {
+    if (auto* name = LookupAetheryteName(aetheryteId)) {
+        return std::format("{} ({})", name, aetheryteId);
+    }
+    return std::to_string(aetheryteId);
+}
+
+const char* LookupInstanceContentName(uint32_t instanceContentId) noexcept {
+    auto it = s_instanceContents.find(instanceContentId);
+    return (it != s_instanceContents.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatInstanceContent(uint32_t instanceContentId) {
+    if (auto* name = LookupInstanceContentName(instanceContentId)) {
+        return std::format("{} ({})", name, instanceContentId);
+    }
+    return std::to_string(instanceContentId);
 }
 
 const LoadStats& GetLoadStats() {

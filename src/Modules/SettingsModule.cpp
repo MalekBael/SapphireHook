@@ -4,6 +4,7 @@
 #include "../Core/PacketInjector.h"
 #include "../Core/SettingsManager.h"
 #include "../Core/GameDataLookup.h"
+#include "../Core/NavMeshManager.h"
 #include <windows.h>
 #include <shellapi.h>   // for ShellExecute
 #include <shobjidl.h>   // for IFileDialog
@@ -39,6 +40,16 @@ void SettingsModule::RenderWindow()
 	if (ImGui::CollapsingHeader("Game Data (sqpack)", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		DrawGameDataSection();
+	}
+
+	if (ImGui::CollapsingHeader("EXD Test Lookups"))
+	{
+		DrawExdTestLookupsSection();
+	}
+
+	if (ImGui::CollapsingHeader("NavMesh (navi)", ImGuiTreeNodeFlags_DefaultOpen))
+	{
+		DrawNavMeshSection();
 	}
 
 	if (ImGui::CollapsingHeader("Packet Logging", ImGuiTreeNodeFlags_DefaultOpen))
@@ -277,54 +288,244 @@ void SettingsModule::DrawGameDataSection()
 	
 	ImGui::Spacing();
 	ImGui::TextDisabled("Example: K:\\Program Files\\SquareEnix\\FINAL FANTASY XIV - A Realm Reborn\\game\\sqpack");
+}
+
+void SettingsModule::DrawExdTestLookupsSection()
+{
+	const auto& stats = GameData::GetLoadStats();
 	
-	// Test/Diagnostic section
-	if (stats.initialized)
+	if (!stats.initialized)
 	{
-		ImGui::Spacing();
-		ImGui::Separator();
-		ImGui::TextUnformatted("Test Lookups");
-		ImGui::Separator();
-		
-		// Test with some well-known IDs
-		static int s_testItemId = 4;       // Fire Shard
-		static int s_testActionId = 7;     // Attack
-		static int s_testStatusId = 2;     // Weakness
-		static int s_testMountId = 1;      // Company Chocobo
-		
-		ImGui::SetNextItemWidth(100);
-		ImGui::InputInt("Item ID", &s_testItemId);
-		ImGui::SameLine();
-		if (const char* name = GameData::LookupItemName(static_cast<uint32_t>(s_testItemId)))
-			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "-> %s", name);
-		else
-			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "-> (not found)");
-		
-		ImGui::SetNextItemWidth(100);
-		ImGui::InputInt("Action ID", &s_testActionId);
-		ImGui::SameLine();
-		if (const char* name = GameData::LookupActionName(static_cast<uint32_t>(s_testActionId)))
-			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "-> %s", name);
-		else
-			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "-> (not found)");
-		
-		ImGui::SetNextItemWidth(100);
-		ImGui::InputInt("Status ID", &s_testStatusId);
-		ImGui::SameLine();
-		if (const char* name = GameData::LookupStatusName(static_cast<uint32_t>(s_testStatusId)))
-			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "-> %s", name);
-		else
-			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "-> (not found)");
-		
-		ImGui::SetNextItemWidth(100);
-		ImGui::InputInt("Mount ID", &s_testMountId);
-		ImGui::SameLine();
-		if (const char* name = GameData::LookupMountName(static_cast<uint32_t>(s_testMountId)))
-			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "-> %s", name);
-		else
-			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "-> (not found)");
-		
-		ImGui::Spacing();
-		ImGui::TextDisabled("Try known IDs: Item 4=Fire Shard, Action 7=Attack, Status 2=Weakness");
+		ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Game data not loaded. Configure sqpack path above.");
+		return;
 	}
+	
+	ImGui::TextDisabled("Test EXD sheet lookups by entering IDs. Green = found, Red = not found.");
+	ImGui::Spacing();
+	
+	// Helper lambda for rendering a lookup row
+	auto RenderLookup = [](const char* label, int& id, const char* (*lookupFn)(uint32_t)) {
+		ImGui::SetNextItemWidth(80);
+		ImGui::InputInt(label, &id);
+		ImGui::SameLine();
+		if (const char* name = lookupFn(static_cast<uint32_t>(id)))
+			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "-> %s", name);
+		else
+			ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "-> (not found)");
+	};
+	
+	// Static test IDs for each sheet
+	static int s_itemId = 4;            // Fire Shard
+	static int s_actionId = 7;          // Attack
+	static int s_statusId = 2;          // Stun
+	static int s_classJobId = 1;        // Gladiator
+	static int s_mountId = 1;           // Company Chocobo
+	static int s_minionId = 1;          // Chocobo Chick
+	static int s_emoteId = 1;           // /sit
+	static int s_questId = 65575;       // First quest
+	static int s_territoryId = 132;     // Limsa Lominsa Upper Decks
+	static int s_weatherId = 1;         // Clear Skies
+	static int s_worldId = 21;          // Hyperion
+	static int s_aetheryteId = 8;       // Limsa Aetheryte
+	static int s_instanceId = 1;        // First dungeon
+	static int s_bnpcId = 1;            // First BNpc
+	static int s_enpcId = 1002299;      // An NPC
+	static int s_placeNameId = 30;      // PlaceName
+	static int s_mapId = 1;             // Map
+	
+	if (ImGui::BeginTabBar("ExdLookupTabs"))
+	{
+		if (ImGui::BeginTabItem("Common"))
+		{
+			ImGui::Spacing();
+			RenderLookup("Item", s_itemId, GameData::LookupItemName);
+			RenderLookup("Action", s_actionId, GameData::LookupActionName);
+			RenderLookup("Status", s_statusId, GameData::LookupStatusName);
+			RenderLookup("ClassJob", s_classJobId, [](uint32_t id) { return GameData::LookupClassJobName(static_cast<uint8_t>(id)); });
+			ImGui::Spacing();
+			ImGui::TextDisabled("Item 4=Fire Shard, Action 7=Attack, Status 2=Stun, ClassJob 1=GLD");
+			ImGui::EndTabItem();
+		}
+		
+		if (ImGui::BeginTabItem("Entities"))
+		{
+			ImGui::Spacing();
+			RenderLookup("Mount", s_mountId, GameData::LookupMountName);
+			RenderLookup("Minion", s_minionId, GameData::LookupMinionName);
+			RenderLookup("Emote", s_emoteId, GameData::LookupEmoteName);
+			RenderLookup("Quest", s_questId, GameData::LookupQuestName);
+			ImGui::Spacing();
+			ImGui::TextDisabled("Mount 1=Company Chocobo, Emote 1=/sit");
+			ImGui::EndTabItem();
+		}
+		
+		if (ImGui::BeginTabItem("World"))
+		{
+			ImGui::Spacing();
+			RenderLookup("Territory", s_territoryId, GameData::LookupTerritoryName);
+			RenderLookup("Weather", s_weatherId, GameData::LookupWeatherName);
+			RenderLookup("World", s_worldId, GameData::LookupWorldName);
+			RenderLookup("Aetheryte", s_aetheryteId, GameData::LookupAetheryteName);
+			RenderLookup("Instance", s_instanceId, GameData::LookupInstanceContentName);
+			RenderLookup("Map", s_mapId, GameData::LookupMapPath);
+			ImGui::Spacing();
+			ImGui::TextDisabled("Territory 132=Limsa Upper, Weather 1=Clear, World 21=Hyperion");
+			ImGui::EndTabItem();
+		}
+		
+		if (ImGui::BeginTabItem("NPCs"))
+		{
+			ImGui::Spacing();
+			RenderLookup("BNpcName", s_bnpcId, GameData::LookupBNpcName);
+			RenderLookup("ENpcName", s_enpcId, GameData::LookupENpcName);
+			RenderLookup("PlaceName", s_placeNameId, GameData::LookupPlaceName);
+			ImGui::Spacing();
+			ImGui::TextDisabled("ENpc IDs start around 1000000+");
+			ImGui::EndTabItem();
+		}
+		
+		ImGui::EndTabBar();
+	}
+}
+
+void SettingsModule::DrawNavMeshSection()
+{
+	auto& settings = SettingsManager::Instance();
+	auto& navMgr = NavMeshManager::GetInstance();
+	
+	ImGui::TextUnformatted("Sapphire Server NavMesh Path");
+	ImGui::Separator();
+	
+	ImGui::PushTextWrapPos();
+	ImGui::TextUnformatted(
+		"Path to the Sapphire server's /navi/ folder containing zone NavMesh files.\n"
+		"Structure: {navi_path}/{zone_bg_name}/*.nav\n"
+		"Example: D:\\Sapphire\\navi\\a2d1\\mesh.nav");
+	ImGui::PopTextWrapPos();
+	ImGui::Spacing();
+	
+	// Show current status
+	auto currentPath = navMgr.GetNavMeshBasePath();
+	bool hasNavMesh = navMgr.HasNavMesh();
+	
+	if (!currentPath.empty() && std::filesystem::exists(currentPath))
+	{
+		ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "Status: Path Set");
+		if (hasNavMesh)
+		{
+			auto stats = navMgr.GetCurrentNavMeshStats();
+			ImGui::SameLine();
+			ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), " | NavMesh Loaded (%zu polys)", stats.totalPolygons);
+		}
+	}
+	else if (!currentPath.empty())
+	{
+		ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Status: Path not found");
+	}
+	else
+	{
+		ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.0f, 1.0f), "Status: Not configured");
+	}
+	
+	ImGui::TextUnformatted("Current Path:");
+	ImGui::SameLine();
+	ImGui::TextDisabled("%s", currentPath.empty() ? "(none)" : currentPath.string().c_str());
+	
+	ImGui::Spacing();
+	
+	// Path input
+	ImGui::TextUnformatted("NavMesh Path:");
+	static char s_naviPathBuffer[512] = {};
+	
+	// Initialize buffer from current path on first frame
+	static bool s_naviBufferInitialized = false;
+	if (!s_naviBufferInitialized && !currentPath.empty())
+	{
+		strncpy_s(s_naviPathBuffer, currentPath.string().c_str(), sizeof(s_naviPathBuffer) - 1);
+		s_naviBufferInitialized = true;
+	}
+	
+	ImGui::SetNextItemWidth(-100);
+	ImGui::InputText("##navipath", s_naviPathBuffer, sizeof(s_naviPathBuffer));
+	
+	ImGui::SameLine();
+	if (ImGui::Button("Browse...##navi"))
+	{
+		// Open folder browser dialog
+		IFileDialog* pFileDialog = nullptr;
+		HRESULT hr = CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pFileDialog));
+		if (SUCCEEDED(hr))
+		{
+			DWORD options;
+			pFileDialog->GetOptions(&options);
+			pFileDialog->SetOptions(options | FOS_PICKFOLDERS);
+			pFileDialog->SetTitle(L"Select Sapphire Server /navi/ Folder");
+			
+			hr = pFileDialog->Show(nullptr);
+			if (SUCCEEDED(hr))
+			{
+				IShellItem* pItem = nullptr;
+				hr = pFileDialog->GetResult(&pItem);
+				if (SUCCEEDED(hr))
+				{
+					LPWSTR pPath = nullptr;
+					hr = pItem->GetDisplayName(SIGDN_FILESYSPATH, &pPath);
+					if (SUCCEEDED(hr) && pPath)
+					{
+						std::filesystem::path selectedPath(pPath);
+						strncpy_s(s_naviPathBuffer, selectedPath.string().c_str(), sizeof(s_naviPathBuffer) - 1);
+						CoTaskMemFree(pPath);
+					}
+					pItem->Release();
+				}
+			}
+			pFileDialog->Release();
+		}
+	}
+	
+	ImGui::Spacing();
+	
+	// Apply button
+	if (ImGui::Button("Apply & Reload NavMesh"))
+	{
+		std::filesystem::path newPath(s_naviPathBuffer);
+		if (!newPath.empty() && std::filesystem::exists(newPath))
+		{
+			navMgr.SetNavMeshBasePath(newPath);
+			
+			// Try to reload navmesh for current zone
+			auto terrId = navMgr.GetCurrentTerritoryId();
+			if (terrId != 0)
+			{
+				if (navMgr.LoadNavMeshForZone(terrId))
+				{
+					LogInfo("[Settings] NavMesh loaded for zone " + std::to_string(terrId));
+				}
+				else
+				{
+					LogInfo("[Settings] No NavMesh found for zone " + std::to_string(terrId));
+				}
+			}
+		}
+		else if (newPath.empty())
+		{
+			LogWarning("[Settings] NavMesh path is empty");
+		}
+		else
+		{
+			LogWarning("[Settings] NavMesh path does not exist: " + newPath.string());
+		}
+	}
+	
+	ImGui::SameLine();
+	if (ImGui::Button("Clear NavMesh Path"))
+	{
+		s_naviPathBuffer[0] = '\0';
+		settings.SetNavMeshPath(std::filesystem::path());
+		navMgr.ClearNavMesh();
+		LogInfo("[Settings] NavMesh path cleared.");
+	}
+	
+	ImGui::Spacing();
+	ImGui::TextDisabled("Example: D:\\Sapphire\\navi");
 }

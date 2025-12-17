@@ -1,5 +1,6 @@
 #include "../Network/OpcodeNames.h"
 #include "../Network/GameEnums.h"
+#include "../Core/TerritoryScanner.h"
 #include "../ProtocolHandlers/CommonTypes.h"
 #include "../ProtocolHandlers/Zone/ClientZoneDef.h"
 #include "../ProtocolHandlers/Zone/ServerZoneDef.h"
@@ -1248,6 +1249,10 @@ namespace {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
             if (l < sizeof(ServerZone::FFXIVIpcInitZone)) { emit("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcInitZone*>(p);
+            
+            // Notify TerritoryScanner of zone change
+            SapphireHook::TerritoryScanner::GetInstance().OnInitZonePacket(p, l);
+            
             FieldBuilder(emit)
                 .Field("ZoneId", pkt->ZoneId)
                 .Territory("TerritoryType", pkt->TerritoryType)
@@ -2805,6 +2810,10 @@ namespace {
         return [](const uint8_t* p, size_t l, RowEmitter emit) {
             if (l < sizeof(ServerZone::FFXIVIpcMoveTerritory)) { emit("error", "Packet too small"); return; }
             auto* pkt = reinterpret_cast<const ServerZone::FFXIVIpcMoveTerritory*>(p);
+            
+            // Notify TerritoryScanner of zone change
+            SapphireHook::TerritoryScanner::GetInstance().OnMoveTerritoryPacket(p, l);
+            
             FieldBuilder(emit)
                 .Field("index", pkt->index)
                 .Territory("Territory", pkt->territoryType)

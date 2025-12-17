@@ -57,9 +57,9 @@ namespace SapphireHook::MatrixHooks {
         static std::atomic<uint64_t> callCount = 0;
         uint64_t count = ++callCount;
         
-        // Log every 100th call to avoid spam
+        // Log every 100th call at debug level to avoid spam
         if (count == 1 || count % 100 == 0) {
-            LogInfo(std::format("MatrixCaptureHooks: ViewMatrixWriter called #{}, thisPtr=0x{:X}, param2=0x{:X}", 
+            LogDebug(std::format("MatrixCaptureHooks: ViewMatrixWriter called #{}, thisPtr=0x{:X}, param2=0x{:X}", 
                 count, static_cast<uint64_t>(thisPtr), static_cast<uint64_t>(param2)));
         }
         
@@ -80,9 +80,9 @@ namespace SapphireHook::MatrixHooks {
         static std::atomic<uint64_t> callCount = 0;
         uint64_t count = ++callCount;
         
-        // Log every 100th call to avoid spam
-        if (count == 1 || count % 100 == 0) {
-            LogInfo(std::format("MatrixCaptureHooks: ProjectionMatrixWriter called #{}, thisPtr=0x{:X}", 
+        // Log every 10000th call at debug level to avoid spam
+        if (count == 1 || count % 10000 == 0) {
+            LogDebug(std::format("MatrixCaptureHooks: ProjectionMatrixWriter called #{}, thisPtr=0x{:X}", 
                 count, reinterpret_cast<uintptr_t>(thisPtr)));
         }
         
@@ -335,40 +335,40 @@ namespace SapphireHook::MatrixHooks {
         static bool dumpedOnce = false;
         if (!dumpedOnce && srcCamera) {
             dumpedOnce = true;
-            LogInfo("MatrixCaptureHooks: === ViewMatrixWriter DUMP (AFTER function wrote) ===");
-            LogInfo(std::format("  destBuffer (thisPtr) = 0x{:X}", destAddr));
-            LogInfo(std::format("  srcCamera (param2)   = 0x{:X}", srcAddr));
+            LogDebug("MatrixCaptureHooks: === ViewMatrixWriter DUMP (AFTER function wrote) ===");
+            LogDebug(std::format("  destBuffer (thisPtr) = 0x{:X}", destAddr));
+            LogDebug(std::format("  srcCamera (param2)   = 0x{:X}", srcAddr));
             
             // Dump destination buffer (where matrix was written TO)
-            LogInfo("  --- Destination Buffer (thisPtr) ---");
+            LogDebug("  --- Destination Buffer (thisPtr) ---");
             for (size_t offset = 0; offset < 0x100; offset += 0x40) {
                 DirectX::XMMATRIX mat;
                 if (SafeReadMatrix(destAddr + offset, mat)) {
                     DirectX::XMFLOAT4X4 m;
                     DirectX::XMStoreFloat4x4(&m, mat);
-                    LogInfo(std::format("    +0x{:03X}: [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", offset, m._11, m._12, m._13, m._14));
-                    LogInfo(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._21, m._22, m._23, m._24));
-                    LogInfo(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._31, m._32, m._33, m._34));
-                    LogInfo(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._41, m._42, m._43, m._44));
+                    LogDebug(std::format("    +0x{:03X}: [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", offset, m._11, m._12, m._13, m._14));
+                    LogDebug(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._21, m._22, m._23, m._24));
+                    LogDebug(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._31, m._32, m._33, m._34));
+                    LogDebug(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._41, m._42, m._43, m._44));
                 }
             }
             
             // Dump source camera (where matrix was read FROM)
             if (srcAddr) {
-                LogInfo("  --- Source Camera (param2) ---");
+                LogDebug("  --- Source Camera (param2) ---");
                 for (size_t offset = 0; offset < 0x200; offset += 0x40) {
                     DirectX::XMMATRIX mat;
                     if (SafeReadMatrix(srcAddr + offset, mat)) {
                         DirectX::XMFLOAT4X4 m;
                         DirectX::XMStoreFloat4x4(&m, mat);
-                        LogInfo(std::format("    +0x{:03X}: [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", offset, m._11, m._12, m._13, m._14));
-                        LogInfo(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._21, m._22, m._23, m._24));
-                        LogInfo(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._31, m._32, m._33, m._34));
-                        LogInfo(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._41, m._42, m._43, m._44));
+                        LogDebug(std::format("    +0x{:03X}: [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", offset, m._11, m._12, m._13, m._14));
+                        LogDebug(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._21, m._22, m._23, m._24));
+                        LogDebug(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._31, m._32, m._33, m._34));
+                        LogDebug(std::format("            [{:10.4f} {:10.4f} {:10.4f} {:10.4f}]", m._41, m._42, m._43, m._44));
                     }
                 }
             }
-            LogInfo("MatrixCaptureHooks: === End ViewMatrixWriter DUMP ===");
+            LogDebug("MatrixCaptureHooks: === End ViewMatrixWriter DUMP ===");
         }
         
         // Try to find valid View matrix in destination buffer (where function wrote)

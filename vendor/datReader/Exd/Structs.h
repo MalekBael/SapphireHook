@@ -512,10 +512,11 @@ namespace Excel
     uint32_t Timeline;
   };
 
-  /* 100766 */
+  /* 100766 */ /*Updated using Alpha for SapphireHook*/
   struct WeatherTextStruct
   {
     Excel::StringOffset Name;
+    Excel::StringOffset Description;
   };
 
   /* 100767 */
@@ -1555,22 +1556,23 @@ namespace Excel
     int8_t padding1[1];
   };
 
-  /* 257957 */
-  struct WorldTextStruct
+
+
+  /* 257957 
+  /*struct WorldTextStruct
   {
     Excel::StringOffset Help;
   };
+  */
 
-  /* 257958 */
+  /* 257958 - Updated for SapphireHook based on actual EXD layout */
   struct World
   {
-    WorldTextStruct Text;
-    Excel::StringOffset Name;
-    uint8_t UserType;
-    uint8_t DCGroup;
-    uint8_t padding0 : 7;
-    uint8_t Public : 1;
-    int8_t padding1[1];
+    Excel::StringOffset InternalName;  // 0x0 - String
+    uint8_t Name;                      // 0x4 - UInt8 (PlaceName index?)
+    uint8_t Region;                    // 0x5 - UInt8
+    uint8_t UserType;                  // 0x6 - PackedBool0
+    int8_t padding0[1];                // 0x7 - align to 8
   };
 
   /* 258037 */

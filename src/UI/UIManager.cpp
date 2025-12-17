@@ -47,8 +47,13 @@
 #include "../Modules/CollisionOverlayModule.h"
 // NEW: Zone Layout Viewer for LGB data inspection
 #include "../Modules/ZoneLayoutViewerModule.h"
+// NEW: World Overlay manager module
+#include "../Modules/WorldOverlayModule.h"
 // NEW: Camera extractor for player position display
 #include "../Tools/GameCameraExtractor.h"
+// Territory detection for zone display
+#include "../Core/TerritoryScanner.h"
+#include "../Core/GameDataLookup.h"
 
 #pragma comment(lib, "pdh.lib")
 #pragma comment(lib, "iphlpapi.lib")
@@ -383,6 +388,7 @@ void UIManager::RegisterDefaultModules()
 	TryRegisterModule<SapphireHook::DebugVisualsModule>("debug_visuals", "Debug Visuals", successCount);
 	TryRegisterModule<SapphireHook::CollisionOverlayModule>("collision_overlay", "Collision Overlay", successCount);
 	TryRegisterModule<SapphireHook::ZoneLayoutViewerModule>("zone_layout_viewer", "Zone Layout Viewer", successCount);
+	TryRegisterModule<SapphireHook::WorldOverlayModule>("world_overlay", "World Overlay", successCount);
 
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
 	LogInfo("Successfully registered: " + std::to_string(successCount) + " modules");
@@ -716,6 +722,37 @@ void UIManager::RenderMainMenu()
 				}
 			}
 
+			// World Overlay (zone-aware 3D overlays, navmesh, pathfinding)
+			{
+				static UIModule* s_worldOverlay = nullptr;
+				static bool s_worldOverlayLogged = false;
+				if (!s_worldOverlay)
+				{
+					s_worldOverlay = GetModule("world_overlay");
+					if (!s_worldOverlayLogged)
+					{
+						if (s_worldOverlay)
+							LogInfo("[Menu] World Overlay module found");
+						else
+							LogError("[Menu] World Overlay module NOT found!");
+						s_worldOverlayLogged = true;
+					}
+				}
+
+				if (s_worldOverlay)
+				{
+					bool open = s_worldOverlay->IsWindowOpen();
+					if (ImGui::MenuItem(s_worldOverlay->GetDisplayName(), nullptr, open))
+					{
+						s_worldOverlay->SetWindowOpen(!open);
+					}
+				}
+				else
+				{
+					ImGui::MenuItem("World Overlay", nullptr, false, false);  // Show disabled if not found
+				}
+			}
+
 			ImGui::Separator();
 
 			// Unified Network Monitor toggle
@@ -788,7 +825,23 @@ void UIManager::RenderMainMenu()
 			                std::abs(playerPos.z) > 0.1f);
 		}
 
-		// Display system stats with player position
+		// Display system stats with zone info, player position, and performance
+		// Zone info from TerritoryScanner
+		auto& terrScanner = TerritoryScanner::GetInstance();
+		auto terrState = terrScanner.GetCurrentState();
+		if (terrState.IsValid()) {
+			const char* zoneName = GameData::LookupTerritoryName(terrState.TerritoryType);
+			if (zoneName && zoneName[0]) {
+				ImGui::Text("%s (%u)", zoneName, terrState.TerritoryType);
+			} else {
+				ImGui::Text("Zone %u", terrState.TerritoryType);
+			}
+			ImGui::SameLine();
+			ImGui::Text(" | ");
+			ImGui::SameLine();
+		}
+		
+		// Player position
 		if (hasPlayerPos) {
 			ImGui::Text("Pos: (%.0f, %.0f, %.0f)", playerPos.x, playerPos.y, playerPos.z);
 			ImGui::SameLine();

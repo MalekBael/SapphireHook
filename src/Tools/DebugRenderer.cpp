@@ -4,6 +4,7 @@
 #include <d3dcompiler.h>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 
 #pragma comment(lib, "d3dcompiler.lib")
 
@@ -443,7 +444,13 @@ namespace SapphireHook::DebugVisuals {
         
         if (vertexCount > MAX_VERTICES) {
             vertexCount = MAX_VERTICES;
-            LogWarning("DebugRenderer: Too many line vertices, truncating");
+            // Rate-limit this warning to once per 30 seconds
+            static auto lastWarnTime = std::chrono::steady_clock::time_point{};
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - lastWarnTime).count() >= 30) {
+                lastWarnTime = now;
+                LogWarning("DebugRenderer: Too many line vertices, truncating");
+            }
         }
 
         // Update vertex buffer
@@ -466,7 +473,13 @@ namespace SapphireHook::DebugVisuals {
         size_t vertexCount = m_triangleVertices.size();
         if (vertexCount > MAX_VERTICES) {
             vertexCount = MAX_VERTICES;
-            LogWarning("DebugRenderer: Too many triangle vertices, truncating");
+            // Rate-limit this warning to once per second
+            static auto lastWarnTime = std::chrono::steady_clock::now();
+            auto now = std::chrono::steady_clock::now();
+            if (std::chrono::duration_cast<std::chrono::seconds>(now - lastWarnTime).count() >= 30) {
+                lastWarnTime = now;
+                LogWarning("DebugRenderer: Too many triangle vertices, truncating");
+            }
         }
 
         // Update vertex buffer
@@ -488,11 +501,13 @@ namespace SapphireHook::DebugVisuals {
         m_view = view;
         m_projection = projection;
         m_viewProjection = DirectX::XMMatrixMultiply(view, projection);
+        UpdateFrustumPlanes();
     }
 
     void DebugRenderer::SetViewProjectionDirect(const DirectX::XMMATRIX& viewProjection) {
         // Use the pre-computed ViewProjection directly - this is the game's perfectly synchronized matrix
         m_viewProjection = viewProjection;
+        UpdateFrustumPlanes();
         // Note: m_view and m_projection are NOT updated here, but that's fine
         // since we only use m_viewProjection for rendering
     }
@@ -506,6 +521,7 @@ namespace SapphireHook::DebugVisuals {
         m_view = camera.view;
         m_projection = camera.projection;
         m_viewProjection = DirectX::XMMatrixMultiply(m_view, m_projection);
+        UpdateFrustumPlanes();
     }
 
     // ============================================
@@ -533,6 +549,78 @@ namespace SapphireHook::DebugVisuals {
         }
 
         return DirectX::XMFLOAT2(screenX, screenY);
+    }
+
+    // ============================================
+    // Frustum Culling
+    // ============================================
+    void DebugRenderer::UpdateFrustumPlanes() {
+        // Extract frustum planes from the transposed ViewProjection matrix
+        // Using Gribb/Hartmann method
+        DirectX::XMFLOAT4X4 m;
+        DirectX::XMStoreFloat4x4(&m, m_viewProjection);
+        
+        // Left plane: row4 + row1
+        m_frustumPlanes[0] = { m._14 + m._11, m._24 + m._21, m._34 + m._31, m._44 + m._41 };
+        // Right plane: row4 - row1
+        m_frustumPlanes[1] = { m._14 - m._11, m._24 - m._21, m._34 - m._31, m._44 - m._41 };
+        // Bottom plane: row4 + row2
+        m_frustumPlanes[2] = { m._14 + m._12, m._24 + m._22, m._34 + m._32, m._44 + m._42 };
+        // Top plane: row4 - row2
+        m_frustumPlanes[3] = { m._14 - m._12, m._24 - m._22, m._34 - m._32, m._44 - m._42 };
+        // Near plane: row4 + row3 (for DX, near = row3)
+        m_frustumPlanes[4] = { m._13, m._23, m._33, m._43 };
+        // Far plane: row4 - row3
+        m_frustumPlanes[5] = { m._14 - m._13, m._24 - m._23, m._34 - m._33, m._44 - m._43 };
+        
+        // Normalize all planes
+        for (int i = 0; i < 6; ++i) {
+            float len = std::sqrt(m_frustumPlanes[i].x * m_frustumPlanes[i].x +
+                                  m_frustumPlanes[i].y * m_frustumPlanes[i].y +
+                                  m_frustumPlanes[i].z * m_frustumPlanes[i].z);
+            if (len > 0.0001f) {
+                m_frustumPlanes[i].x /= len;
+                m_frustumPlanes[i].y /= len;
+                m_frustumPlanes[i].z /= len;
+                m_frustumPlanes[i].w /= len;
+            }
+        }
+    }
+    
+    bool DebugRenderer::IsPointInFrustum(const Vec3& worldPos) const {
+        return IsPointInFrustum(worldPos.x, worldPos.y, worldPos.z);
+    }
+    
+    bool DebugRenderer::IsPointInFrustum(float x, float y, float z) const {
+        if (!m_frustumCullingEnabled) return true;
+        
+        // Test point against all 6 frustum planes
+        for (int i = 0; i < 6; ++i) {
+            float dist = m_frustumPlanes[i].x * x +
+                        m_frustumPlanes[i].y * y +
+                        m_frustumPlanes[i].z * z +
+                        m_frustumPlanes[i].w;
+            if (dist < 0.0f) {
+                return false;  // Point is behind this plane
+            }
+        }
+        return true;
+    }
+    
+    bool DebugRenderer::IsSphereInFrustum(const Vec3& center, float radius) const {
+        if (!m_frustumCullingEnabled) return true;
+        
+        // Test sphere against all 6 frustum planes
+        for (int i = 0; i < 6; ++i) {
+            float dist = m_frustumPlanes[i].x * center.x +
+                        m_frustumPlanes[i].y * center.y +
+                        m_frustumPlanes[i].z * center.z +
+                        m_frustumPlanes[i].w;
+            if (dist < -radius) {
+                return false;  // Sphere is completely behind this plane
+            }
+        }
+        return true;
     }
 
     // ============================================
@@ -830,13 +918,24 @@ namespace SapphireHook::DebugVisuals {
 
     void DebugRenderer::DrawText3D(const Vec3& position, const std::string& text, 
                                     const Color& color, float scale) {
+        // Guard against empty or problematic text that can cause ImGui assertion failures
+        if (text.empty()) return;
+        
         // Project to screen and use ImGui to draw
         auto screenPos = WorldToScreen(position);
         if (!screenPos) return;
 
         ImDrawList* drawList = ImGui::GetBackgroundDrawList();
         if (drawList) {
-            drawList->AddText(ImVec2(screenPos->x, screenPos->y), color.ToABGR(), text.c_str());
+            // Use simpler AddText overload that doesn't trigger glyph texture changes
+            // This avoids the assertion failure when text contains unloaded glyphs
+            ImFont* font = ImGui::GetFont();
+            if (font && font->IsLoaded()) {
+                float fontSize = ImGui::GetFontSize() * scale;
+                drawList->AddText(font, fontSize, 
+                                  ImVec2(screenPos->x, screenPos->y), 
+                                  color.ToABGR(), text.c_str(), text.c_str() + text.size());
+            }
         }
     }
 

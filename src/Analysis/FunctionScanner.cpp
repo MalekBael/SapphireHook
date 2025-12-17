@@ -389,8 +389,18 @@ namespace SapphireHook {
         size_t processed = 0;
         size_t total = targetStrings.size();
 
+        // Reset stop flag at start of scan
+        m_impl->scanState.stopRequested = false;
+        m_impl->scanState.inProgress = true;
+
         for (const auto& s : targetStrings)
         {
+            // Check for cancellation
+            if (m_impl->scanState.stopRequested.load(std::memory_order_relaxed)) {
+                m_impl->scanState.inProgress = false;
+                return results;
+            }
+
             if (!s.empty())
             {
                 for (const auto& region : dataRegions) {
@@ -398,6 +408,12 @@ namespace SapphireHook {
                     uintptr_t regionEnd = region.base + region.size;
 
                     while (regionBegin < regionEnd) {
+                        // Check for cancellation in inner loop
+                        if (m_impl->scanState.stopRequested.load(std::memory_order_relaxed)) {
+                            m_impl->scanState.inProgress = false;
+                            return results;
+                        }
+
                         MEMORY_BASIC_INFORMATION mbi{};
                         if (VirtualQuery(reinterpret_cast<LPCVOID>(regionBegin), &mbi, sizeof(mbi)) == 0)
                             break;
@@ -439,6 +455,8 @@ namespace SapphireHook {
                 progress(processed, total, "StringScan");
         }
 
+        m_impl->scanState.inProgress = false;
+
         std::sort(results.begin(), results.end(), [](const auto& a, const auto& b)
             {
                 if (a.nearbyFunctionAddress != b.nearbyFunctionAddress)
@@ -462,7 +480,8 @@ namespace SapphireHook {
 
     std::vector<uintptr_t> FunctionScanner::ScanForAllInterestingFunctions(
         const ScanConfig& config,
-        ProgressCallback progress) const
+        ProgressCallback progress,
+        ResultCallback onResult) const
     {
         uintptr_t base = 0; size_t size = 0;
         if (!GetMainModuleBaseAndSize(base, size)) return {};
@@ -476,13 +495,29 @@ namespace SapphireHook {
         std::vector<uintptr_t> results;
         results.reserve(10000);
 
+        // Reset stop flag at start of scan
+        m_impl->scanState.stopRequested = false;
+        m_impl->scanState.inProgress = true;
+
         size_t total = textSize;
         for (size_t off = 0; off + 16 < textSize; ++off)
         {
+            // Check for cancellation
+            if (m_impl->scanState.stopRequested.load(std::memory_order_relaxed)) {
+                m_impl->scanState.inProgress = false;
+                return results;
+            }
+
             uintptr_t addr = textBase + off;
             if (IsLikelyFunctionStart(addr))
             {
                 results.push_back(addr);
+                
+                // Stream result to callback if provided
+                if (onResult) {
+                    onResult(addr);
+                }
+                
                 if (results.size() >= config.maxResults) break;
             }
 
@@ -490,6 +525,7 @@ namespace SapphireHook {
                 progress(off, total, ".text/prologue-scan");
         }
 
+        m_impl->scanState.inProgress = false;
         UniqueSortPtrVec(results);
         return results;
     }

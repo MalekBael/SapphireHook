@@ -3,7 +3,7 @@
 #include "MemoryViewerModule.h"
 #include "../Helper/CapstoneWrapper.h"
 
-#include <../vendor/capstone/include/capstone.h>
+#include <capstone/capstone.h>
 #include <algorithm>
 #include <windows.h>
 #include "../src/Logger/Logger.h"

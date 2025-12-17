@@ -26,6 +26,8 @@
 #include <nlohmann/json.hpp>
 // Protocol definitions for packet structures
 #include "../ProtocolHandlers/Zone/ServerZoneDef.h"
+// Territory detection
+#include "../Core/TerritoryScanner.h"
 #include "../ProtocolHandlers/Zone/ClientZoneDef.h"
 
 using namespace SapphireHook;
@@ -800,6 +802,14 @@ namespace {
 				DispatchActorMoveEvent(seg.opcode, hp.outgoing, 
 					seg.source, seg.target, 
 					payload, payloadLen, hp.ts);
+			}
+			// InitZone (0x019A) - zone entry/teleport
+			else if (seg.opcode == 0x019A && payloadLen >= sizeof(ServerZone::FFXIVIpcInitZone)) {
+				TerritoryScanner::GetInstance().OnInitZonePacket(payload, payloadLen);
+			}
+			// MoveTerritory (0x006A) - walking between zones
+			else if (seg.opcode == 0x006A && payloadLen >= 4) {
+				TerritoryScanner::GetInstance().OnMoveTerritoryPacket(payload, payloadLen);
 			}
 		}
 	}

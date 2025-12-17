@@ -103,10 +103,17 @@ namespace SapphireHook::DebugVisuals {
 
         // World-to-screen projection
         std::optional<DirectX::XMFLOAT2> WorldToScreen(const Vec3& worldPos) const;
+        
+        // Frustum culling - returns true if point is potentially visible
+        bool IsPointInFrustum(const Vec3& worldPos) const;
+        bool IsPointInFrustum(float x, float y, float z) const;
+        bool IsSphereInFrustum(const Vec3& center, float radius) const;
 
         // Configuration
         void SetEnabled(bool enabled) { m_enabled = enabled; }
         bool IsEnabled() const { return m_enabled; }
+        void SetFrustumCullingEnabled(bool enabled) { m_frustumCullingEnabled = enabled; }
+        bool IsFrustumCullingEnabled() const { return m_frustumCullingEnabled; }
         void SetDepthTestEnabled(bool enabled) { m_depthTestEnabled = enabled; }
         bool IsDepthTestEnabled() const { return m_depthTestEnabled; }
 
@@ -180,8 +187,13 @@ namespace SapphireHook::DebugVisuals {
         // State
         bool m_initialized = false;
         bool m_enabled = true;
+        bool m_frustumCullingEnabled = true;  // Enable frustum culling by default
         bool m_depthTestEnabled = false;  // Usually we want debug visuals on top
         bool m_inFrame = false;
+        
+        // Cached frustum planes (updated each frame from view-projection)
+        DirectX::XMFLOAT4 m_frustumPlanes[6];  // Left, Right, Bottom, Top, Near, Far
+        void UpdateFrustumPlanes();
     };
 
 } // namespace SapphireHook::DebugVisuals

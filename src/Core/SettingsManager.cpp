@@ -116,6 +116,17 @@ void SettingsManager::Load()
             }
         }
         
+        // NavMesh path
+        if (settings.contains("navMeshPath") && settings["navMeshPath"].is_string())
+        {
+            std::string pathStr = settings["navMeshPath"].get<std::string>();
+            if (!pathStr.empty())
+            {
+                m_navMeshPath = std::filesystem::path(pathStr);
+                LogInfo("[SettingsManager] Using NavMesh path: " + pathStr);
+            }
+        }
+        
         LogInfo("[SettingsManager] Loaded from " + path.string());
     }
     catch (const std::exception& e)
@@ -153,6 +164,9 @@ void SettingsManager::Save()
         
         // Custom sqpack path
         settings["sqpackPath"] = m_sqpackPath.string();
+        
+        // NavMesh path
+        settings["navMeshPath"] = m_navMeshPath.string();
         
         std::filesystem::path path = GetSettingsFilePath();
         std::ofstream file(path);
@@ -233,5 +247,11 @@ void SettingsManager::RegisterLoadCallback(SettingsLoadedCallback callback)
 void SettingsManager::SetSqpackPath(const std::filesystem::path& path)
 {
     m_sqpackPath = path;
+    Save();
+}
+
+void SettingsManager::SetNavMeshPath(const std::filesystem::path& path)
+{
+    m_navMeshPath = path;
     Save();
 }

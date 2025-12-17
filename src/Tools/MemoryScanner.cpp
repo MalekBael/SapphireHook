@@ -1,7 +1,9 @@
 #include "../Tools/MemoryScanner.h"
 #include "../Logger/Logger.h"
+#include "../Helper/CapstoneWrapper.h"
 #include "../vendor/imgui/imgui.h"
 #include <sstream>
+#include <fstream>
 #include <iomanip>
 #include <unordered_set>
 #include <algorithm>
@@ -80,9 +82,12 @@ void MemoryScanner::StartScan(const std::vector<std::string>& targetStrings,
 	m_scanState.targetStrings = targetStrings;
 	m_scanState.status = "Initializing scan...";
 
-	// Clear previous results
-	m_mergedFunctions.clear();
-	m_functionTags.clear();
+	// Clear previous results (under lock)
+	{
+		std::lock_guard<std::mutex> lock(m_resultsMutex);
+		m_mergedFunctions.clear();
+		m_functionTags.clear();
+	}
 
 	LogInfo("Memory scan started with " + std::to_string(targetStrings.size()) + " target strings");
 
@@ -97,8 +102,18 @@ void MemoryScanner::StopScan()
 	m_scanState.cancelled = true;
 	m_scanState.running = false;
 
+	// Signal the FunctionScanner to stop its internal loops
+	if (m_scanner) {
+		m_scanner->StopScan();
+	}
+
+	// Wait for the async task to finish (it should exit quickly now)
 	if (m_scanState.scanFuture.valid()) {
-		m_scanState.scanFuture.wait();
+		// Use wait_for with timeout to avoid indefinite blocking
+		auto status = m_scanState.scanFuture.wait_for(std::chrono::seconds(2));
+		if (status == std::future_status::timeout) {
+			LogWarning("Scan stop timed out - scan thread may still be running");
+		}
 	}
 
 	m_scanState.status = "Scan stopped by user";
@@ -120,8 +135,16 @@ void MemoryScanner::UpdateScanAsync()
 		std::memory_order_relaxed);
 	m_scanState.regionsProcessed.store(0, std::memory_order_relaxed);
 
-	std::unordered_set<uintptr_t> mergedSet;
-	mergedSet.reserve(8192);
+	// Helper to safely add a result
+	auto addResult = [this](uintptr_t addr, const std::string& tag) {
+		std::lock_guard<std::mutex> lock(m_resultsMutex);
+		// Check if already exists
+		auto it = std::lower_bound(m_mergedFunctions.begin(), m_mergedFunctions.end(), addr);
+		if (it == m_mergedFunctions.end() || *it != addr) {
+			m_mergedFunctions.insert(it, addr);
+		}
+		m_functionTags[addr].push_back(tag);
+	};
 
 	try {
 		if (m_scanState.scanPrologues && !m_scanState.cancelled) {
@@ -129,34 +152,90 @@ void MemoryScanner::UpdateScanAsync()
 			SapphireHook::FunctionScanner::ScanConfig cfg{};
 			cfg.maxResults = 10000;
 
-			auto prologueResults = m_scanner->ScanForAllInterestingFunctions(cfg, nullptr);
-			for (auto addr : prologueResults) {
-				mergedSet.insert(addr);
-				m_functionTags[addr].push_back("prologue");
+			// Use result callback to stream results as they're found
+			m_scanner->ScanForAllInterestingFunctions(cfg, 
+				[this](size_t processed, size_t total, const std::string&) {
+					// Update status periodically
+					if (processed % 0x10000 == 0) {
+						std::lock_guard<std::mutex> lock(m_resultsMutex);
+						m_scanState.status = "Prologue scan: " + std::to_string(processed * 100 / (std::max)(total, size_t(1))) + "% (" + std::to_string(m_mergedFunctions.size()) + " found)";
+					}
+				},
+				[&addResult](uintptr_t addr) {
+					// Stream each result as it's found
+					addResult(addr, "prologue");
+				});
+			
+			// Check cancellation before continuing
+			if (m_scanState.cancelled) {
+				m_scanState.running = false;
+				return;
 			}
+
 			m_scanState.regionsProcessed.fetch_add(1, std::memory_order_relaxed);
+		}
+
+		// Check cancellation between phases
+		if (m_scanState.cancelled) {
+			m_scanState.running = false;
+			return;
 		}
 
 		if (m_scanState.scanStrings && !m_scanState.cancelled) {
 			m_scanState.status = "Scanning for string anchors...";
-			RebuildAnchorStringMatches();
+			
+			// Build default anchors if empty
+			std::vector<std::string> anchors = m_scanState.targetStrings;
+			if (anchors.empty()) {
+				anchors = {
+					"Player","Actor","UI","Addon","Agent","Network","Packet","Ability","Render","Socket"
+				};
+			}
+
+			// Scan with progress callback
+			const auto stringHits = m_scanner->ScanMemoryForFunctionStrings(anchors);
+			
+			// Check cancellation before processing results
+			if (m_scanState.cancelled) {
+				m_scanState.running = false;
+				return;
+			}
+
+			// Get module range for sanity checks
+			uintptr_t base = 0; size_t imageSize = 0;
+			(void)GetMainModuleInfo(base, imageSize);
+
+			for (const auto& hit : stringHits) {
+				if (m_scanState.cancelled) break;
+				
+				const uintptr_t fn = hit.nearbyFunctionAddress;
+				if (!fn) continue;
+
+				if (base != 0 && imageSize != 0) {
+					if (fn < base || fn >= base + imageSize) continue;
+				}
+
+				addResult(fn, std::string("string:") + hit.foundString);
+			}
+			
 			m_scanState.regionsProcessed.fetch_add(1, std::memory_order_relaxed);
 		}
-
-		// Move mergedSet into the vector and sort unique
-		m_mergedFunctions.assign(mergedSet.begin(), mergedSet.end());
-		std::sort(m_mergedFunctions.begin(), m_mergedFunctions.end());
 
 		if (!m_scanState.cancelled) {
 			auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::steady_clock::now() - m_scanState.startTime).count();
 
+			std::lock_guard<std::mutex> lock(m_resultsMutex);
 			m_scanState.status = "Scan complete: " + std::to_string(m_mergedFunctions.size()) +
 				" functions found in " + std::to_string(elapsed) + "ms";
 		}
 	}
 	catch (const std::exception& e) {
 		m_scanState.status = std::string("Scan error: ") + e.what();
+		LogError(m_scanState.status);
+	}
+	catch (...) {
+		m_scanState.status = "Scan error: unknown exception";
 		LogError(m_scanState.status);
 	}
 
@@ -211,9 +290,18 @@ void MemoryScanner::RebuildAnchorStringMatches()
 
 void MemoryScanner::RenderScanResults()
 {
-	ImGui::Text("Results: %zu functions discovered", m_mergedFunctions.size());
+	// Take a snapshot of results under lock for thread safety
+	std::vector<uintptr_t> resultsCopy;
+	std::unordered_map<uintptr_t, std::vector<std::string>> tagsCopy;
+	{
+		std::lock_guard<std::mutex> lock(m_resultsMutex);
+		resultsCopy = m_mergedFunctions;
+		tagsCopy = m_functionTags;
+	}
 
-	if (!m_mergedFunctions.empty()) {
+	ImGui::Text("Results: %zu functions discovered", resultsCopy.size());
+
+	if (!resultsCopy.empty()) {
 		if (ImGui::BeginTable("ScanResults", 3,
 			ImGuiTableFlags_ScrollY | ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg))
 		{
@@ -223,15 +311,15 @@ void MemoryScanner::RenderScanResults()
 			ImGui::TableSetupScrollFreeze(0, 1);
 			ImGui::TableHeadersRow();
 
-			for (const auto& addr : m_mergedFunctions) {
+			for (const auto& addr : resultsCopy) {
 				ImGui::TableNextRow();
 
 				ImGui::TableSetColumnIndex(0);
 				ImGui::Text("0x%016llX", static_cast<unsigned long long>(addr));
 
 				ImGui::TableSetColumnIndex(1);
-				auto it = m_functionTags.find(addr);
-				if (it != m_functionTags.end()) {
+				auto it = tagsCopy.find(addr);
+				if (it != tagsCopy.end()) {
 					std::string tags;
 					tags.reserve(64);
 					for (const auto& tag : it->second) {
@@ -258,7 +346,9 @@ void MemoryScanner::RenderAnalysisPanel()
 {
 	ImGui::Text("Analysis for 0x%016llX", static_cast<unsigned long long>(m_selectedFunction));
 
-	if (ImGui::BeginChild("AnalysisContent", ImVec2(0, 200), true)) {
+	// Use remaining height for content (leave space for buttons)
+	float availHeight = ImGui::GetContentRegionAvail().y - 30.0f;
+	if (ImGui::BeginChild("AnalysisContent", ImVec2(0, availHeight), true)) {
 		if (m_selectedAnalysis.empty()) {
 			m_selectedAnalysis = GenerateFunctionAnalysis(m_selectedFunction);
 		}
@@ -357,13 +447,24 @@ void SapphireHook::MemoryScanner::RenderWindow()
 
 	ImGui::Separator();
 
-	// Results section
-	RenderScanResults();
+	// Side-by-side layout: results on left, analysis on right
+	float availWidth = ImGui::GetContentRegionAvail().x;
+	float leftWidth = (m_selectedFunction != 0) ? availWidth * 0.55f : availWidth;
+	float rightWidth = availWidth - leftWidth - 10.0f; // 10px gap
 
-	// Analysis panel
+	// Left panel: Results
+	if (ImGui::BeginChild("ResultsPanel", ImVec2(leftWidth, 0), false)) {
+		RenderScanResults();
+	}
+	ImGui::EndChild();
+
+	// Right panel: Analysis (only if a function is selected)
 	if (m_selectedFunction != 0) {
-		ImGui::Separator();
-		RenderAnalysisPanel();
+		ImGui::SameLine(0, 10.0f);
+		if (ImGui::BeginChild("AnalysisPanelContainer", ImVec2(rightWidth, 0), true)) {
+			RenderAnalysisPanel();
+		}
+		ImGui::EndChild();
 	}
 
 	ImGui::End();
@@ -371,11 +472,13 @@ void SapphireHook::MemoryScanner::RenderWindow()
 
 std::vector<uintptr_t> MemoryScanner::GetDiscoveredFunctions() const
 {
+	std::lock_guard<std::mutex> lock(m_resultsMutex);
 	return m_mergedFunctions;
 }
 
 std::unordered_map<uintptr_t, std::vector<std::string>> MemoryScanner::GetFunctionTags() const
 {
+	std::lock_guard<std::mutex> lock(m_resultsMutex);
 	return m_functionTags;
 }
 
@@ -386,14 +489,17 @@ std::string MemoryScanner::GenerateFunctionAnalysis(uintptr_t address) const
 	ss << "========================\n\n";
 	ss << "Address: 0x" << std::hex << std::setw(16) << std::setfill('0') << address << "\n";
 
-	// Tags
-	auto it = m_functionTags.find(address);
-	if (it != m_functionTags.end()) {
-		ss << "Tags: ";
-		for (const auto& tag : it->second) {
-			ss << tag << " ";
+	// Tags (thread-safe access)
+	{
+		std::lock_guard<std::mutex> lock(m_resultsMutex);
+		auto it = m_functionTags.find(address);
+		if (it != m_functionTags.end()) {
+			ss << "Tags: ";
+			for (const auto& tag : it->second) {
+				ss << tag << " ";
+			}
+			ss << "\n";
 		}
-		ss << "\n";
 	}
 
 	ss << "\nPrologue Bytes:\n";
@@ -462,12 +568,49 @@ std::string MemoryScanner::GetPrologueBytes(uintptr_t address, size_t maxLen) co
 	return ss.str();
 }
 
-bool MemoryScanner::DisassembleSnippet(uintptr_t address, std::string& out, int /*maxInstr*/, size_t maxBytes) const
+bool MemoryScanner::DisassembleSnippet(uintptr_t address, std::string& out, int maxInstr, size_t maxBytes) const
 {
-	// Minimal safe fallback (no Capstone dependency here)
+	if (!IsSafeToRead(reinterpret_cast<void*>(address), maxBytes)) {
+		out = "(Invalid memory address)";
+		return false;
+	}
+
+	// Use CapstoneWrapper for actual disassembly
+	CapstoneWrapper cs;
+	if (!cs.valid()) {
+		// Fallback to raw bytes if capstone failed to init
+		std::stringstream ss;
+		ss << "(Capstone init failed)\nBytes: ";
+		ss << GetPrologueBytes(address, (std::min)(maxBytes, size_t(32)));
+		out = ss.str();
+		return false;
+	}
+
+	const uint8_t* code = reinterpret_cast<const uint8_t*>(address);
+	auto result = cs.DisassembleBuffer(code, maxBytes, address, static_cast<size_t>(maxInstr));
+
+	if (!result.ok()) {
+		std::stringstream ss;
+		ss << "(Disassembly failed: " << CapstoneErrorToString(result.error()) << ")\nBytes: ";
+		ss << GetPrologueBytes(address, (std::min)(maxBytes, size_t(32)));
+		out = ss.str();
+		return false;
+	}
+
 	std::stringstream ss;
-	ss << "(Raw bytes; disassembler not linked)\nBytes: ";
-	ss << GetPrologueBytes(address, (std::min)(maxBytes, size_t(32))); // <-- wrap in parens
+	for (const auto& insn : result.value()) {
+		ss << std::hex << std::setw(16) << std::setfill('0') << insn.address << "  ";
+		// Print bytes
+		for (size_t i = 0; i < insn.size; ++i) {
+			ss << std::setw(2) << static_cast<int>(insn.bytes[i]) << " ";
+		}
+		// Pad to align mnemonics (max 16 bytes * 3 chars = 48)
+		for (size_t i = insn.size; i < 8; ++i) {
+			ss << "   ";
+		}
+		ss << " " << insn.mnemonic << " " << insn.operands << "\n";
+	}
+
 	out = ss.str();
 	return true;
 }
