@@ -87,6 +87,18 @@ namespace SapphireHook {
         const std::map<std::string, SignatureInfo>& GetGlobalSignatures() const { return m_globalSignatures; }
         const std::map<std::string, std::map<std::string, SignatureInfo>>& GetClassSignatures() const { return m_classSignatures; }
 
+        /// Returns all signature entries (global + class methods) as name->SignatureInfo pairs
+        std::map<std::string, SignatureInfo> GetAllEntries() const {
+            std::map<std::string, SignatureInfo> result = m_globalSignatures;
+            for (const auto& [className, methods] : m_classSignatures) {
+                for (const auto& [methodName, info] : methods) {
+                    std::string fullName = className + "::" + methodName;
+                    result[fullName] = info;
+                }
+            }
+            return result;
+        }
+
         std::vector<std::pair<uintptr_t, SignatureInfo>> GetResolvedFunctionsWithTypes() const
         {
             return GetResolvedFunctionsWithInfo();

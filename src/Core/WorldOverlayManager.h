@@ -66,6 +66,23 @@ public:
         All             = 0xFFFFFFFF
     };
     
+    /// Detailed zone information from EXD data
+    struct ZoneInfo {
+        uint16_t territoryId = 0;
+        std::string zoneName;           ///< Territory name from EXD
+        std::string placeName;          ///< Current place name (sub-area)
+        std::string regionName;         ///< Region name (e.g., "La Noscea")
+        std::string bgPath;             ///< BG path (level data path)
+        uint8_t weatherRate = 0;        ///< Weather rate ID for this zone
+        bool isContentFinderContent = false;  ///< Is this a duty?
+        std::string contentName;        ///< If duty, the duty name
+        uint16_t contentLevel = 0;      ///< If duty, the level requirement
+        bool isPvP = false;             ///< PvP zone
+        bool hasMount = true;           ///< Mount allowed
+        bool hasAetheryte = false;      ///< Has aetheryte in zone
+        size_t layoutElementCount = 0;  ///< Total layout elements loaded
+    };
+    
     /// Overlay appearance settings
     struct OverlaySettings {
         float Alpha = 0.6f;               ///< Global alpha multiplier
@@ -97,6 +114,9 @@ public:
     
     /// Get current zone name
     std::string GetCurrentZoneName() const;
+    
+    /// Get detailed zone info from EXD data
+    ZoneInfo GetCurrentZoneInfo() const;
     
     /// Force load a specific zone (for manual override/browsing)
     bool LoadZone(uint16_t territoryId);

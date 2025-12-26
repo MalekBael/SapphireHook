@@ -3385,4 +3385,125 @@ void PacketDecoding::RegisterZonePackets() {
     r.RegisterDecoder(1, false, 0x01DD, MakeGenericDecoder<ServerZone::FFXIVIpcResumeEventSceneN<64>>());
     r.RegisterDecoder(1, false, 0x01DE, MakeGenericDecoder<ServerZone::FFXIVIpcResumeEventSceneN<128>>());
     r.RegisterDecoder(1, false, 0x01DF, MakeGenericDecoder<ServerZone::FFXIVIpcResumeEventSceneN<255>>());
+
+    // ============================================================================
+    // NEW OPCODES FROM 3.35 GAP ANALYSIS (83 opcodes)
+    // ============================================================================
+
+    // Group 1: Content Finder (0x078-0x07A) - 3 opcodes with struct decoders
+    r.RegisterDecoder(1, false, 0x0078, MakeGenericDecoder<ServerZone::FFXIVIpcContentFinderNotify>());
+    r.RegisterDecoder(1, false, 0x0079, MakeGenericDecoder<ServerZone::FFXIVIpcContentFinderUpdate>());
+    r.RegisterDecoder(1, false, 0x007A, MakeGenericDecoder<ServerZone::FFXIVIpcContentFinderResult>());
+    // 0x07B and 0x07C use vtable callbacks - no packet struct needed
+
+    // Group 2: Request Item / Ready Check (0x0E4, 0x0E7) - 2 opcodes
+    r.RegisterDecoder(1, false, 0x00E4, MakeGenericDecoder<ServerZone::FFXIVIpcRequestHighQuality>());
+    r.RegisterDecoder(1, false, 0x00E7, MakeGenericDecoder<ServerZone::FFXIVIpcReadyCheckNotify>());
+
+    // Group 3: Free Company Extended (0x11B-0x11D) - 3 opcodes
+    r.RegisterDecoder(1, false, 0x011B, MakeGenericDecoder<ServerZone::FFXIVIpcFCMemberUpdate>());
+    r.RegisterDecoder(1, false, 0x011C, MakeGenericDecoder<ServerZone::FFXIVIpcFCRankUpdate>());
+    r.RegisterDecoder(1, false, 0x011D, MakeGenericDecoder<ServerZone::FFXIVIpcFCPermissions>());
+
+    // Group 4: Quest Tracker UI (0x150-0x15B) - 12 opcodes
+    r.RegisterDecoder(1, false, 0x0150, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerInit>());
+    r.RegisterDecoder(1, false, 0x0151, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerAdd>());
+    r.RegisterDecoder(1, false, 0x0152, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerRemove>());
+    r.RegisterDecoder(1, false, 0x0153, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerUpdate>());
+    r.RegisterDecoder(1, false, 0x0154, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerPosition>());
+    r.RegisterDecoder(1, false, 0x0155, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerComplete>());
+    r.RegisterDecoder(1, false, 0x0156, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerSync>());
+    r.RegisterDecoder(1, false, 0x0157, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerClear>());
+    r.RegisterDecoder(1, false, 0x0158, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerReorder>());
+    r.RegisterDecoder(1, false, 0x0159, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerShow>());
+    r.RegisterDecoder(1, false, 0x015A, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerHide>());
+    r.RegisterDecoder(1, false, 0x015B, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTrackerReset>());
+
+    // Group 5: Director Type 7 / Instance (0x168-0x16A) - 3 opcodes
+    r.RegisterDecoder(1, false, 0x0168, MakeGenericDecoder<ServerZone::FFXIVIpcDirector7Init>());
+    r.RegisterDecoder(1, false, 0x0169, MakeGenericDecoder<ServerZone::FFXIVIpcDirector7Update>());
+    r.RegisterDecoder(1, false, 0x016A, MakeGenericDecoder<ServerZone::FFXIVIpcDirector7Result>());
+
+    // Group 6: Territory/Actor (0x195, 0x197) - 2 opcodes
+    r.RegisterDecoder(1, false, 0x0195, MakeGenericDecoder<ServerZone::FFXIVIpcTerritorySetup>());
+    r.RegisterDecoder(1, false, 0x0197, MakeGenericDecoder<ServerZone::FFXIVIpcActorGauge>());
+
+    // Group 7: Event Scene (0x1E0-0x1EA) - 11 opcodes with struct decoders
+    r.RegisterDecoder(1, false, 0x01E0, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneStart>());
+    r.RegisterDecoder(1, false, 0x01E1, MakeGenericDecoder<ServerZone::FFXIVIpcEventScenePlay>());
+    r.RegisterDecoder(1, false, 0x01E2, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneSequence>());
+    r.RegisterDecoder(1, false, 0x01E3, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneChoice>());
+    r.RegisterDecoder(1, false, 0x01E4, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneAction>());
+    r.RegisterDecoder(1, false, 0x01E5, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneCamera>());
+    r.RegisterDecoder(1, false, 0x01E6, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneDialogue>());
+    r.RegisterDecoder(1, false, 0x01E7, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneEnd>());
+    r.RegisterDecoder(1, false, 0x01E8, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneParams>());
+    r.RegisterDecoder(1, false, 0x01E9, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneData>());
+    r.RegisterDecoder(1, false, 0x01EA, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneComplete>());
+
+    // Group 8: Housing Buddy/Stable (0x30A-0x310) - 7 opcodes
+    r.RegisterDecoder(1, false, 0x030A, MakeGenericDecoder<ServerZone::FFXIVIpcHousingBuddyInit>());
+    r.RegisterDecoder(1, false, 0x030B, MakeGenericDecoder<ServerZone::FFXIVIpcHousingBuddyList>());
+    r.RegisterDecoder(1, false, 0x030C, MakeGenericDecoder<ServerZone::FFXIVIpcHousingBuddyStatus>());
+    r.RegisterDecoder(1, false, 0x030D, MakeGenericDecoder<ServerZone::FFXIVIpcHousingBuddyUpdate>());
+    r.RegisterDecoder(1, false, 0x030E, MakeGenericDecoder<ServerZone::FFXIVIpcHousingBuddyAction>());
+    r.RegisterDecoder(1, false, 0x030F, MakeGenericDecoder<ServerZone::FFXIVIpcHousingBuddyResult>());
+    r.RegisterDecoder(1, false, 0x0310, MakeGenericDecoder<ServerZone::FFXIVIpcHousingBuddyComplete>());
+
+    // Group 9: Chocobo Stable Commands (0x330-0x33A) - 11 opcodes
+    r.RegisterDecoder(1, false, 0x0330, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableList>());
+    r.RegisterDecoder(1, false, 0x0331, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableSelect>());
+    r.RegisterDecoder(1, false, 0x0332, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableData>());
+    r.RegisterDecoder(1, false, 0x0333, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableUpdate>());
+    r.RegisterDecoder(1, false, 0x0334, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableResult>());
+    r.RegisterDecoder(1, false, 0x0335, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableAction1>());
+    r.RegisterDecoder(1, false, 0x0336, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableAction2>());
+    r.RegisterDecoder(1, false, 0x0337, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableStatus>());
+    r.RegisterDecoder(1, false, 0x0338, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableFlags>());
+    r.RegisterDecoder(1, false, 0x0339, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableSync>());
+    r.RegisterDecoder(1, false, 0x033A, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboStableComplete>());
+
+    // Group 10: Chocobo Racing (0x34A-0x35E) - 21 opcodes
+    r.RegisterDecoder(1, false, 0x0348, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceConfig>());
+    r.RegisterDecoder(1, false, 0x0349, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceParticipants>());
+    r.RegisterDecoder(1, false, 0x034A, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceInit>());
+    r.RegisterDecoder(1, false, 0x034B, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceUpdate>());
+    r.RegisterDecoder(1, false, 0x034C, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceCountdown>());
+    r.RegisterDecoder(1, false, 0x034D, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceStart>());
+    r.RegisterDecoder(1, false, 0x034E, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRacePosition>());
+    r.RegisterDecoder(1, false, 0x034F, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceLap>());
+    r.RegisterDecoder(1, false, 0x0350, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceCheckpoint>());
+    r.RegisterDecoder(1, false, 0x0351, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceObstacle>());
+    r.RegisterDecoder(1, false, 0x0352, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceMessage>());
+    r.RegisterDecoder(1, false, 0x0353, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceAbility>());
+    r.RegisterDecoder(1, false, 0x0354, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceItem>());
+    r.RegisterDecoder(1, false, 0x0355, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceCollision>());
+    r.RegisterDecoder(1, false, 0x0356, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceSpeed>());
+    r.RegisterDecoder(1, false, 0x0357, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceTime>());
+    r.RegisterDecoder(1, false, 0x0358, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceRanking>());
+    r.RegisterDecoder(1, false, 0x0359, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceBonus>());
+    r.RegisterDecoder(1, false, 0x035A, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRacePenalty>());
+    r.RegisterDecoder(1, false, 0x035B, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceFinish>());
+    r.RegisterDecoder(1, false, 0x035C, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceReward>());
+    r.RegisterDecoder(1, false, 0x035D, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceResult>());
+    r.RegisterDecoder(1, false, 0x035E, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceComplete>());
+    // 0x3B7 - ChocoboRaceComplete alternative opcode (duplicate handler)
+    r.RegisterDecoder(1, false, 0x03B7, MakeGenericDecoder<ServerZone::FFXIVIpcChocoboRaceComplete>());
+
+    // Group 11: Triple Triad (0x384-0x38A) - 7 opcodes
+    r.RegisterDecoder(1, false, 0x0384, MakeGenericDecoder<ServerZone::FFXIVIpcTriadMatchInit>());
+    r.RegisterDecoder(1, false, 0x0385, MakeGenericDecoder<ServerZone::FFXIVIpcTriadMatchStart>());
+    r.RegisterDecoder(1, false, 0x0386, MakeGenericDecoder<ServerZone::FFXIVIpcTriadTurnStart>());
+    r.RegisterDecoder(1, false, 0x0387, MakeGenericDecoder<ServerZone::FFXIVIpcTriadCardPlay>());
+    r.RegisterDecoder(1, false, 0x0388, MakeGenericDecoder<ServerZone::FFXIVIpcTriadCardResult>());
+    r.RegisterDecoder(1, false, 0x0389, MakeGenericDecoder<ServerZone::FFXIVIpcTriadMatchEnd>());
+    r.RegisterDecoder(1, false, 0x038A, MakeGenericDecoder<ServerZone::FFXIVIpcTriadReward>());
+
+    // Group 12: ContentFinder Notifications (0x290-0x294) - 5 opcodes
+    // Handler: sub_140CC6F40 - all share same handler, differentiated by category field
+    r.RegisterDecoder(1, false, 0x0290, MakeGenericDecoder<ServerZone::FFXIVIpcCFNotify>());
+    r.RegisterDecoder(1, false, 0x0291, MakeGenericDecoder<ServerZone::FFXIVIpcCFNotifyPop>());
+    r.RegisterDecoder(1, false, 0x0292, MakeGenericDecoder<ServerZone::FFXIVIpcCFNotifyEnterReady>());
+    r.RegisterDecoder(1, false, 0x0293, MakeGenericDecoder<ServerZone::FFXIVIpcCFNotifyMemberUpdate>());
+    r.RegisterDecoder(1, false, 0x0294, MakeGenericDecoder<ServerZone::FFXIVIpcCFNotifyStatus>());
 }

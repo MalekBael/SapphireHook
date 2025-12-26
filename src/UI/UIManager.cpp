@@ -49,6 +49,8 @@
 #include "../Modules/ZoneLayoutViewerModule.h"
 // NEW: World Overlay manager module
 #include "../Modules/WorldOverlayModule.h"
+// NEW: Signature Scanner module for async pattern scanning
+#include "../Modules/SignatureScannerModule.h"
 // NEW: Camera extractor for player position display
 #include "../Tools/GameCameraExtractor.h"
 // Territory detection for zone display
@@ -389,6 +391,7 @@ void UIManager::RegisterDefaultModules()
 	TryRegisterModule<SapphireHook::CollisionOverlayModule>("collision_overlay", "Collision Overlay", successCount);
 	TryRegisterModule<SapphireHook::ZoneLayoutViewerModule>("zone_layout_viewer", "Zone Layout Viewer", successCount);
 	TryRegisterModule<SapphireHook::WorldOverlayModule>("world_overlay", "World Overlay", successCount);
+	TryRegisterModule<SapphireHook::SignatureScannerModule>("signature_scanner", "Signature Scanner", successCount);
 
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
 	LogInfo("Successfully registered: " + std::to_string(successCount) + " modules");
@@ -750,6 +753,26 @@ void UIManager::RenderMainMenu()
 				else
 				{
 					ImGui::MenuItem("World Overlay", nullptr, false, false);  // Show disabled if not found
+				}
+			}
+
+			// Signature Scanner (async pattern discovery)
+			{
+				static UIModule* s_sigScanner = nullptr;
+				if (!s_sigScanner)
+					s_sigScanner = GetModule("signature_scanner");
+
+				if (s_sigScanner)
+				{
+					bool open = s_sigScanner->IsWindowOpen();
+					if (ImGui::MenuItem(s_sigScanner->GetDisplayName(), nullptr, open))
+					{
+						s_sigScanner->SetWindowOpen(!open);
+					}
+				}
+				else
+				{
+					ImGui::MenuItem("Signature Scanner", nullptr, false, false);
 				}
 			}
 

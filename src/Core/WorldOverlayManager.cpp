@@ -92,6 +92,51 @@ std::string WorldOverlayManager::GetCurrentZoneName() const {
     return name ? name : std::format("Zone_{}", terrId);
 }
 
+WorldOverlayManager::ZoneInfo WorldOverlayManager::GetCurrentZoneInfo() const {
+    ZoneInfo info;
+    
+    uint16_t terrId;
+    std::shared_ptr<ZoneLayoutData> layout;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        terrId = m_currentTerritoryId;
+        layout = m_currentLayout;
+    }
+    
+    info.territoryId = terrId;
+    
+    if (terrId == 0) {
+        info.zoneName = "None";
+        return info;
+    }
+    
+    // Get zone name from EXD
+    if (const char* name = GameData::LookupTerritoryName(terrId)) {
+        info.zoneName = name;
+    } else {
+        info.zoneName = std::format("Zone_{}", terrId);
+    }
+    
+    // Get BG path
+    if (const char* bgPath = GameData::LookupTerritoryBgPath(terrId)) {
+        info.bgPath = bgPath;
+    }
+    
+    // Check for aetherytes and get layout stats
+    if (layout) {
+        info.hasAetheryte = !layout->Aetherytes.empty();
+        info.layoutElementCount = layout->TotalEntryCount();
+    }
+    
+    // TODO: Add more EXD lookups when available:
+    // - ContentFinderCondition lookup for duty info
+    // - TerritoryType lookup for mount/pvp flags
+    // - WeatherRate lookup
+    // - Region/PlaceName from TerritoryType references
+    
+    return info;
+}
+
 bool WorldOverlayManager::LoadZone(uint16_t territoryId) {
     if (territoryId == 0) {
         ClearCurrentZone();
@@ -540,7 +585,19 @@ void WorldOverlayManager::RenderAetheryteOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 5.0f * m_settings.Scale;
-            renderer.DrawText3D(labelPos, "Aetheryte", color, 1.0f);
+            
+            // Use EXD lookup to get actual aetheryte name
+            std::string label;
+            if (pt.BaseId > 0) {
+                if (const char* name = GameData::LookupAetheryteName(pt.BaseId)) {
+                    label = std::format("{} (ID: {})", name, pt.BaseId);
+                } else {
+                    label = std::format("Aetheryte #{}", pt.BaseId);
+                }
+            } else {
+                label = "Aetheryte";
+            }
+            renderer.DrawText3D(labelPos, label.c_str(), color, 1.0f);
         }
     }
 }

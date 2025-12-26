@@ -22,6 +22,13 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x0073, "SetPSNId" },
         { 0x0075, "SetBillingTime" },
 
+        // Content Finder (Duty Finder) packets
+        { 0x0078, "CFCommenceResult" },       // CF commence duty result
+        { 0x0079, "CFCommenceUpdate" },        // CF commence state update
+        { 0x007A, "CFContentReady" },          // CF content is ready to enter
+        { 0x007B, "CFNotifyCategory9" },       // CF notification type 9
+        { 0x007C, "CFNotifyCategory11" },      // CF notification type 11
+
         { 0x00C9, "InviteResult" },
         { 0x00CA, "InviteReplyResult" },
         { 0x00CB, "InviteUpdate" },
@@ -49,8 +56,10 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x00E1, "BlacklistAddResult" },
         { 0x00E2, "BlacklistRemoveResult" },
         { 0x00E3, "GetBlacklistResult" },
-
+        { 0x00E4, "RequestItemListResult" },   // Item request list from social manager
+        { 0x00E5, "RequestItemUpdate" },       // Item request state update
         { 0x00E6, "FriendlistRemoveResult" },
+        { 0x00E7, "AllianceReadyCheckUpdate" },  // Alliance ready check state update
         { 0x00EB, "PcSearchResult" },
         { 0x00F0, "LinkshellResult" },
         { 0x00F1, "GetLinkshellListResult" },
@@ -83,6 +92,9 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x0118, "GetFcParamsResult" },
         { 0x0119, "GetFcActionResult" },
         { 0x011A, "GetFcMemoResult" },
+        { 0x011B, "GetFcReputationResult" },   // FC reputation/rank data
+        { 0x011C, "FcBonusResult" },           // FC bonus status result
+        { 0x011D, "FcMemberUpdate" },          // FC member data update
         { 0x0122, "InfoGMCommandResult" },
 
         { 0x012C, "SyncTagHeader" },
@@ -112,14 +124,39 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x014B, "UpdateAlliance" },
         { 0x014C, "PartyPos" },
         { 0x014D, "AlliancePos" },
+        { 0x014E, "PartyMemberPos" },        // Party member position markers (packed uint16→float)
         { 0x014F, "GrandCompany" },
+
+        // Quest Tracker UI packets (various sized data)
+        { 0x0150, "SetQuestUIFlag" },          // Sets quest UI state flags
+        { 0x0151, "QuestTrackerData" },        // Full quest tracker data (0xA0 bytes)
+        { 0x0152, "QuestTrackerEntry" },       // Single quest tracker entry update
+        { 0x0153, "QuestTracker40" },          // Quest tracker 40-byte chunk
+        { 0x0154, "QuestTracker60" },          // Quest tracker 60-byte chunk
+        { 0x0155, "QuestTracker60Entry" },     // Quest tracker 60 single entry
+        { 0x0156, "QuestTracker80" },          // Quest tracker 80-byte chunk
+        { 0x0157, "QuestTrackerBig" },         // Quest tracker large data (365 bytes)
+        { 0x0158, "QuestTrackerBigEntry" },    // Quest tracker large single entry
+        { 0x0159, "QuestUIState" },            // Quest UI state bytes
+        { 0x015A, "QuestFlags" },              // Quest completion flags
+        { 0x015B, "QuestComplete" },           // Quest completion signal
+
+        // Director Type 7 - Instance/Content Director packets
+        // These initialize and update the instance director when entering instanced content
+        // Director7Init sets Director+1512 (active flag) and Director+1513 (contentId)
+        // which triggers the UI transition from ContentsFinder to ContentsInfo addon
+        { 0x0168, "Director7Init" },          // Initialize instance director (contentType, contentId)
+        { 0x0169, "Director7Update" },        // Update instance director state
+        { 0x016A, "Director7Result" },        // Instance completion/result
 
         { 0x0190, "Create" },
         { 0x0191, "Delete" },
         { 0x0192, "ActorMove" },
         { 0x0193, "Transfer" },
         { 0x0194, "Warp" },
+        { 0x0195, "TerritoryListData" },       // Territory list (100 entries × 72 bytes)
         { 0x0196, "RequestCast" },
+        { 0x0197, "ActorModifiers" },          // Actor modifier array (26 bytes at actor+4952)
         { 0x0199, "UpdateParty" },
         { 0x019A, "InitZone" },
         { 0x019B, "HateList" },
@@ -192,6 +229,23 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x01DE, "ResumeEventScene128" },
         { 0x01DF, "ResumeEventScene255" },
 
+        // Event Scene system packets
+        { 0x01E0, "EventSceneInit" },          // Event scene initialization (16-byte entries)
+        { 0x01E1, "EventSceneSlot" },          // Event scene slot (5 params, slot < 0x1E)
+        { 0x01E2, "EventSceneData" },          // Event scene data (310 + 32 bytes)
+        { 0x01E3, "EventSceneFlags" },         // Event scene flags (word + 3 bools)
+        { 0x01E4, "EventScenePos" },           // Event scene position data
+        { 0x01E5, "EventSceneSlot4" },         // Event scene slot variant (4 params)
+        { 0x01E6, "EventSceneBulk200" },       // Event scene bulk data (200 bytes)
+        { 0x01E7, "EventSceneState" },         // Event scene state (word + bool)
+        { 0x01E9, "EventLogParam1" },          // Event log with 1 param
+        { 0x01EA, "EventLogParam2" },          // Event log with 2 params
+        { 0x01EB, "EventLogParam3" },          // Event log with 3 params
+        { 0x01EC, "EventLogParam4" },          // Event log with 4 params
+        { 0x01ED, "EventLogParam5" },          // Event log with 5 params
+        { 0x01EE, "EventScenePad5" },          // Event scene padding (5 units)
+        { 0x01EF, "InspectUpdate" },           // Inspect data update (uses dword_1505540)
+
         { 0x01F0, "LegacyQuestCompleteFlags" },
         { 0x01F1, "ResumeEventSceneHeaderStr" },
         { 0x01F2, "ResumeEventSceneStr32" },
@@ -243,11 +297,15 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x028D, "TimeOffset" },
         { 0x028E, "ChocoboTaxiStart" },
         { 0x028F, "GMOrderHeader" },
-        { 0x0290, "GMOrder2" },
-        { 0x0291, "GMOrder4" },
-        { 0x0292, "GMOrder8" },
-        { 0x0293, "GMOrder16" },
-        { 0x0294, "GMOrder32" },
+
+        // ContentFinder (Duty Finder) Notification packets
+        // Handler: sub_140CC6F40 - processes queue state, match found, ready check, etc.
+        // State values: 8=queue update, 9=queue op, 10=instance content, 11=instance state
+        { 0x0290, "CFNotify" },              // ContentFinder notification (base)
+        { 0x0291, "CFNotifyPop" },           // CF match found / pop notification
+        { 0x0292, "CFNotifyEnterReady" },    // CF all players ready, entering instance
+        { 0x0293, "CFNotifyMemberUpdate" },  // CF party member update
+        { 0x0294, "CFNotifyStatus" },        // CF queue/duty status update
         { 0x029E, "InspectQuests" },
         { 0x029F, "InspectGuildleves" },
         { 0x02A0, "InspectReward" },
@@ -314,6 +372,15 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x0308, "HousingGetHouseBuddyStableListResult" },
         { 0x0309, "HouseTrainBuddyData" },
 
+        // Housing Buddy/Stable system
+        { 0x030A, "HouseBuddyStableUpdate" },  // Chocobo stable update in housing
+        { 0x030B, "HouseBuddyData" },          // Housing buddy data (UI component 104)
+        { 0x030C, "SocialStatus8" },           // Social/party status (8 slots)
+        { 0x030D, "HouseTrainBuddyResult" },   // Buddy training result
+        { 0x030E, "HouseYardInfo" },           // Housing yard information
+        { 0x030F, "HouseYardEntry" },          // Housing yard single entry
+        { 0x0310, "HouseYardBatch" },          // Housing yard batch update
+
         { 0x0311, "ContentBonus" },
         { 0x0316, "FcChestLog" },
         { 0x0317, "SalvageResult" },
@@ -327,13 +394,59 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x032C, "TreasureHuntReward" },
         { 0x032D, "HousingCombinedObjectStatus" },
         { 0x032E, "HouseBuddyModelData" },
+        { 0x032F, "RetainerListBatch" },     // Retainer list (30 entries × 3 bytes per page)
+
+        // Housing Buddy commands - need further investigation, what is housing buddy in ffxiv context?
+        { 0x0330, "HouseBuddyStatus" },        // Housing buddy status
+        { 0x0331, "HouseBuddyCommand" },       // Housing buddy command
+        { 0x0332, "HouseBuddyEquip" },         // Housing buddy equipment
+        { 0x0333, "HouseBuddyAction" },        // Housing buddy action
 
         { 0x0334, "Marker" },
         { 0x0335, "GroundMarker" },
         { 0x0336, "Frontline01Result" },
         { 0x0337, "Frontline01BaseInfo" },
+        { 0x0338, "SocialSearchFlags" },     // Search/social flags via UI 42
         { 0x0339, "FinishContentMatchToClient" },
+        { 0x033A, "ContentMatchStatus" },     // Content matching status update
         { 0x033E, "UnMountLink" },
+        { 0x033F, "CameraSetPosition" },       // Camera/view position (4 floats)
+        { 0x0348, "DirectorMember2" },         // Director member (2 × 104-byte entries)
+        { 0x0349, "BatchListEntry" },          // Batch queue entry (72-byte, max 72)
+
+        // Gold Saucer - Chocobo Racing (UI component 157)
+        { 0x034A, "ChocoboRaceInit" },         // Race initialization
+        { 0x034B, "ChocoboRaceData" },         // Race data update
+        { 0x034C, "ChocoboRaceEntry" },        // Race entry data
+        { 0x034D, "ChocoboRacePosition" },     // Racer position data
+        { 0x034E, "ChocoboRaceResult" },       // Race result
+        { 0x034F, "ChocoboRaceJockey" },       // Jockey/rider data
+        { 0x0350, "ChocoboRaceStats" },        // Chocobo stats
+        { 0x0351, "ChocoboRaceState" },        // Race state
+        { 0x0352, "ChocoboRaceChat" },         // Race chat message (const char*)
+        { 0x0353, "ChocoboRaceReward" },       // Race rewards
+        { 0x0354, "ChocoboRaceRank" },         // Race ranking
+        { 0x0355, "ChocoboRaceConfig" },       // Race configuration
+        { 0x0356, "ChocoboRaceItem" },         // Race item usage
+        { 0x0357, "ChocoboRaceAbility" },      // Race ability (unsigned __int16*)
+        { 0x0358, "ChocoboRaceText" },         // Race text display (char*)
+        { 0x0359, "ChocoboRaceFlag" },         // Race flags
+        { 0x035A, "ChocoboRaceTimer" },        // Race timer
+        { 0x035B, "ChocoboRaceProgress" },     // Race progress
+        { 0x035C, "ChocoboRacePhase" },        // Race phase
+        { 0x035D, "ChocoboRaceFinish" },       // Race finish
+        { 0x035E, "ChocoboRaceCamera" },       // Race camera (flt_150A508)
+
+        // Gold Saucer - Triple Triad (actor type 0x800A)
+        { 0x0384, "TripleTriadInit" },         // TT game initialization (vtable[1176])
+        { 0x0385, "TripleTriadData" },         // TT game data (vtable[1172])
+        { 0x0386, "TripleTriadState" },        // TT game state (vtable[1176])
+        { 0x0387, "TripleTriadResult" },       // TT game result (vtable[1180])
+        { 0x0388, "TripleTriadAction" },       // TT player action
+        { 0x0389, "TripleTriadCard" },         // TT card data
+        { 0x038A, "TripleTriadHand" },         // TT hand data (unsigned __int8*)
+
+        { 0x03B7, "ChocoboRaceComplete" },     // Final race completion handler
     };
 
     // Server (chat) opcodes

@@ -56,6 +56,16 @@ namespace {
     std::unordered_map<uint32_t, std::string> s_worlds;
     std::unordered_map<uint32_t, std::string> s_aetherytes;
     std::unordered_map<uint32_t, std::string> s_instanceContents;
+    
+    // New EXD sheets for enhanced packet decoding
+    std::unordered_map<uint32_t, std::string> s_fates;
+    std::unordered_map<uint32_t, std::string> s_recipes;
+    std::unordered_map<uint32_t, std::string> s_contentFinderConditions;
+    std::unordered_map<uint32_t, std::string> s_leves;
+    std::unordered_map<uint32_t, std::string> s_achievements;
+    std::unordered_map<uint32_t, std::string> s_titles;
+    std::unordered_map<uint32_t, std::string> s_orchestrions;
+    std::unordered_map<uint32_t, std::string> s_tripleTriadCards;
 
     // Helper to load a sheet into a cache map
     template<typename StructT, typename ExtractName>
@@ -108,6 +118,14 @@ namespace {
         s_worlds.clear();
         s_aetherytes.clear();
         s_instanceContents.clear();
+        s_fates.clear();
+        s_recipes.clear();
+        s_contentFinderConditions.clear();
+        s_leves.clear();
+        s_achievements.clear();
+        s_titles.clear();
+        s_orchestrions.clear();
+        s_tripleTriadCards.clear();
         s_stats = LoadStats{};
     }
     
@@ -291,6 +309,103 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
         } catch (const std::exception& e) {
             LogWarning("[GameData] InstanceContent loading failed: " + std::string(e.what()));
         }
+        
+        // ====================================================================
+        // NEW: Enhanced Packet Decoding Sheets
+        // ====================================================================
+        
+        // Fate: Text.TitleText (FATE name)
+        LogInfo("[GameData] Loading Fate...");
+        try {
+            LoadSheet<Excel::Fate>("Fate", s_fates, s_stats.fateCount,
+                [](const auto& row) { return row->getString(row->_data.Text.TitleText); });
+        } catch (const std::exception& e) {
+            LogWarning("[GameData] Fate loading failed: " + std::string(e.what()));
+        }
+        
+        // Leve: Text.Name (Levequest name)
+        LogInfo("[GameData] Loading Leve...");
+        try {
+            LoadSheet<Excel::Leve>("Leve", s_leves, s_stats.leveCount,
+                [](const auto& row) { return row->getString(row->_data.Text.Name); });
+        } catch (const std::exception& e) {
+            LogWarning("[GameData] Leve loading failed: " + std::string(e.what()));
+        }
+        
+        // Achievement: Text.Name
+        LogInfo("[GameData] Loading Achievement...");
+        try {
+            LoadSheet<Excel::Achievement>("Achievement", s_achievements, s_stats.achievementCount,
+                [](const auto& row) { return row->getString(row->_data.Text.Name); });
+        } catch (const std::exception& e) {
+            LogWarning("[GameData] Achievement loading failed: " + std::string(e.what()));
+        }
+        
+        // Title: Text.Male (use male variant as primary)
+        LogInfo("[GameData] Loading Title...");
+        try {
+            LoadSheet<Excel::Title>("Title", s_titles, s_stats.titleCount,
+                [](const auto& row) { return row->getString(row->_data.Text.Male); });
+        } catch (const std::exception& e) {
+            LogWarning("[GameData] Title loading failed: " + std::string(e.what()));
+        }
+        
+        // ContentFinderCondition: We need to get the name via the linked InstanceContent
+        // For now, store the InstanceContentId as the "name" and lookup at runtime
+        // Or we could build a more complex lookup. For simplicity, use InstanceContent names.
+        LogInfo("[GameData] Loading ContentFinderCondition...");
+        try {
+            // ContentFinderCondition links to InstanceContent via InstanceContentId field
+            // We'll read ContentFinderCondition and look up names from s_instanceContents
+            auto& cat = s_exdData->get_category("ContentFinderCondition");
+            auto& exd = cat.get_data(XivLanguage::en);
+            auto rows = exd.get_sheet_rows<Excel::ContentFinderCondition>();
+            
+            s_contentFinderConditions.clear();
+            for (const auto& [id, row] : rows) {
+                uint16_t instanceId = row->_data.InstanceContentId;
+                // Look up the instance content name
+                auto it = s_instanceContents.find(instanceId);
+                if (it != s_instanceContents.end() && !it->second.empty()) {
+                    s_contentFinderConditions[id] = it->second;
+                }
+            }
+            s_stats.contentFinderConditionCount = s_contentFinderConditions.size();
+            LogInfo("[GameData] Loaded " + std::to_string(s_stats.contentFinderConditionCount) + " entries from ContentFinderCondition");
+        } catch (const std::exception& e) {
+            LogWarning("[GameData] ContentFinderCondition loading failed: " + std::string(e.what()));
+        }
+        
+        // Recipe: Doesn't have a name field, but we store the CraftItemId for runtime lookup
+        // We'll format recipes as "Recipe #X (creates ItemName)" at format time
+        // For the cache, store the item name of the crafted item
+        LogInfo("[GameData] Loading Recipe...");
+        try {
+            auto& cat = s_exdData->get_category("Recipe");
+            auto& exd = cat.get_data(XivLanguage::en);
+            auto rows = exd.get_sheet_rows<Excel::Recipe>();
+            
+            s_recipes.clear();
+            for (const auto& [id, row] : rows) {
+                int32_t craftItemId = row->_data.CraftItemId;
+                if (craftItemId > 0) {
+                    // Look up the crafted item name
+                    auto it = s_items.find(static_cast<uint32_t>(craftItemId));
+                    if (it != s_items.end() && !it->second.empty()) {
+                        s_recipes[id] = it->second;
+                    }
+                }
+            }
+            s_stats.recipeCount = s_recipes.size();
+            LogInfo("[GameData] Loaded " + std::to_string(s_stats.recipeCount) + " entries from Recipe");
+        } catch (const std::exception& e) {
+            LogWarning("[GameData] Recipe loading failed: " + std::string(e.what()));
+        }
+        
+        // Note: Orchestrion and TripleTriadCard sheets are not in Structs.h
+        // We'll add placeholders and implement when struct definitions are available
+        s_stats.orchestrionCount = 0;
+        s_stats.tripleTriadCardCount = 0;
         
         s_stats.initialized = true;
         LogInfo("[GameData] Initialization complete");
@@ -522,12 +637,349 @@ std::string FormatInstanceContent(uint32_t instanceContentId) {
     return std::to_string(instanceContentId);
 }
 
+// ============================================================================
+// NEW: Enhanced Packet Decoding Lookups
+// ============================================================================
+
+const char* LookupFateName(uint32_t fateId) noexcept {
+    auto it = s_fates.find(fateId);
+    return (it != s_fates.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatFate(uint32_t fateId) {
+    if (auto* name = LookupFateName(fateId)) {
+        return std::format("{} ({})", name, fateId);
+    }
+    return std::to_string(fateId);
+}
+
+const char* LookupRecipeName(uint32_t recipeId) noexcept {
+    auto it = s_recipes.find(recipeId);
+    return (it != s_recipes.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatRecipe(uint32_t recipeId) {
+    if (auto* itemName = LookupRecipeName(recipeId)) {
+        return std::format("Recipe: {} ({})", itemName, recipeId);
+    }
+    return std::format("Recipe #{}", recipeId);
+}
+
+const char* LookupContentFinderConditionName(uint32_t conditionId) noexcept {
+    auto it = s_contentFinderConditions.find(conditionId);
+    return (it != s_contentFinderConditions.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatContentFinderCondition(uint32_t conditionId) {
+    if (auto* name = LookupContentFinderConditionName(conditionId)) {
+        return std::format("{} ({})", name, conditionId);
+    }
+    return std::format("ContentFinder #{}", conditionId);
+}
+
+const char* LookupLeveName(uint32_t leveId) noexcept {
+    auto it = s_leves.find(leveId);
+    return (it != s_leves.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatLeve(uint32_t leveId) {
+    if (auto* name = LookupLeveName(leveId)) {
+        return std::format("{} ({})", name, leveId);
+    }
+    return std::to_string(leveId);
+}
+
+const char* LookupAchievementName(uint32_t achievementId) noexcept {
+    auto it = s_achievements.find(achievementId);
+    return (it != s_achievements.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatAchievement(uint32_t achievementId) {
+    if (auto* name = LookupAchievementName(achievementId)) {
+        return std::format("{} ({})", name, achievementId);
+    }
+    return std::to_string(achievementId);
+}
+
+const char* LookupTitleName(uint32_t titleId) noexcept {
+    auto it = s_titles.find(titleId);
+    return (it != s_titles.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatTitle(uint32_t titleId) {
+    if (auto* name = LookupTitleName(titleId)) {
+        return std::format("{} ({})", name, titleId);
+    }
+    return std::to_string(titleId);
+}
+
+const char* LookupOrchestrionName(uint32_t orchestrionId) noexcept {
+    auto it = s_orchestrions.find(orchestrionId);
+    return (it != s_orchestrions.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatOrchestrion(uint32_t orchestrionId) {
+    if (auto* name = LookupOrchestrionName(orchestrionId)) {
+        return std::format("{} ({})", name, orchestrionId);
+    }
+    return std::to_string(orchestrionId);
+}
+
+const char* LookupTripleTriadCardName(uint32_t cardId) noexcept {
+    auto it = s_tripleTriadCards.find(cardId);
+    return (it != s_tripleTriadCards.end()) ? it->second.c_str() : nullptr;
+}
+
+std::string FormatTripleTriadCard(uint32_t cardId) {
+    if (auto* name = LookupTripleTriadCardName(cardId)) {
+        return std::format("{} ({})", name, cardId);
+    }
+    return std::to_string(cardId);
+}
+
+// ============================================================================
+// Asset Path Resolution
+// ============================================================================
+
+namespace {
+    // Helper to zero-pad IDs for path construction
+    std::string PadId(uint16_t id, size_t width = 4) {
+        std::string s = std::to_string(id);
+        if (s.length() < width) {
+            s.insert(0, width - s.length(), '0');
+        }
+        return s;
+    }
+    
+    // Equipment slot suffix for model files
+    const char* GetEquipSlotSuffix(EquipSlot slot) {
+        switch (slot) {
+            case EquipSlot::MainHand:
+            case EquipSlot::OffHand:
+                return ""; // Weapons have different structure
+            case EquipSlot::Head:   return "_met";  // helmet/met
+            case EquipSlot::Body:   return "_top";  // top
+            case EquipSlot::Hands:  return "_glv";  // gloves
+            case EquipSlot::Legs:   return "_dwn";  // down/legs
+            case EquipSlot::Feet:   return "_sho";  // shoes
+            case EquipSlot::Earring:
+            case EquipSlot::Necklace:
+            case EquipSlot::Bracelet:
+            case EquipSlot::Ring:
+                return "_acc";  // accessory
+            default: return "";
+        }
+    }
+    
+    // Equipment category folder for model files
+    const char* GetEquipCategoryFolder(EquipSlot slot) {
+        switch (slot) {
+            case EquipSlot::MainHand:
+            case EquipSlot::OffHand:
+                return "weapon";
+            case EquipSlot::Earring:
+            case EquipSlot::Necklace:
+            case EquipSlot::Bracelet:
+            case EquipSlot::Ring:
+                return "accessory";
+            default:
+                return "equipment";
+        }
+    }
+}
+
+std::string ResolveEquipmentModelPath(uint16_t primaryId, uint16_t secondaryId, EquipSlot slot) {
+    std::string category = GetEquipCategoryFolder(slot);
+    std::string suffix = GetEquipSlotSuffix(slot);
+    std::string ePad = PadId(primaryId);
+    std::string vPad = PadId(secondaryId);
+    
+    if (slot == EquipSlot::MainHand || slot == EquipSlot::OffHand) {
+        // Weapons: chara/weapon/w0001/obj/body/b0001/model/w0001b0001.mdl
+        return std::format("chara/{}/w{}/obj/body/b{}/model/w{}b{}.mdl", 
+            category, ePad, vPad, ePad, vPad);
+    } else if (category == "accessory") {
+        // Accessories: chara/accessory/a0001/model/c0101a0001_acc.mdl
+        return std::format("chara/{}/a{}/model/c0101a{}{}.mdl", 
+            category, ePad, ePad, suffix);
+    } else {
+        // Regular equipment: chara/equipment/e0001/model/c0101e0001_top.mdl
+        return std::format("chara/{}/e{}/model/c0101e{}{}.mdl", 
+            category, ePad, ePad, suffix);
+    }
+}
+
+std::string ResolveMonsterModelPath(uint16_t modelId, uint16_t bodyId, uint16_t typeId) {
+    std::string mPad = PadId(modelId);
+    std::string bPad = PadId(bodyId);
+    std::string tPad = PadId(typeId);
+    
+    // Monster models: chara/monster/m0001/obj/body/b0001/model/m0001b0001.mdl
+    return std::format("chara/monster/m{}/obj/body/b{}/model/m{}b{}.mdl", 
+        mPad, bPad, mPad, bPad);
+}
+
+std::string ResolveCharacterModelPath(uint16_t raceId, const std::string& partType, uint16_t partId) {
+    std::string cPad = PadId(raceId);
+    std::string pPad = PadId(partId);
+    
+    // Map part type to file prefix and suffix
+    char typeChar = 'f'; // default to face
+    std::string suffix = "_fac";
+    
+    if (partType == "face") {
+        typeChar = 'f'; suffix = "_fac";
+    } else if (partType == "hair") {
+        typeChar = 'h'; suffix = "_hir";
+    } else if (partType == "body") {
+        typeChar = 'b'; suffix = "_top";
+    } else if (partType == "tail") {
+        typeChar = 't'; suffix = "_til";
+    } else if (partType == "ear") {
+        typeChar = 'z'; suffix = "_zer"; // zear
+    }
+    
+    // chara/human/c0101/obj/face/f0001/model/c0101f0001_fac.mdl
+    return std::format("chara/human/c{}/obj/{}/{}{}/model/c{}{}{}{}.mdl",
+        cPad, partType, typeChar, pPad, cPad, typeChar, pPad, suffix);
+}
+
+std::string ResolveMapTexturePath(uint32_t territoryId, uint8_t variant) {
+    // Get territory's Bg path to extract map folder
+    const char* bgPath = LookupTerritoryBgPath(territoryId);
+    if (!bgPath) return "";
+    
+    std::string_view bg(bgPath);
+    
+    // Extract the last folder from bg path (e.g., "f1t1" from "ffxiv/fst_f1/twn/f1t1")
+    auto lastSlash = bg.rfind('/');
+    if (lastSlash == std::string_view::npos) return "";
+    
+    // Get just the level folder name and its parent
+    std::string_view levelFolder = bg.substr(lastSlash + 1);
+    auto secondLastSlash = bg.rfind('/', lastSlash - 1);
+    std::string_view fullPath = (secondLastSlash != std::string_view::npos) 
+        ? bg.substr(secondLastSlash + 1) 
+        : levelFolder;
+    
+    // ui/map/f1t1/00/f1t100_m.tex (variant as 2-digit: 00, 01, etc.)
+    std::string varStr = PadId(variant, 2);
+    return std::format("ui/map/{}/{}/{}{}_{}.tex", 
+        levelFolder, varStr, levelFolder, varStr, 'm');
+}
+
+std::string ResolveIconPath(uint32_t iconId, bool highRes) {
+    // Icons are organized in folders of 1000: 000000, 001000, 002000, etc.
+    uint32_t folder = (iconId / 1000) * 1000;
+    
+    std::string folderStr = PadId(static_cast<uint16_t>(folder), 6);
+    std::string iconStr = PadId(static_cast<uint16_t>(iconId), 6);
+    
+    // To handle larger IDs (6 digits total)
+    if (folder >= 100000) {
+        folderStr = std::to_string(folder);
+        iconStr = std::to_string(iconId);
+        // Pad to 6 digits
+        while (folderStr.length() < 6) folderStr.insert(0, 1, '0');
+        while (iconStr.length() < 6) iconStr.insert(0, 1, '0');
+    }
+    
+    if (highRes) {
+        return std::format("ui/icon/{}/{}_hr1.tex", folderStr, iconStr);
+    }
+    return std::format("ui/icon/{}/{}.tex", folderStr, iconStr);
+}
+
+std::string ResolveItemIconPath(uint32_t itemId, bool highRes) {
+    // Need to look up item's icon ID from the Item sheet
+    auto it = s_items.find(itemId);
+    if (it == s_items.end()) return "";
+    
+    // We stored just the name, but we need the icon ID
+    // This would require storing more data in the cache
+    // For now, return empty - this needs Item sheet access
+    // TODO: Extend s_items to store ItemInfo { name, iconId, etc. }
+    return "";
+}
+
+std::string ResolveActionIconPath(uint32_t actionId, bool highRes) {
+    // Similar to items - needs icon ID from Action sheet
+    // TODO: Extend s_actions to store ActionInfo { name, iconId, etc. }
+    return "";
+}
+
+std::string ResolveTerritoryLgbPath(uint32_t territoryId) {
+    const char* bgPath = LookupTerritoryBgPath(territoryId);
+    if (!bgPath) return "";
+    
+    // bg/[BgPath]/level/bg.lgb
+    return std::format("bg/{}/level/bg.lgb", bgPath);
+}
+
+std::string ResolveTerritoryPlannerPath(uint32_t territoryId) {
+    const char* bgPath = LookupTerritoryBgPath(territoryId);
+    if (!bgPath) return "";
+    
+    // bg/[BgPath]/level/planner.sgb
+    return std::format("bg/{}/level/planner.sgb", bgPath);
+}
+
 const LoadStats& GetLoadStats() {
     return s_stats;
 }
 
 XivGameData* GetGameDataInstance() noexcept {
     return s_gameData.get();
+}
+
+std::optional<std::vector<char>> ReadRawFile(const std::string& path) {
+    if (!s_gameData) return std::nullopt;
+    
+    try {
+        auto file = s_gameData->getFile(path);
+        if (!file) return std::nullopt;
+        
+        auto& sections = file->get_data_sections();
+        if (sections.empty()) return std::nullopt;
+        
+        // Return the first (usually only) data section
+        return sections.front();
+    }
+    catch (const std::exception& e) {
+        LogWarning("[GameData] ReadRawFile failed for '" + path + "': " + e.what());
+        return std::nullopt;
+    }
+    catch (...) {
+        return std::nullopt;
+    }
+}
+
+bool DoesFileExist(const std::string& path) {
+    if (!s_gameData) return false;
+    
+    try {
+        return s_gameData->doesFileExist(path);
+    }
+    catch (...) {
+        return false;
+    }
+}
+
+size_t GetFileSize(const std::string& path) {
+    if (!s_gameData) return 0;
+    
+    try {
+        auto file = s_gameData->getFile(path);
+        if (!file) return 0;
+        
+        auto& sections = file->get_data_sections();
+        if (sections.empty()) return 0;
+        
+        return sections.front().size();
+    }
+    catch (...) {
+        return 0;
+    }
 }
 
 } // namespace GameData

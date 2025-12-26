@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cmath>
 #include <string>
 #include <vector>
 #include <memory>
@@ -46,6 +47,29 @@ struct Vec3 {
     float x = 0.0f;
     float y = 0.0f;
     float z = 0.0f;
+    
+    // Distance to another point (3D)
+    [[nodiscard]] float DistanceTo(const Vec3& other) const {
+        float dx = x - other.x;
+        float dy = y - other.y;
+        float dz = z - other.z;
+        return std::sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    
+    // Distance to another point (2D, ignoring Y)
+    [[nodiscard]] float DistanceTo2D(const Vec3& other) const {
+        float dx = x - other.x;
+        float dz = z - other.z;
+        return std::sqrt(dx * dx + dz * dz);
+    }
+    
+    // Squared distance (faster, avoids sqrt)
+    [[nodiscard]] float DistanceSquaredTo(const Vec3& other) const {
+        float dx = x - other.x;
+        float dy = y - other.y;
+        float dz = z - other.z;
+        return dx * dx + dy * dy + dz * dz;
+    }
 };
 
 // Collision mesh vertex
@@ -505,5 +529,71 @@ private:
 
 // Global instance accessor
 ZoneLayoutManager& GetZoneLayoutManager();
+
+// ============================================================================
+// Zone Context - Spatial awareness for hooks and packet decoding
+// ============================================================================
+
+// Result of a nearby element search with distance
+template<typename T>
+struct NearbyElement {
+    const T* element = nullptr;
+    float distance = 0.0f;
+    
+    operator bool() const { return element != nullptr; }
+    const T* operator->() const { return element; }
+    const T& operator*() const { return *element; }
+};
+
+// Zone context containing nearby elements within a search radius
+struct ZoneContext {
+    uint32_t territoryId = 0;
+    Vec3 queryPosition;
+    float searchRadius = 50.0f;
+    
+    // Nearby elements (sorted by distance)
+    NearbyElement<ExitRange> nearestExit;
+    NearbyElement<PopRange> nearestSpawnPoint;
+    NearbyElement<EventObject> nearestInteractable;
+    NearbyElement<AetherytePoint> nearestAetheryte;
+    NearbyElement<GatheringPoint> nearestGatheringPoint;
+    NearbyElement<MapRange> currentMapRange;
+    
+    // Lists of all nearby elements within radius
+    std::vector<NearbyElement<BNpcSpawnPoint>> nearbyEnemies;
+    std::vector<NearbyElement<ENpcSpawnPoint>> nearbyNpcs;
+    std::vector<NearbyElement<EventObject>> nearbyObjects;
+    std::vector<NearbyElement<FateRange>> nearbyFateRanges;
+    
+    // Flags
+    bool isValid = false;
+    bool hasLayoutData = false;
+};
+
+// Get zone context for a position in a territory
+// Returns context with nearby elements within the specified radius
+ZoneContext GetZoneContextForPosition(uint32_t territoryId, const Vec3& position, float searchRadius = 50.0f);
+
+// Validate that a BNPC spawn at a position matches known spawn data
+// Returns true if the spawn is valid, false if suspicious
+struct BNpcValidationResult {
+    bool isValid = false;
+    bool hasLayoutData = false;
+    bool matchesKnownSpawn = false;
+    float distanceToNearestSpawn = -1.0f;
+    uint32_t matchedNameId = 0;
+    std::string reason;
+};
+
+BNpcValidationResult ValidateBNpcSpawn(uint32_t territoryId, uint32_t bnpcNameId, const Vec3& position, float tolerance = 50.0f);
+
+// Check if a position is within any known exit range
+bool IsPositionNearExit(uint32_t territoryId, const Vec3& position, float tolerance = 10.0f);
+
+// Check if a position is within a FATE range
+bool IsPositionInFateRange(uint32_t territoryId, const Vec3& position);
+
+// Get the map range a position is in (for PlaceName lookups)
+std::optional<uint32_t> GetPlaceNameForPosition(uint32_t territoryId, const Vec3& position);
 
 } // namespace SapphireHook

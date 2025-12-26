@@ -265,6 +265,65 @@ namespace PacketDecoding {
         FieldBuilder& Minion(std::string_view name, uint32_t minionId) {
             return Field(name, GameData::FormatMinion(minionId));
         }
+        
+        // ================================================================
+        // NEW: Enhanced Packet Decoding Helpers
+        // ================================================================
+        
+        // FATE lookup with GameData
+        FieldBuilder& Fate(std::string_view name, uint32_t fateId) {
+            return Field(name, GameData::FormatFate(fateId));
+        }
+        
+        // Recipe lookup with GameData (shows crafted item name)
+        FieldBuilder& Recipe(std::string_view name, uint32_t recipeId) {
+            return Field(name, GameData::FormatRecipe(recipeId));
+        }
+        
+        // Content Finder Condition lookup (Duty Finder)
+        FieldBuilder& ContentFinderCondition(std::string_view name, uint32_t conditionId) {
+            return Field(name, GameData::FormatContentFinderCondition(conditionId));
+        }
+        
+        // Leve (Levequest) lookup
+        FieldBuilder& Leve(std::string_view name, uint32_t leveId) {
+            return Field(name, GameData::FormatLeve(leveId));
+        }
+        
+        // Achievement lookup
+        FieldBuilder& Achievement(std::string_view name, uint32_t achievementId) {
+            return Field(name, GameData::FormatAchievement(achievementId));
+        }
+        
+        // Title lookup
+        FieldBuilder& Title(std::string_view name, uint32_t titleId) {
+            return Field(name, GameData::FormatTitle(titleId));
+        }
+        
+        // Weather lookup
+        FieldBuilder& Weather(std::string_view name, uint32_t weatherId) {
+            return Field(name, GameData::FormatWeather(weatherId));
+        }
+        
+        // World (server) lookup
+        FieldBuilder& World(std::string_view name, uint32_t worldId) {
+            return Field(name, GameData::FormatWorld(worldId));
+        }
+        
+        // Aetheryte lookup
+        FieldBuilder& Aetheryte(std::string_view name, uint32_t aetheryteId) {
+            return Field(name, GameData::FormatAetheryte(aetheryteId));
+        }
+        
+        // Instance Content (Duty) lookup
+        FieldBuilder& InstanceContent(std::string_view name, uint32_t instanceId) {
+            return Field(name, GameData::FormatInstanceContent(instanceId));
+        }
+        
+        // Place Name lookup
+        FieldBuilder& PlaceName(std::string_view name, uint32_t placeNameId) {
+            return Field(name, GameData::FormatPlaceName(placeNameId));
+        }
 
     private:
         RowEmitter m_emit;
@@ -679,6 +738,230 @@ namespace PacketDecoding {
                 m_emit(std::string(name).c_str(), "[TRUNCATED]");
                 m_truncatedCount++;
             }
+            return *this;
+        }
+        
+        // ================================================================
+        // NEW: Enhanced Packet Decoding Helpers
+        // ================================================================
+        
+        // FATE lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& Fate(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatFate(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // FATE lookup (direct value)
+        PartialFieldBuilder& Fate(std::string_view name, uint32_t fateId) {
+            m_emit(std::string(name).c_str(), GameData::FormatFate(fateId));
+            return *this;
+        }
+        
+        // Recipe lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& Recipe(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatRecipe(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Recipe lookup (direct value)
+        PartialFieldBuilder& Recipe(std::string_view name, uint32_t recipeId) {
+            m_emit(std::string(name).c_str(), GameData::FormatRecipe(recipeId));
+            return *this;
+        }
+        
+        // Content Finder Condition lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& ContentFinderCondition(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatContentFinderCondition(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Content Finder Condition lookup (direct value)
+        PartialFieldBuilder& ContentFinderCondition(std::string_view name, uint32_t conditionId) {
+            m_emit(std::string(name).c_str(), GameData::FormatContentFinderCondition(conditionId));
+            return *this;
+        }
+        
+        // Leve lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& Leve(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatLeve(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Leve lookup (direct value)
+        PartialFieldBuilder& Leve(std::string_view name, uint32_t leveId) {
+            m_emit(std::string(name).c_str(), GameData::FormatLeve(leveId));
+            return *this;
+        }
+        
+        // Achievement lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& Achievement(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatAchievement(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Achievement lookup (direct value)
+        PartialFieldBuilder& Achievement(std::string_view name, uint32_t achievementId) {
+            m_emit(std::string(name).c_str(), GameData::FormatAchievement(achievementId));
+            return *this;
+        }
+        
+        // Title lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& Title(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatTitle(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Title lookup (direct value)
+        PartialFieldBuilder& Title(std::string_view name, uint32_t titleId) {
+            m_emit(std::string(name).c_str(), GameData::FormatTitle(titleId));
+            return *this;
+        }
+        
+        // Weather lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& Weather(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatWeather(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Weather lookup (direct value)
+        PartialFieldBuilder& Weather(std::string_view name, uint32_t weatherId) {
+            m_emit(std::string(name).c_str(), GameData::FormatWeather(weatherId));
+            return *this;
+        }
+        
+        // World lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& World(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatWorld(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // World lookup (direct value)
+        PartialFieldBuilder& World(std::string_view name, uint32_t worldId) {
+            m_emit(std::string(name).c_str(), GameData::FormatWorld(worldId));
+            return *this;
+        }
+        
+        // Aetheryte lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& Aetheryte(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatAetheryte(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Aetheryte lookup (direct value)
+        PartialFieldBuilder& Aetheryte(std::string_view name, uint32_t aetheryteId) {
+            m_emit(std::string(name).c_str(), GameData::FormatAetheryte(aetheryteId));
+            return *this;
+        }
+        
+        // Instance Content lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& InstanceContent(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatInstanceContent(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Instance Content lookup (direct value)
+        PartialFieldBuilder& InstanceContent(std::string_view name, uint32_t instanceId) {
+            m_emit(std::string(name).c_str(), GameData::FormatInstanceContent(instanceId));
+            return *this;
+        }
+        
+        // Place Name lookup (member pointer version)
+        template<typename MemberT>
+        PartialFieldBuilder& PlaceName(std::string_view name, MemberT PacketT::*member) {
+            size_t offset = OffsetOf(member);
+            if (CanAccess(offset, sizeof(MemberT))) {
+                uint32_t id = static_cast<uint32_t>(Pkt()->*member);
+                m_emit(std::string(name).c_str(), GameData::FormatPlaceName(id));
+            } else {
+                m_emit(std::string(name).c_str(), "[TRUNCATED]");
+                m_truncatedCount++;
+            }
+            return *this;
+        }
+        
+        // Place Name lookup (direct value)
+        PartialFieldBuilder& PlaceName(std::string_view name, uint32_t placeNameId) {
+            m_emit(std::string(name).c_str(), GameData::FormatPlaceName(placeNameId));
             return *this;
         }
         

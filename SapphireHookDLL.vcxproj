@@ -107,6 +107,7 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="resources\Resources.h" />
     <ClInclude Include="src\Analysis\FunctionScanner.h" />
     <ClInclude Include="src\Analysis\PatternScanner.h" />
+    <ClInclude Include="src\Analysis\ScanEnrichment.h" />
     <ClInclude Include="src\Core\CommandInvoker.h" />
     <ClInclude Include="src\Core\FunctionAnalyzer.h" />
     <ClInclude Include="src\Core\FunctionDatabase.h" />
@@ -128,6 +129,7 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="src\Hooking\dynamic_hook_engine.h" />
     <ClInclude Include="src\Hooking\hook_factory_impl.h" />
     <ClInclude Include="src\Hooking\hook_manager.h" />
+    <ClInclude Include="src\Hooking\HookParameterDecoder.h" />
     <ClInclude Include="src\Hooking\lua_hook.h" />
     <ClInclude Include="src\Hooking\MatrixCaptureHooks.h" />
     <ClInclude Include="src\Logger\Logger.h" />
@@ -172,6 +174,7 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="src\Modules\CollisionOverlayModule.h" />
     <ClInclude Include="src\Modules\ZoneLayoutViewerModule.h" />
     <ClInclude Include="src\Modules\WorldOverlayModule.h" />
+    <ClInclude Include="src\Modules\SignatureScannerModule.h" />
     <ClInclude Include="src\Tools\CollisionMeshLoader.h" />
     <ClInclude Include="src\Tools\NavMeshLoader.h" />
     <ClInclude Include="src\UI\imgui_overlay.h" />
@@ -252,12 +255,14 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClCompile Include="src\Modules\CollisionOverlayModule.cpp" />
     <ClCompile Include="src\Modules\ZoneLayoutViewerModule.cpp" />
     <ClCompile Include="src\Modules\WorldOverlayModule.cpp" />
+    <ClCompile Include="src\Modules\SignatureScannerModule.cpp" />
     <ClCompile Include="src\Tools\CollisionMeshLoader.cpp" />
     <ClCompile Include="src\Tools\NavMeshLoader.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFDNative.cpp" />
     <ClCompile Include="src\Analysis\FunctionScanner.cpp" />
     <ClCompile Include="src\Analysis\PatternScanner.cpp" />
+    <ClCompile Include="src\Analysis\ScanEnrichment.cpp" />
     <ClCompile Include="src\Core\CommandInvoker.cpp" />
     <ClCompile Include="src\Core\FunctionAnalyzer.cpp" />
     <ClCompile Include="src\Core\FunctionDatabase.cpp" />
@@ -272,6 +277,7 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClCompile Include="src\Helper\WindowsAPIWrapper.cpp" />
     <ClCompile Include="src\Hooking\dynamic_hook_engine.cpp" />
     <ClCompile Include="src\Hooking\hook_manager.cpp" />
+    <ClCompile Include="src\Hooking\HookParameterDecoder.cpp" />
     <ClCompile Include="src\Hooking\lua_hook.cpp" />
     <ClCompile Include="src\Hooking\MatrixCaptureHooks.cpp" />
     <ClCompile Include="src\Logger\Logger.cpp" />

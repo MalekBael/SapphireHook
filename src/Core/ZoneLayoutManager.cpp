@@ -11,6 +11,7 @@
 #include <DatCategories/InstanceObject.h>
 #include <DatCategories/DatCommon.h>
 
+#include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
 #include <format>
@@ -813,6 +814,225 @@ bool ZoneLayoutManager::ParsePcbFile(const std::string& filePath, ZoneLayoutData
     catch (...) {
         return false;
     }
+}
+
+// ============================================================================
+// Zone Context Functions - Spatial queries for hooks and packet decoding
+// ============================================================================
+
+namespace {
+
+// Helper to check if a point is inside a box (simplified, ignores rotation)
+bool IsPointInBox(const Vec3& point, const Vec3& boxPos, const Vec3& boxScale) {
+    float halfX = boxScale.x * 0.5f;
+    float halfY = boxScale.y * 0.5f;
+    float halfZ = boxScale.z * 0.5f;
+    
+    return (point.x >= boxPos.x - halfX && point.x <= boxPos.x + halfX &&
+            point.y >= boxPos.y - halfY && point.y <= boxPos.y + halfY &&
+            point.z >= boxPos.z - halfZ && point.z <= boxPos.z + halfZ);
+}
+
+// Helper to find the nearest element from a vector
+template<typename T>
+NearbyElement<T> FindNearest(const std::vector<T>& elements, const Vec3& position, float maxDistance) {
+    NearbyElement<T> result;
+    float nearestDist = maxDistance + 1.0f;
+    
+    for (const auto& elem : elements) {
+        float dist = position.DistanceTo(elem.Position);
+        if (dist < nearestDist && dist <= maxDistance) {
+            nearestDist = dist;
+            result.element = &elem;
+            result.distance = dist;
+        }
+    }
+    
+    return result;
+}
+
+// Helper to find all elements within radius
+template<typename T>
+std::vector<NearbyElement<T>> FindAllWithinRadius(const std::vector<T>& elements, const Vec3& position, float radius) {
+    std::vector<NearbyElement<T>> results;
+    
+    for (const auto& elem : elements) {
+        float dist = position.DistanceTo(elem.Position);
+        if (dist <= radius) {
+            results.push_back({ &elem, dist });
+        }
+    }
+    
+    // Sort by distance
+    std::sort(results.begin(), results.end(), 
+        [](const NearbyElement<T>& a, const NearbyElement<T>& b) {
+            return a.distance < b.distance;
+        });
+    
+    return results;
+}
+
+} // anonymous namespace
+
+ZoneContext GetZoneContextForPosition(uint32_t territoryId, const Vec3& position, float searchRadius) {
+    ZoneContext ctx;
+    ctx.territoryId = territoryId;
+    ctx.queryPosition = position;
+    ctx.searchRadius = searchRadius;
+    
+    // Get cached layout data
+    auto layout = GetZoneLayoutManager().GetCachedLayout(territoryId);
+    if (!layout) {
+        // Try to load it
+        layout = GetZoneLayoutManager().LoadZoneLayout(territoryId);
+    }
+    
+    if (!layout || !layout->IsLoaded()) {
+        ctx.hasLayoutData = false;
+        ctx.isValid = true;  // Valid query, just no data
+        return ctx;
+    }
+    
+    ctx.hasLayoutData = true;
+    ctx.isValid = true;
+    
+    // Find nearest elements
+    ctx.nearestExit = FindNearest(layout->Exits, position, searchRadius);
+    ctx.nearestSpawnPoint = FindNearest(layout->PopRanges, position, searchRadius);
+    ctx.nearestInteractable = FindNearest(layout->EventObjects, position, searchRadius);
+    ctx.nearestAetheryte = FindNearest(layout->Aetherytes, position, searchRadius);
+    ctx.nearestGatheringPoint = FindNearest(layout->GatheringPoints, position, searchRadius);
+    
+    // Find current map range (check all, not just nearest)
+    for (const auto& mapRange : layout->MapRanges) {
+        if (IsPointInBox(position, mapRange.Position, mapRange.Scale)) {
+            ctx.currentMapRange.element = &mapRange;
+            ctx.currentMapRange.distance = position.DistanceTo(mapRange.Position);
+            break;  // Take first match (could prioritize by some criteria)
+        }
+    }
+    
+    // Find all nearby enemies/NPCs/objects within radius
+    ctx.nearbyEnemies = FindAllWithinRadius(layout->BattleNpcs, position, searchRadius);
+    ctx.nearbyNpcs = FindAllWithinRadius(layout->EventNpcs, position, searchRadius);
+    ctx.nearbyObjects = FindAllWithinRadius(layout->EventObjects, position, searchRadius);
+    ctx.nearbyFateRanges = FindAllWithinRadius(layout->FateRanges, position, searchRadius);
+    
+    return ctx;
+}
+
+BNpcValidationResult ValidateBNpcSpawn(uint32_t territoryId, uint32_t bnpcNameId, const Vec3& position, float tolerance) {
+    BNpcValidationResult result;
+    
+    // Get cached layout data
+    auto layout = GetZoneLayoutManager().GetCachedLayout(territoryId);
+    if (!layout) {
+        layout = GetZoneLayoutManager().LoadZoneLayout(territoryId);
+    }
+    
+    if (!layout || !layout->IsLoaded()) {
+        result.hasLayoutData = false;
+        result.isValid = true;  // Can't validate without data, assume valid
+        result.reason = "No layout data available for territory";
+        return result;
+    }
+    
+    result.hasLayoutData = true;
+    result.distanceToNearestSpawn = -1.0f;
+    
+    // Search for matching spawn points
+    for (const auto& spawn : layout->BattleNpcs) {
+        float dist = position.DistanceTo(spawn.Position);
+        
+        // Track nearest spawn regardless of name match
+        if (result.distanceToNearestSpawn < 0 || dist < result.distanceToNearestSpawn) {
+            result.distanceToNearestSpawn = dist;
+        }
+        
+        // Check if this is a matching spawn
+        if (spawn.NameId == bnpcNameId && dist <= tolerance) {
+            result.isValid = true;
+            result.matchesKnownSpawn = true;
+            result.matchedNameId = spawn.NameId;
+            result.reason = std::format("Matches known spawn at distance {:.1f}m", dist);
+            return result;
+        }
+    }
+    
+    // Check if ANY spawn point is near this location
+    bool nearAnySpawn = false;
+    for (const auto& spawn : layout->BattleNpcs) {
+        if (position.DistanceTo(spawn.Position) <= tolerance) {
+            nearAnySpawn = true;
+            break;
+        }
+    }
+    
+    if (nearAnySpawn) {
+        result.isValid = true;
+        result.matchesKnownSpawn = false;
+        result.reason = std::format("Near spawn point but name ID {} not matched", bnpcNameId);
+    } else {
+        // Not near any known spawn - could be FATE spawn, GM spawn, or suspicious
+        result.isValid = false;
+        result.matchesKnownSpawn = false;
+        result.reason = std::format("No known spawn within {}m (nearest: {:.1f}m)", 
+            static_cast<int>(tolerance), result.distanceToNearestSpawn);
+    }
+    
+    return result;
+}
+
+bool IsPositionNearExit(uint32_t territoryId, const Vec3& position, float tolerance) {
+    auto layout = GetZoneLayoutManager().GetCachedLayout(territoryId);
+    if (!layout) {
+        layout = GetZoneLayoutManager().LoadZoneLayout(territoryId);
+    }
+    if (!layout) return false;
+    
+    for (const auto& exit : layout->Exits) {
+        // Check if within the exit range box or within tolerance distance
+        if (IsPointInBox(position, exit.Position, exit.Scale) ||
+            position.DistanceTo(exit.Position) <= tolerance) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool IsPositionInFateRange(uint32_t territoryId, const Vec3& position) {
+    auto layout = GetZoneLayoutManager().GetCachedLayout(territoryId);
+    if (!layout) {
+        layout = GetZoneLayoutManager().LoadZoneLayout(territoryId);
+    }
+    if (!layout) return false;
+    
+    for (const auto& fate : layout->FateRanges) {
+        if (IsPointInBox(position, fate.Position, fate.Scale)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+std::optional<uint32_t> GetPlaceNameForPosition(uint32_t territoryId, const Vec3& position) {
+    auto layout = GetZoneLayoutManager().GetCachedLayout(territoryId);
+    if (!layout) {
+        layout = GetZoneLayoutManager().LoadZoneLayout(territoryId);
+    }
+    if (!layout) return std::nullopt;
+    
+    for (const auto& mapRange : layout->MapRanges) {
+        if (mapRange.PlaceNameEnabled && IsPointInBox(position, mapRange.Position, mapRange.Scale)) {
+            // Prefer spot name over block name
+            if (mapRange.PlaceNameSpot != 0) {
+                return mapRange.PlaceNameSpot;
+            } else if (mapRange.PlaceNameBlock != 0) {
+                return mapRange.PlaceNameBlock;
+            }
+        }
+    }
+    return std::nullopt;
 }
 
 } // namespace SapphireHook

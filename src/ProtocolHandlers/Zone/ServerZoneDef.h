@@ -3997,4 +3997,1601 @@ namespace PacketStructures::Server::Zone {
     );
 #endif // DECLARE_PACKET_FIELDS
 
+    // ============================================================================
+    // NEW OPCODES FROM 3.35 GAP ANALYSIS (83 opcodes)
+    // Field documentation derived from client handler decompilation analysis
+    // ============================================================================
+
+    // ============================================================================
+    // Group 1: Content Finder (0x078-0x07C) - 5 opcodes
+    // Handler (x64): 0x140E1B130, 0x140E1B160, 0x140E1B190
+    // ============================================================================
+
+    /**
+     * @brief Notify client of content finder activity (0x078)
+     */
+    struct FFXIVIpcContentFinderNotify {
+        uint32_t contentId;   ///< ContentFinderCondition.exd row ID
+        uint32_t param1;      ///< Context-dependent: queue position, time estimate, penalty timer
+        uint32_t param2;      ///< Reserved/additional context data
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcContentFinderNotify,
+        STRUCT_FIELD(FFXIVIpcContentFinderNotify, contentId),
+        STRUCT_FIELD(FFXIVIpcContentFinderNotify, param1),
+        STRUCT_FIELD(FFXIVIpcContentFinderNotify, param2)
+    );
+#endif
+
+    /**
+     * @brief Update content finder queue status (0x079)
+     */
+    struct FFXIVIpcContentFinderUpdate {
+        uint32_t contentId;   ///< ContentFinderCondition.exd row ID
+        uint32_t status;      ///< Queue status: 0=none, 1=queued, 2=ready, 3=in-progress
+        uint32_t param1;      ///< Status-specific data (e.g., wait time in seconds)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcContentFinderUpdate,
+        STRUCT_FIELD(FFXIVIpcContentFinderUpdate, contentId),
+        STRUCT_FIELD(FFXIVIpcContentFinderUpdate, status),
+        STRUCT_FIELD(FFXIVIpcContentFinderUpdate, param1)
+    );
+#endif
+
+    /**
+     * @brief Content finder queue result (0x07A)
+     */
+    struct FFXIVIpcContentFinderResult {
+        uint32_t contentId;   ///< ContentFinderCondition.exd row ID
+        uint32_t result;      ///< Result code: 0=success, 1=cancelled, 2=failed, 3=timeout, 4=disbanded
+        uint32_t param1;      ///< Result-specific data
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcContentFinderResult,
+        STRUCT_FIELD(FFXIVIpcContentFinderResult, contentId),
+        STRUCT_FIELD(FFXIVIpcContentFinderResult, result),
+        STRUCT_FIELD(FFXIVIpcContentFinderResult, param1)
+    );
+#endif
+
+    // 0x07B and 0x07C use vtable callbacks (GameManager idx 244, type 9/11) - no packet struct needed
+
+    // ============================================================================
+    // Group 2: Request Item / Ready Check (0x0E4-0x0E7) - 4 opcodes
+    // Handler (x64): 0x140CC1080 (0xE4), 0x140D16FF0 (0xE7)
+    // ============================================================================
+
+    /**
+     * @brief Request high-quality item crafting prompt (0x0E4)
+     */
+    struct FFXIVIpcRequestHighQuality {
+        uint32_t param1;      ///< Item ID or recipe ID
+        uint32_t param2;      ///< Quantity or flags
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcRequestHighQuality,
+        STRUCT_FIELD(FFXIVIpcRequestHighQuality, param1),
+        STRUCT_FIELD(FFXIVIpcRequestHighQuality, param2)
+    );
+#endif
+
+    /**
+     * @brief Ready check notification to party members (0x0E7)
+     */
+    struct FFXIVIpcReadyCheckNotify {
+        uint32_t param1;      ///< Ready check initiator entity ID or 0 for broadcast
+        uint32_t param2;      ///< Bitmask of ready members or timeout in seconds
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcReadyCheckNotify,
+        STRUCT_FIELD(FFXIVIpcReadyCheckNotify, param1),
+        STRUCT_FIELD(FFXIVIpcReadyCheckNotify, param2)
+    );
+#endif
+
+    // ============================================================================
+    // Group 3: Free Company (0x11B-0x11D) - 3 opcodes
+    // Handler (x64): 0x140D18560, 0x140D1E170, 0x140D185B0
+    // ============================================================================
+
+    /**
+     * @brief FC member status update (0x11B)
+     */
+    struct FFXIVIpcFCMemberUpdate {
+        uint64_t fcId;        ///< Free Company ID (from DB)
+        uint32_t memberId;    ///< Character ID of the affected member
+        uint32_t updateType;  ///< Update type: 0=joined, 1=left, 2=promoted, 3=demoted, 4=kicked
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcFCMemberUpdate,
+        STRUCT_FIELD(FFXIVIpcFCMemberUpdate, fcId),
+        STRUCT_FIELD(FFXIVIpcFCMemberUpdate, memberId),
+        STRUCT_FIELD(FFXIVIpcFCMemberUpdate, updateType)
+    );
+#endif
+
+    /**
+     * @brief FC rank change notification (0x11C)
+     */
+    struct FFXIVIpcFCRankUpdate {
+        uint32_t actorId;     ///< Entity ID of the player whose rank changed
+        uint32_t newRank;     ///< New rank index (0=Master, 1-7=custom ranks)
+        uint32_t oldRank;     ///< Previous rank index
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcFCRankUpdate,
+        STRUCT_FIELD(FFXIVIpcFCRankUpdate, actorId),
+        STRUCT_FIELD(FFXIVIpcFCRankUpdate, newRank),
+        STRUCT_FIELD(FFXIVIpcFCRankUpdate, oldRank)
+    );
+#endif
+
+    /**
+     * @brief FC permissions update for a rank (0x11D)
+     */
+    struct FFXIVIpcFCPermissions {
+        uint32_t actorId;     ///< Entity ID of the affected player
+        uint64_t permissions; ///< Bitmask of permissions (see FcHierarchy.AuthorityList)
+        uint32_t rank;        ///< Rank index these permissions apply to (0-7)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcFCPermissions,
+        STRUCT_FIELD(FFXIVIpcFCPermissions, actorId),
+        STRUCT_FIELD(FFXIVIpcFCPermissions, permissions),
+        STRUCT_FIELD(FFXIVIpcFCPermissions, rank)
+    );
+#endif
+
+    // ============================================================================
+    // Group 4: Quest Tracker UI (0x150-0x15B) - 12 opcodes
+    // Handler (x64): 0x140CC2310-0x140CC24B0, 0x140CC0AF0
+    // Manages the on-screen quest tracker widget (up to 5 quests visible)
+    // ============================================================================
+
+    /**
+     * @brief Initialize quest tracker state (0x150)
+     * Sent on login to populate the tracker UI
+     */
+    struct FFXIVIpcQuestTrackerInit {
+        uint8_t data[64];     ///< Serialized tracker state: array of (questId:u16, sequence:u8, flags:u8) tuples
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerInit,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerInit, data)
+    );
+#endif
+
+    /**
+     * @brief Add quest to tracker widget (0x151)
+     */
+    struct FFXIVIpcQuestTrackerAdd {
+        uint16_t questId;     ///< Quest.exd row ID
+        uint8_t index;        ///< Slot index in tracker (0-4 for 5 visible slots)
+        uint8_t flags;        ///< Display flags: bit0=highlighted, bit1=completed objective blink
+        uint32_t param;       ///< Quest sequence number or objective index to highlight
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerAdd,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerAdd, questId),
+        STRUCT_FIELD(FFXIVIpcQuestTrackerAdd, index),
+        STRUCT_FIELD(FFXIVIpcQuestTrackerAdd, flags),
+        STRUCT_FIELD(FFXIVIpcQuestTrackerAdd, param)
+    );
+#endif
+
+    /**
+     * @brief Remove quest from tracker widget (0x152)
+     */
+    struct FFXIVIpcQuestTrackerRemove {
+        uint8_t index;        ///< Slot index to remove (0-4)
+        uint8_t flags;        ///< Removal flags: bit0=animate out, bit1=quest completed
+        uint16_t __padding;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerRemove,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerRemove, index),
+        STRUCT_FIELD(FFXIVIpcQuestTrackerRemove, flags)
+    );
+#endif
+
+    /**
+     * @brief Update tracked quest progress (0x153)
+     */
+    struct FFXIVIpcQuestTrackerUpdate {
+        uint16_t questId;     ///< Quest.exd row ID
+        uint8_t index;        ///< Slot index (0-4)
+        uint8_t flags;        ///< Update flags: bit0=objective changed, bit1=refresh UI
+        uint8_t data[32];     ///< Quest progress data: objective counts (8 bytes), todo list completion flags (8 bytes), sequence number, timer values
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerUpdate,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerUpdate, questId),
+        STRUCT_FIELD(FFXIVIpcQuestTrackerUpdate, index),
+        STRUCT_FIELD(FFXIVIpcQuestTrackerUpdate, flags),
+        STRUCT_FIELD(FFXIVIpcQuestTrackerUpdate, data)
+    );
+#endif
+
+    /**
+     * @brief Update quest objective map positions (0x154)
+     * Used to update map markers for tracked quest objectives
+     */
+    struct FFXIVIpcQuestTrackerPosition {
+        uint8_t data[32];     ///< Position data: array of (territoryId:u16, x:u16, y:u16, z:u16) for each objective
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerPosition,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerPosition, data)
+    );
+#endif
+
+    /**
+     * @brief Mark tracked quest as complete (0x155)
+     */
+    struct FFXIVIpcQuestTrackerComplete {
+        uint8_t index;        ///< Slot index (0-4)
+        uint8_t flags;        ///< Completion flags: bit0=play fanfare, bit1=show reward preview
+        uint16_t __padding;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerComplete,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerComplete, index),
+        STRUCT_FIELD(FFXIVIpcQuestTrackerComplete, flags)
+    );
+#endif
+
+    /**
+     * @brief Full sync of tracker state (0x156)
+     * Sent when tracker needs complete refresh (e.g., after zone change)
+     */
+    struct FFXIVIpcQuestTrackerSync {
+        uint8_t data[64];     ///< Full tracker serialization (same format as Init)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerSync,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerSync, data)
+    );
+#endif
+
+    /**
+     * @brief Clear specific tracker entries (0x157)
+     */
+    struct FFXIVIpcQuestTrackerClear {
+        uint8_t data[32];     ///< Bitmask or list of slot indices to clear
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerClear,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerClear, data)
+    );
+#endif
+
+    /**
+     * @brief Reorder tracked quests (0x158)
+     */
+    struct FFXIVIpcQuestTrackerReorder {
+        uint16_t count;       ///< Number of entries in the order array (max 5)
+        uint16_t __padding;
+        uint8_t order[16];    ///< New order: order[newIndex] = oldIndex (e.g., [2,0,1,3,4] swaps slots)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerReorder,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerReorder, count),
+        STRUCT_FIELD(FFXIVIpcQuestTrackerReorder, order)
+    );
+#endif
+
+    /**
+     * @brief Show/expand quest tracker widget (0x159)
+     */
+    struct FFXIVIpcQuestTrackerShow {
+        uint32_t param;       ///< Show mode: 0=normal, 1=expanded, 2=minimized
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerShow,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerShow, param)
+    );
+#endif
+
+    /**
+     * @brief Hide/collapse quest tracker widget (0x15A)
+     */
+    struct FFXIVIpcQuestTrackerHide {
+        uint32_t param;       ///< Hide mode: 0=collapse, 1=fully hide, 2=fade out
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerHide,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerHide, param)
+    );
+#endif
+
+    /**
+     * @brief Reset quest tracker to default state (0x15B)
+     */
+    struct FFXIVIpcQuestTrackerReset {
+        uint32_t param;       ///< Reset mode: 0=clear all, 1=restore defaults, 2=hard reset
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcQuestTrackerReset,
+        STRUCT_FIELD(FFXIVIpcQuestTrackerReset, param)
+    );
+#endif
+
+    // ============================================================================
+    // Group 5: Director Type 7 / Instance (0x168-0x16A) - 3 opcodes
+    // Handler (x64): 0x140CBEE50, 0x140CBEE90, 0x140CC52A0
+    // Directors manage instance content state (dungeons, trials, raids)
+    // ============================================================================
+
+    /**
+     * @brief Initialize instance director (0x168)
+     * Sent when entering instanced content to set up the director
+     */
+    struct FFXIVIpcDirector7Init {
+        uint32_t actorId;     ///< Entity ID of the player (or 0 for broadcast)
+        uint32_t directorId;  ///< Director ID: (ContentFinderCondition << 16) | instanceId
+        uint32_t param1;      ///< Instance-specific: time limit, phase, or content flags
+        uint32_t param2;      ///< Instance-specific: objective count, party size, sync level
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcDirector7Init,
+        STRUCT_FIELD(FFXIVIpcDirector7Init, actorId),
+        STRUCT_FIELD(FFXIVIpcDirector7Init, directorId),
+        STRUCT_FIELD(FFXIVIpcDirector7Init, param1),
+        STRUCT_FIELD(FFXIVIpcDirector7Init, param2)
+    );
+#endif
+
+    /**
+     * @brief Update instance director state (0x169)
+     */
+    struct FFXIVIpcDirector7Update {
+        uint32_t actorId;     ///< Entity ID of the player (or 0 for broadcast)
+        uint32_t directorId;  ///< Director ID
+        uint32_t param1;      ///< Update-specific: remaining time, objectives completed, current phase
+        uint32_t param2;      ///< Update-specific: phase change, wipe count, checkpoint flags
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcDirector7Update,
+        STRUCT_FIELD(FFXIVIpcDirector7Update, actorId),
+        STRUCT_FIELD(FFXIVIpcDirector7Update, directorId),
+        STRUCT_FIELD(FFXIVIpcDirector7Update, param1),
+        STRUCT_FIELD(FFXIVIpcDirector7Update, param2)
+    );
+#endif
+
+    /**
+     * @brief Instance director result/completion (0x16A)
+     */
+    struct FFXIVIpcDirector7Result {
+        uint32_t actorId;     ///< Entity ID of the player (or 0 for broadcast)
+        uint32_t result;      ///< Result code: 0=success/clear, 1=failed, 2=time out, 3=abandoned
+        uint32_t param1;      ///< Clear time in seconds, or failure reason
+        uint32_t param2;      ///< Bonus flags, chest count, or retry count
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcDirector7Result,
+        STRUCT_FIELD(FFXIVIpcDirector7Result, actorId),
+        STRUCT_FIELD(FFXIVIpcDirector7Result, result),
+        STRUCT_FIELD(FFXIVIpcDirector7Result, param1),
+        STRUCT_FIELD(FFXIVIpcDirector7Result, param2)
+    );
+#endif
+
+    // ============================================================================
+    // Group 6: Territory/Actor (0x195, 0x197) - 2 opcodes
+    // Handler (x64): 0x140CBEE30 (0x195), 0x140CBEED0 (0x197)
+    // ============================================================================
+
+    /**
+     * @brief Territory setup configuration (0x195)
+     * Sent to configure territory-specific behavior
+     */
+    struct FFXIVIpcTerritorySetup {
+        uint32_t actorId;       ///< Entity ID of the player
+        uint32_t territoryTypeId; ///< TerritoryType.exd row ID
+        uint32_t layerSetId;    ///< Active layer set (for housing/instance phases)
+        uint32_t flags;         ///< Territory flags: bit0=pvp, bit1=sanctuary, bit2=no-mount, bit3=no-teleport, bit4=no-return
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcTerritorySetup,
+        STRUCT_FIELD(FFXIVIpcTerritorySetup, actorId),
+        STRUCT_FIELD(FFXIVIpcTerritorySetup, territoryTypeId),
+        STRUCT_FIELD(FFXIVIpcTerritorySetup, layerSetId),
+        STRUCT_FIELD(FFXIVIpcTerritorySetup, flags)
+    );
+#endif
+
+    /**
+     * @brief Actor gauge update (0x197)
+     * Updates job-specific UI gauges (e.g., BLM Astral Fire, WAR Beast Gauge)
+     */
+    struct FFXIVIpcActorGauge {
+        uint32_t actorId;     ///< Entity ID of the player
+        uint8_t gaugeType;    ///< Gauge type ID (job-specific, see ClassJob.exd)
+        uint8_t __padding1;
+        uint16_t __padding2;
+        uint32_t gaugeValue;  ///< Gauge value (stacks, timer, or packed bits)
+        uint32_t param;       ///< Secondary gauge data (varies by job)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcActorGauge,
+        STRUCT_FIELD(FFXIVIpcActorGauge, actorId),
+        STRUCT_FIELD(FFXIVIpcActorGauge, gaugeType),
+        STRUCT_FIELD(FFXIVIpcActorGauge, gaugeValue),
+        STRUCT_FIELD(FFXIVIpcActorGauge, param)
+    );
+#endif
+
+    // ============================================================================
+    // Group 7: Event Scene (0x1E0-0x1EA) - 11 opcodes
+    // Handler (x64): 0x140CC8D20, 0x140CC7F20, 0x140CC6990, 0x140CC6A90, 0x140CC69E0, 0x140CC6A40
+    // Event scenes are cutscenes and scripted NPC interactions
+    // ============================================================================
+
+    /**
+     * @brief Start event scene/cutscene (0x1E0)
+     */
+    struct FFXIVIpcEventSceneStart {
+        uint32_t sceneId;     ///< Scene ID from quest script or CutScene.exd
+        uint32_t flags;       ///< Scene flags: bit0=skippable, bit1=black bars, bit2=hide UI
+        uint32_t param1;      ///< Quest ID or event handler ID
+        uint32_t param2;      ///< Scene variant or branch index
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventSceneStart,
+        STRUCT_FIELD(FFXIVIpcEventSceneStart, sceneId),
+        STRUCT_FIELD(FFXIVIpcEventSceneStart, flags),
+        STRUCT_FIELD(FFXIVIpcEventSceneStart, param1),
+        STRUCT_FIELD(FFXIVIpcEventSceneStart, param2)
+    );
+#endif
+
+    /**
+     * @brief Play event scene segment (0x1E1)
+     * Handler analyzes: +0x00=sceneId, +0x04=params with flags(1,1,1)
+     */
+    struct FFXIVIpcEventScenePlay {
+        uint8_t sceneId;      ///< Scene segment index (0-255)
+        uint8_t flags1;       ///< Playback flags: bit0=loop, bit1=reverse
+        uint8_t flags2;       ///< Audio flags: bit0=voice, bit1=bgm, bit2=sfx
+        uint8_t flags3;       ///< Camera flags: bit0=lock camera, bit1=fade transition
+        uint8_t params[64];   ///< Scene parameters: actor positions, animation IDs, camera angles, timing data
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventScenePlay,
+        STRUCT_FIELD(FFXIVIpcEventScenePlay, sceneId),
+        STRUCT_FIELD(FFXIVIpcEventScenePlay, flags1),
+        STRUCT_FIELD(FFXIVIpcEventScenePlay, flags2),
+        STRUCT_FIELD(FFXIVIpcEventScenePlay, flags3),
+        STRUCT_FIELD(FFXIVIpcEventScenePlay, params)
+    );
+#endif
+
+    /**
+     * @brief Event scene sequence data (0x1E2)
+     * Handler reads 310 bytes of sequence data + 32 bytes extra
+     */
+    struct FFXIVIpcEventSceneSequence {
+        uint8_t sequenceData[310]; ///< Timeline/keyframe data for scene animation
+        uint8_t extraData[32];     ///< Additional actor/camera keyframes
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventSceneSequence,
+        STRUCT_FIELD(FFXIVIpcEventSceneSequence, sequenceData),
+        STRUCT_FIELD(FFXIVIpcEventSceneSequence, extraData)
+    );
+#endif
+
+    /**
+     * @brief Event scene dialogue choice prompt (0x1E3)
+     * Handler: +0x00=u16 choiceId, +0x02=bool, +0x03=bool, +0x04=u8
+     */
+    struct FFXIVIpcEventSceneChoice {
+        uint16_t choiceId;    ///< Dialogue choice index from quest script
+        uint8_t flag1;        ///< Choice type: 0=normal, 1=timed, 2=consequence
+        uint8_t flag2;        ///< Display mode: 0=list, 1=radial, 2=yes/no
+        uint8_t param;        ///< Timeout in seconds (if timed) or default selection
+        uint8_t __padding1;
+        uint8_t __padding2;
+        uint8_t __padding3;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventSceneChoice,
+        STRUCT_FIELD(FFXIVIpcEventSceneChoice, choiceId),
+        STRUCT_FIELD(FFXIVIpcEventSceneChoice, flag1),
+        STRUCT_FIELD(FFXIVIpcEventSceneChoice, flag2),
+        STRUCT_FIELD(FFXIVIpcEventSceneChoice, param)
+    );
+#endif
+
+    /**
+     * @brief Event scene action triggers (0x1E4)
+     * Array of action IDs to execute during scene
+     */
+    struct FFXIVIpcEventSceneAction {
+        int16_t actions[8];   ///< Action IDs: positive=play, negative=stop, 0=skip
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventSceneAction,
+        STRUCT_FIELD(FFXIVIpcEventSceneAction, actions)
+    );
+#endif
+
+    /**
+     * @brief Event scene camera control (0x1E5)
+     * Handler: +0x00=cameraId, +0x04=params with flags(1,1)
+     */
+    struct FFXIVIpcEventSceneCamera {
+        uint8_t cameraId;     ///< Camera track index (0-255)
+        uint8_t flags1;       ///< Transition: 0=cut, 1=pan, 2=fade, 3=shake
+        uint8_t flags2;       ///< FOV mode: 0=normal, 1=wide, 2=closeup
+        uint8_t __padding;
+        uint8_t params[32];   ///< Camera position/rotation/FOV keyframes
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventSceneCamera,
+        STRUCT_FIELD(FFXIVIpcEventSceneCamera, cameraId),
+        STRUCT_FIELD(FFXIVIpcEventSceneCamera, flags1),
+        STRUCT_FIELD(FFXIVIpcEventSceneCamera, flags2),
+        STRUCT_FIELD(FFXIVIpcEventSceneCamera, params)
+    );
+#endif
+
+    /**
+     * @brief Event scene dialogue text (0x1E6)
+     * Handler copies 200 bytes of dialogue data
+     */
+    struct FFXIVIpcEventSceneDialogue {
+        uint8_t dialogueData[200]; ///< UTF-8 dialogue text with FFXIV markup tags
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventSceneDialogue,
+        STRUCT_FIELD(FFXIVIpcEventSceneDialogue, dialogueData)
+    );
+#endif
+
+    /**
+     * @brief End event scene (0x1E7)
+     * Handler: +0x00=u16 sceneId, +0x02=bool isComplete
+     */
+    struct FFXIVIpcEventSceneEnd {
+        uint16_t sceneId;     ///< Scene ID that ended
+        uint8_t isComplete;   ///< 1=completed normally, 0=skipped/cancelled
+        uint8_t __padding;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventSceneEnd,
+        STRUCT_FIELD(FFXIVIpcEventSceneEnd, sceneId),
+        STRUCT_FIELD(FFXIVIpcEventSceneEnd, isComplete)
+    );
+#endif
+
+    /**
+     * @brief Event scene parameter update (0x1E8)
+     */
+    struct FFXIVIpcEventSceneParams {
+        uint32_t param1;      ///< Event handler context ID
+        uint8_t param2;       ///< Parameter slot index (0-31)
+        uint8_t param3;       ///< Parameter type: 0=int, 1=float, 2=string
+        uint16_t __padding;
+        uint8_t data[32];     ///< Parameter value data
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventSceneParams,
+        STRUCT_FIELD(FFXIVIpcEventSceneParams, param1),
+        STRUCT_FIELD(FFXIVIpcEventSceneParams, param2),
+        STRUCT_FIELD(FFXIVIpcEventSceneParams, param3),
+        STRUCT_FIELD(FFXIVIpcEventSceneParams, data)
+    );
+#endif
+
+    /**
+     * @brief Event scene raw data (0x1E9)
+     */
+    struct FFXIVIpcEventSceneData {
+        uint8_t data[64];     ///< Raw scene data blob (context-dependent)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventSceneData,
+        STRUCT_FIELD(FFXIVIpcEventSceneData, data)
+    );
+#endif
+
+    /**
+     * @brief Event scene complete callback (0x1EA)
+     */
+    struct FFXIVIpcEventSceneComplete {
+        uint32_t actorId;     ///< Entity ID of the player
+        uint32_t sceneId;     ///< Completed scene ID
+        uint32_t result;      ///< Completion result: 0=ok, 1=skipped, 2=error
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcEventSceneComplete,
+        STRUCT_FIELD(FFXIVIpcEventSceneComplete, actorId),
+        STRUCT_FIELD(FFXIVIpcEventSceneComplete, sceneId),
+        STRUCT_FIELD(FFXIVIpcEventSceneComplete, result)
+    );
+#endif
+
+    // ============================================================================
+    // Group 8: Housing Buddy/Stable (0x30A-0x310) - 7 opcodes
+    // Handler (x64): 0x140CC1050, 0x140CC0ED0, 0x140CC1980, 0x140CC1470, 0x140CC14D0, 0x140CC1530
+    // Manages companion chocobos stabled at housing estates
+    // ============================================================================
+
+    /**
+     * @brief Initialize housing buddy context (0x30A)
+     */
+    struct FFXIVIpcHousingBuddyInit {
+        uint32_t contextId;   ///< Stable interaction context (from NPC event)
+        uint32_t param1;      ///< Max stable capacity for this estate size
+        uint32_t param2;      ///< Current number of stabled chocobos
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingBuddyInit,
+        STRUCT_FIELD(FFXIVIpcHousingBuddyInit, contextId),
+        STRUCT_FIELD(FFXIVIpcHousingBuddyInit, param1),
+        STRUCT_FIELD(FFXIVIpcHousingBuddyInit, param2)
+    );
+#endif
+
+    /**
+     * @brief Housing buddy list (0x30B)
+     * Handler does memcpy of 128 bytes
+     */
+    struct FFXIVIpcHousingBuddyList {
+        uint8_t data[128];    ///< Array of buddy entries: (ownerId:u64, name:char[20], color:u8, rank:u8) × N
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingBuddyList,
+        STRUCT_FIELD(FFXIVIpcHousingBuddyList, data)
+    );
+#endif
+
+    /**
+     * @brief Housing buddy status update (0x30C)
+     * Handler reads: +0x00=u8 status
+     */
+    struct FFXIVIpcHousingBuddyStatus {
+        uint8_t status;       ///< Status: 0=idle, 1=training, 2=fed, 3=ready for training
+        uint8_t flags;        ///< State flags: bit0=fed today, bit1=trained today
+        uint16_t __padding;
+        uint32_t param;       ///< Time until next action (seconds) or training progress %
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingBuddyStatus,
+        STRUCT_FIELD(FFXIVIpcHousingBuddyStatus, status),
+        STRUCT_FIELD(FFXIVIpcHousingBuddyStatus, flags),
+        STRUCT_FIELD(FFXIVIpcHousingBuddyStatus, param)
+    );
+#endif
+
+    /**
+     * @brief Housing buddy state update (0x30D)
+     */
+    struct FFXIVIpcHousingBuddyUpdate {
+        uint32_t param1;      ///< Buddy index or ID (slot 0-7)
+        uint32_t param2;      ///< Update type: 0=color change, 1=name change, 2=stats update
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingBuddyUpdate,
+        STRUCT_FIELD(FFXIVIpcHousingBuddyUpdate, param1),
+        STRUCT_FIELD(FFXIVIpcHousingBuddyUpdate, param2)
+    );
+#endif
+
+    /**
+     * @brief Housing buddy interaction result (0x30E)
+     */
+    struct FFXIVIpcHousingBuddyAction {
+        uint32_t actionId;    ///< Action type: 0=feed, 1=train, 2=clean, 3=groom
+        uint32_t targetId;    ///< Buddy slot index (0-7) or chocobo entity ID
+        uint32_t result;      ///< Result: 0=success, 1=failed, 2=not enough feed, 3=already done today
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingBuddyAction,
+        STRUCT_FIELD(FFXIVIpcHousingBuddyAction, actionId),
+        STRUCT_FIELD(FFXIVIpcHousingBuddyAction, targetId),
+        STRUCT_FIELD(FFXIVIpcHousingBuddyAction, result)
+    );
+#endif
+
+    /**
+     * @brief Housing buddy operation result (0x30F)
+     */
+    struct FFXIVIpcHousingBuddyResult {
+        int32_t result;       ///< Result code: negative=error, 0=success, positive=reward/bonus
+        uint32_t param1;      ///< Context data: exp gained, gil cost, item consumed, stat increase
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingBuddyResult,
+        STRUCT_FIELD(FFXIVIpcHousingBuddyResult, result),
+        STRUCT_FIELD(FFXIVIpcHousingBuddyResult, param1)
+    );
+#endif
+
+    /**
+     * @brief Housing buddy session complete (0x310)
+     */
+    struct FFXIVIpcHousingBuddyComplete {
+        uint8_t data[32];     ///< Session summary: exp changes, color changes, ability unlocks, rank progress
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcHousingBuddyComplete,
+        STRUCT_FIELD(FFXIVIpcHousingBuddyComplete, data)
+    );
+#endif
+
+    // ============================================================================
+    // Group 9: Chocobo Stable Commands (0x330-0x33A) - 11 opcodes
+    // Handler (x64): 0x140CC1110, 0x140CC1150, 0x140CC1250, 0x140CBEDF0, 0x140CBEE50, 0x140CBEEB0
+    // Manages chocobo stable UI at estates (different from Housing Buddy)
+    // ============================================================================
+
+    /**
+     * @brief List of stabled chocobos (0x330)
+     */
+    struct FFXIVIpcChocoboStableList {
+        uint32_t count;       ///< Number of chocobos in stable (0-8 typically)
+        uint32_t data[8];     ///< Packed data for each chocobo: (ownerId:u16 << 16) | (color:u8 << 8) | rank:u8
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableList,
+        STRUCT_FIELD(FFXIVIpcChocoboStableList, count),
+        STRUCT_FIELD(FFXIVIpcChocoboStableList, data)
+    );
+#endif
+
+    /**
+     * @brief Select chocobo from stable list (0x331)
+     */
+    struct FFXIVIpcChocoboStableSelect {
+        int32_t selection;    ///< Selected slot index (0-7), -1 for none/cancel
+        uint32_t param;       ///< Action to perform: 0=view, 1=train, 2=feed, 3=color
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableSelect,
+        STRUCT_FIELD(FFXIVIpcChocoboStableSelect, selection),
+        STRUCT_FIELD(FFXIVIpcChocoboStableSelect, param)
+    );
+#endif
+
+    /**
+     * @brief Detailed chocobo stable data (0x332)
+     */
+    struct FFXIVIpcChocoboStableData {
+        uint8_t data[64];     ///< Full chocobo data: name[20], stats[12], exp:u32, abilities[8], color:u8, pedigree:u8, rank:u8, reserved[9]
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableData,
+        STRUCT_FIELD(FFXIVIpcChocoboStableData, data)
+    );
+#endif
+
+    /**
+     * @brief Update stable chocobo state (0x333)
+     */
+    struct FFXIVIpcChocoboStableUpdate {
+        uint32_t param1;      ///< Chocobo slot index (0-7)
+        uint32_t param2;      ///< Update flags: bit0=exp, bit1=stats, bit2=color, bit3=abilities
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableUpdate,
+        STRUCT_FIELD(FFXIVIpcChocoboStableUpdate, param1),
+        STRUCT_FIELD(FFXIVIpcChocoboStableUpdate, param2)
+    );
+#endif
+
+    /**
+     * @brief Stable action result (0x334)
+     */
+    struct FFXIVIpcChocoboStableResult {
+        uint32_t result;      ///< Result: 0=success, 1=not enough greens, 2=stable full, 3=cooldown
+        uint32_t param;       ///< Context: cooldown time (seconds), required item count, greens consumed
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableResult,
+        STRUCT_FIELD(FFXIVIpcChocoboStableResult, result),
+        STRUCT_FIELD(FFXIVIpcChocoboStableResult, param)
+    );
+#endif
+
+    /**
+     * @brief Stable training action (0x335)
+     */
+    struct FFXIVIpcChocoboStableAction1 {
+        uint32_t actorId;     ///< Entity ID of the player performing action
+        uint32_t actionId;    ///< Action: 0=feed, 1=train, 2=dye, 3=rename
+        uint32_t param;       ///< Action param: item ID for feed/dye, stat ID for train
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableAction1,
+        STRUCT_FIELD(FFXIVIpcChocoboStableAction1, actorId),
+        STRUCT_FIELD(FFXIVIpcChocoboStableAction1, actionId),
+        STRUCT_FIELD(FFXIVIpcChocoboStableAction1, param)
+    );
+#endif
+
+    /**
+     * @brief Extended stable action with multiple params (0x336)
+     */
+    struct FFXIVIpcChocoboStableAction2 {
+        uint32_t actorId;     ///< Entity ID of the player
+        uint32_t params[4];   ///< params[0]=action, params[1]=slot, params[2]=item, params[3]=quantity
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableAction2,
+        STRUCT_FIELD(FFXIVIpcChocoboStableAction2, actorId),
+        STRUCT_FIELD(FFXIVIpcChocoboStableAction2, params)
+    );
+#endif
+
+    /**
+     * @brief Overall stable status (0x337)
+     */
+    struct FFXIVIpcChocoboStableStatus {
+        uint32_t param;       ///< Packed status: (maxSlots:u8 << 24) | (usedSlots:u8 << 16) | (cleanliness:u8 << 8) | flags:u8
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableStatus,
+        STRUCT_FIELD(FFXIVIpcChocoboStableStatus, param)
+    );
+#endif
+
+    /**
+     * @brief Stable feature flags (0x338)
+     */
+    struct FFXIVIpcChocoboStableFlags {
+        uint8_t flags;        ///< Bitmask: bit0=can train, bit1=can feed, bit2=can dye, bit3=breeding unlocked
+        uint8_t __padding1;
+        uint8_t __padding2;
+        uint8_t __padding3;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableFlags,
+        STRUCT_FIELD(FFXIVIpcChocoboStableFlags, flags)
+    );
+#endif
+
+    /**
+     * @brief Sync stable state from server (0x339)
+     */
+    struct FFXIVIpcChocoboStableSync {
+        uint8_t syncData[16]; ///< Compact sync: timestamps for last feed/train per slot
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableSync,
+        STRUCT_FIELD(FFXIVIpcChocoboStableSync, syncData)
+    );
+#endif
+
+    /**
+     * @brief Stable session complete (0x33A)
+     */
+    struct FFXIVIpcChocoboStableComplete {
+        uint8_t result;       ///< Completion: 0=normal close, 1=timeout, 2=error
+        uint8_t __padding1;
+        uint8_t __padding2;
+        uint8_t __padding3;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboStableComplete,
+        STRUCT_FIELD(FFXIVIpcChocoboStableComplete, result)
+    );
+#endif
+
+    // ============================================================================
+    // Group 10: Chocobo Racing (0x34A-0x35E, 0x3B7) - 22 opcodes
+    // Handler (x64): 0x140CBEC20, 0x140CBEA80, 0x140CBEA90, 0x140CBEAC0, 0x140CBEB20, 0x140CBEB80
+    // Gold Saucer chocobo racing minigame packets
+    // ============================================================================
+
+    /**
+     * @brief Single racer entry for race initialization
+     * 48 bytes per entry, used in FFXIVIpcChocoboRaceInit
+     */
+    struct ChocoboRaceEntry {
+        uint32_t actorId;     ///< Entity ID of the racer (or NPC ID for NPCs)
+        uint16_t entryId;     ///< Registration number for this race
+        uint16_t __padding;
+        uint32_t data1;       ///< Chocobo rank/class (1-5)
+        uint32_t data2;       ///< Breeding stats: speed, acceleration, endurance, stamina
+        uint32_t data3;       ///< Ability slot data (packed)
+        uint8_t extra[28];    ///< Name[20], color:u8, pedigree:u8, traits:u16, reserved:u4
+    };
+
+    /**
+     * @brief Race configuration/rules (0x34A)
+     */
+    struct FFXIVIpcChocoboRaceConfig {
+        uint8_t config[32];   ///< Race config: trackId:u8, laps:u8, difficulty:u8, weather:u8, rules[28]
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceConfig,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceConfig, config)
+    );
+#endif
+
+    /**
+     * @brief Race participant list (0x34B)
+     */
+    struct FFXIVIpcChocoboRaceParticipants {
+        uint8_t data[128];    ///< Compact participant list: (entryId:u8, slot:u8, name[14]) × 8
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceParticipants,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceParticipants, data)
+    );
+#endif
+
+    /**
+     * @brief Full race initialization (0x34C)
+     * Handler does memcpy of 960 bytes (20 entries × 48 bytes)
+     */
+    struct FFXIVIpcChocoboRaceInit {
+        ChocoboRaceEntry entries[20];  ///< All racers (8 players max + 12 NPC slots)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceInit,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceInit, entries)
+    );
+#endif
+
+    /**
+     * @brief Race state update during race (0x34D)
+     */
+    struct FFXIVIpcChocoboRaceUpdate {
+        uint32_t field1;      ///< Race timer (milliseconds since start)
+        uint32_t field2;      ///< Event flags: bit0=item spawned, bit1=obstacle active, bit2=shortcut open, bit3=weather change
+        uint32_t field3;      ///< Reserved/future use
+        uint8_t currentIndex; ///< Player's current position (0-7, 0=1st place)
+        uint8_t __padding[3];
+        uint8_t participantData[840]; ///< Per-racer update: (pos[3]:f32, speed:u16, stamina:u16, status:u8) × 8
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceUpdate,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceUpdate, field1),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceUpdate, field2),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceUpdate, field3),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceUpdate, currentIndex),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceUpdate, participantData)
+    );
+#endif
+
+    /**
+     * @brief Pre-race countdown (0x34E)
+     */
+    struct FFXIVIpcChocoboRaceCountdown {
+        uint8_t data[16];     ///< Countdown state: seconds:u8, phase:u8, ready_flags:u16, camera_id:u32, ...
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceCountdown,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceCountdown, data)
+    );
+#endif
+
+    /**
+     * @brief Race start signal (0x34F)
+     */
+    struct FFXIVIpcChocoboRaceStart {
+        uint32_t raceId;      ///< Unique race instance ID (for result matching)
+        uint32_t timestamp;   ///< Server timestamp when race started (Unix epoch ms)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceStart,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceStart, raceId),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceStart, timestamp)
+    );
+#endif
+
+    /**
+     * @brief Real-time position update (0x350)
+     */
+    struct FFXIVIpcChocoboRacePosition {
+        int32_t positions[8]; ///< Track progress per racer (0-100000 = 0-100% of track)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRacePosition,
+        STRUCT_FIELD(FFXIVIpcChocoboRacePosition, positions)
+    );
+#endif
+
+    /**
+     * @brief Lap completion notification (0x351)
+     */
+    struct FFXIVIpcChocoboRaceLap {
+        uint8_t lapNumber;    ///< Current lap (1-based, e.g., 2 = just completed lap 1)
+        uint8_t totalLaps;    ///< Total laps in race (typically 3)
+        uint16_t __padding;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceLap,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceLap, lapNumber),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceLap, totalLaps)
+    );
+#endif
+
+    /**
+     * @brief Checkpoint trigger (0x352)
+     */
+    struct FFXIVIpcChocoboRaceCheckpoint {
+        uint32_t checkpointId; ///< Checkpoint index on track (0-N, varies by track)
+        uint32_t timestamp;    ///< Time when checkpoint was crossed (ms since race start)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceCheckpoint,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceCheckpoint, checkpointId),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceCheckpoint, timestamp)
+    );
+#endif
+
+    /**
+     * @brief Track obstacle hit (0x353)
+     */
+    struct FFXIVIpcChocoboRaceObstacle {
+        uint8_t obstacleType; ///< Type: 0=rock, 1=puddle, 2=cactuar, 3=bomb, 4=wall, 5=box
+        uint8_t severity;     ///< Effect strength: 0=minor, 1=moderate, 2=major slowdown
+        uint16_t __padding;
+        uint32_t param;       ///< Duration of effect (ms) or stamina loss amount
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceObstacle,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceObstacle, obstacleType),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceObstacle, severity),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceObstacle, param)
+    );
+#endif
+
+    /**
+     * @brief Race commentary/announcement (0x354)
+     */
+    struct FFXIVIpcChocoboRaceMessage {
+        char message[64];     ///< UTF-8 race announcement (e.g., "Player takes the lead!")
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceMessage,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceMessage, message)
+    );
+#endif
+
+    /**
+     * @brief Racing ability usage (0x355)
+     */
+    struct FFXIVIpcChocoboRaceAbility {
+        uint32_t abilityId;   ///< RaceChocoboAbility.exd row ID (e.g., Choco Dash, Choco Cure)
+        uint32_t targetId;    ///< Target racer slot (0-7) or 0xFF for self
+        uint32_t result;      ///< Result: 0=success, 1=blocked, 2=miss, 3=on cooldown
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceAbility,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceAbility, abilityId),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceAbility, targetId),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceAbility, result)
+    );
+#endif
+
+    /**
+     * @brief Item box pickup (0x356)
+     */
+    struct FFXIVIpcChocoboRaceItem {
+        uint32_t itemId;      ///< RaceChocoboItem.exd row ID (speed boost, stamina restore, dash, shield)
+        uint32_t slotIndex;   ///< Item slot (0 or 1 for 2-slot inventory during race)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceItem,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceItem, itemId),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceItem, slotIndex)
+    );
+#endif
+
+    /**
+     * @brief Racer collision event (0x357)
+     */
+    struct FFXIVIpcChocoboRaceCollision {
+        uint8_t data[16];     ///< Collision data: targetSlot:u8, type:u8, force[3]:u16, result:u16, ...
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceCollision,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceCollision, data)
+    );
+#endif
+
+    /**
+     * @brief Speed/stamina gauge update (0x358)
+     */
+    struct FFXIVIpcChocoboRaceSpeed {
+        int32_t speed;        ///< Current speed value (0-1000, scaled to %)
+        int32_t maxSpeed;     ///< Max speed based on stats/buffs (0-1000)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceSpeed,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceSpeed, speed),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceSpeed, maxSpeed)
+    );
+#endif
+
+    /**
+     * @brief Timer display update (0x359)
+     */
+    struct FFXIVIpcChocoboRaceTime {
+        uint16_t currentTime; ///< Current lap time (centiseconds, divide by 100 for seconds)
+        uint16_t bestLapTime; ///< Best lap time this race (centiseconds)
+        uint16_t totalTime;   ///< Total race time so far (centiseconds)
+        uint16_t __padding;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceTime,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceTime, currentTime),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceTime, bestLapTime),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceTime, totalTime)
+    );
+#endif
+
+    /**
+     * @brief Real-time ranking display (0x35A)
+     */
+    struct FFXIVIpcChocoboRaceRanking {
+        uint8_t rankings[8];  ///< Racer slot in each position: rankings[0]=1st, rankings[1]=2nd, rankings[7]=8th
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceRanking,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceRanking, rankings)
+    );
+#endif
+
+    /**
+     * @brief Bonus effect trigger (0x35B)
+     */
+    struct FFXIVIpcChocoboRaceBonus {
+        uint8_t bonusType;    ///< Bonus: 0=speed, 1=stamina, 2=ability reset, 3=invincibility
+        uint8_t bonusValue;   ///< Magnitude (1-100 typically)
+        uint16_t __padding;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceBonus,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceBonus, bonusType),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceBonus, bonusValue)
+    );
+#endif
+
+    /**
+     * @brief Penalty applied (0x35C)
+     */
+    struct FFXIVIpcChocoboRacePenalty {
+        uint8_t data[16];     ///< Penalty: type:u8, severity:u8, duration:u16, source:u32, ...
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRacePenalty,
+        STRUCT_FIELD(FFXIVIpcChocoboRacePenalty, data)
+    );
+#endif
+
+    /**
+     * @brief Player crossed finish line (0x35D)
+     */
+    struct FFXIVIpcChocoboRaceFinish {
+        uint8_t position;     ///< Final position (1-8)
+        uint8_t flags;        ///< Flags: bit0=new record, bit1=perfect run, bit2=no items
+        uint16_t __padding;
+        uint32_t finalTime;   ///< Total race time (milliseconds)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceFinish,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceFinish, position),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceFinish, flags),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceFinish, finalTime)
+    );
+#endif
+
+    /**
+     * @brief Race rewards breakdown (0x35E)
+     */
+    struct FFXIVIpcChocoboRaceReward {
+        uint32_t mgpReward;   ///< MGP earned (base + position bonus + streak bonus)
+        uint32_t expReward;   ///< Chocobo EXP earned
+        uint32_t itemReward;  ///< Item reward ID (0 if none) from RaceChocoboReward.exd
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceReward,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceReward, mgpReward),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceReward, expReward),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceReward, itemReward)
+    );
+#endif
+
+    /**
+     * @brief Full race result summary (0x3B7)
+     */
+    struct FFXIVIpcChocoboRaceResult {
+        uint32_t raceId;      ///< Race instance ID (matches ChocoboRaceStart)
+        uint32_t finalPosition; ///< Final position (1-8)
+        uint32_t totalTime;   ///< Total race time (milliseconds)
+        uint32_t mgpEarned;   ///< Total MGP earned including bonuses
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceResult,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceResult, raceId),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceResult, finalPosition),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceResult, totalTime),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceResult, mgpEarned)
+    );
+#endif
+
+    /**
+     * @brief Race session complete (0x35F or related)
+     * Handler does: *(float*)(param3), *(float*)(param3+4), *(float*)(param3+8), *(int*)(param3+0xC)
+     */
+    struct FFXIVIpcChocoboRaceComplete {
+        float params[3];      ///< Final position coords (x, y, z) for camera
+        uint32_t result;      ///< Completion: 0=normal, 1=disconnected, 2=forfeit
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcChocoboRaceComplete,
+        STRUCT_FIELD(FFXIVIpcChocoboRaceComplete, params),
+        STRUCT_FIELD(FFXIVIpcChocoboRaceComplete, result)
+    );
+#endif
+
+    // ============================================================================
+    // Group 11: Triple Triad (0x384-0x38A) - 7 opcodes
+    // Handler (x64): 0x140CC18E0, 0x140CC1860, 0x140CC18A0, 0x140CC1920, 0x140CC1980, 0x140CC19E0
+    // Gold Saucer Triple Triad card game packets
+    // ============================================================================
+
+    /**
+     * @brief Initialize Triple Triad match (0x384)
+     */
+    struct FFXIVIpcTriadMatchInit {
+        int32_t matchId;      ///< Unique match instance ID
+        int32_t opponentId;   ///< Opponent entity ID (NPC ID or player entity ID)
+        int32_t ruleFlags;    ///< Bitmask of active rules from TripleTriadRule.exd
+                              ///< bit0=All Open, bit1=Three Open, bit2=Same, bit3=Sudden Death
+                              ///< bit4=Plus, bit5=Random, bit6=Order, bit7=Chaos, bit8=Reverse
+                              ///< bit9=Fallen Ace, bit10=Ascension, bit11=Descension
+                              ///< bit12=Swap, bit13=Draft, bit14=Roulette
+        int32_t param;        ///< Match variant or tournament round
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcTriadMatchInit,
+        STRUCT_FIELD(FFXIVIpcTriadMatchInit, matchId),
+        STRUCT_FIELD(FFXIVIpcTriadMatchInit, opponentId),
+        STRUCT_FIELD(FFXIVIpcTriadMatchInit, ruleFlags),
+        STRUCT_FIELD(FFXIVIpcTriadMatchInit, param)
+    );
+#endif
+
+    /**
+     * @brief Match begins, determine first player (0x385)
+     */
+    struct FFXIVIpcTriadMatchStart {
+        int32_t matchId;      ///< Match instance ID
+        int32_t turnPlayer;   ///< Who goes first: 0=player, 1=opponent
+        int32_t param1;       ///< Reserved (typically 0)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcTriadMatchStart,
+        STRUCT_FIELD(FFXIVIpcTriadMatchStart, matchId),
+        STRUCT_FIELD(FFXIVIpcTriadMatchStart, turnPlayer),
+        STRUCT_FIELD(FFXIVIpcTriadMatchStart, param1)
+    );
+#endif
+
+    /**
+     * @brief Turn begins for a player (0x386)
+     */
+    struct FFXIVIpcTriadTurnStart {
+        int32_t turnNumber;   ///< Current turn (1-9)
+        int32_t activePlayer; ///< Whose turn: 0=player, 1=opponent
+        int32_t timeLimit;    ///< Turn time limit in seconds (0 for NPC matches)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcTriadTurnStart,
+        STRUCT_FIELD(FFXIVIpcTriadTurnStart, turnNumber),
+        STRUCT_FIELD(FFXIVIpcTriadTurnStart, activePlayer),
+        STRUCT_FIELD(FFXIVIpcTriadTurnStart, timeLimit)
+    );
+#endif
+
+    /**
+     * @brief Card placed on board (0x387)
+     */
+    struct FFXIVIpcTriadCardPlay {
+        int32_t cardId;       ///< TripleTriadCard.exd row ID
+        int32_t position;     ///< Board position (0-8, top-left to bottom-right)
+                              ///< Layout: 0 1 2
+                              ///<         3 4 5
+                              ///<         6 7 8
+        int32_t playerId;     ///< Who played: 0=player, 1=opponent
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcTriadCardPlay,
+        STRUCT_FIELD(FFXIVIpcTriadCardPlay, cardId),
+        STRUCT_FIELD(FFXIVIpcTriadCardPlay, position),
+        STRUCT_FIELD(FFXIVIpcTriadCardPlay, playerId)
+    );
+#endif
+
+    /**
+     * @brief Card play result and score update (0x388)
+     * Sent after a card is placed to show flips and score changes
+     */
+    struct FFXIVIpcTriadCardResult {
+        uint32_t position;      ///< Board position where card was played (0-8)
+        uint32_t flippedCards;  ///< Bitmask of positions that flipped (bit0=pos0, bit1=pos1, bit2=pos2, bit3=pos3, bit4=pos4, bit5=pos5, bit6=pos6, bit7=pos7, bit8=pos8)
+                                ///< Example: 0x05 means positions 0 and 2 flipped
+        uint32_t scorePlayer;   ///< Player's current score (cards owned + 1 if more on board)
+        uint32_t scoreOpponent; ///< Opponent's current score
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcTriadCardResult,
+        STRUCT_FIELD(FFXIVIpcTriadCardResult, position),
+        STRUCT_FIELD(FFXIVIpcTriadCardResult, flippedCards),
+        STRUCT_FIELD(FFXIVIpcTriadCardResult, scorePlayer),
+        STRUCT_FIELD(FFXIVIpcTriadCardResult, scoreOpponent)
+    );
+#endif
+
+    /**
+     * @brief Match conclusion (0x389)
+     */
+    struct FFXIVIpcTriadMatchEnd {
+        uint32_t winner;        ///< Result: 0=draw, 1=player won, 2=opponent won
+        uint32_t scorePlayer;   ///< Final player score (0-9)
+        uint32_t scoreOpponent; ///< Final opponent score (0-9)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcTriadMatchEnd,
+        STRUCT_FIELD(FFXIVIpcTriadMatchEnd, winner),
+        STRUCT_FIELD(FFXIVIpcTriadMatchEnd, scorePlayer),
+        STRUCT_FIELD(FFXIVIpcTriadMatchEnd, scoreOpponent)
+    );
+#endif
+
+    /**
+     * @brief Match rewards (0x38A)
+     */
+    struct FFXIVIpcTriadReward {
+        uint8_t rewardType;   ///< Type: 0=none, 1=MGP only, 2=card won, 3=card + MGP
+        uint8_t cardCount;    ///< Number of cards won (0-1 typically, or more with rules)
+        uint16_t cardId;      ///< TripleTriadCard.exd row ID of won card (0 if none)
+        uint32_t mgpReward;   ///< MGP earned (varies by opponent and win/lose)
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcTriadReward,
+        STRUCT_FIELD(FFXIVIpcTriadReward, rewardType),
+        STRUCT_FIELD(FFXIVIpcTriadReward, cardCount),
+        STRUCT_FIELD(FFXIVIpcTriadReward, cardId),
+        STRUCT_FIELD(FFXIVIpcTriadReward, mgpReward)
+    );
+#endif
+
+    // ============================================================================
+    // ContentFinder Notification Packets (0x290-0x294)
+    // Handler: sub_140CC6F40 - all 5 opcodes share the same handler
+    // Used for duty finder queue state, match pop, ready check, party updates
+    // ============================================================================
+
+    /**
+     * @brief ContentFinder notification base packet (0x290)
+     * Common structure for all CFNotify variants - handler differentiates by category field
+     * 
+     * Handler signature: sub_140CC6F40(actorId, category, params*, state)
+     * - category 8: Queue update (sub_140CC3440)
+     * - category 9: Queue operation (sub_140CC37B0)
+     * - category 10: Instance content notification
+     * - category 11: Instance state change (sub_140538010)
+     */
+    struct FFXIVIpcCFNotify {
+        uint16_t category;    ///< Notification category (8=queue, 9=queueOp, 10=content, 11=state)
+        uint8_t state;        ///< State/subtype within category
+        uint8_t padding;      ///< Alignment padding
+        uint32_t param1;      ///< Category-dependent: contentId, queuePosition, etc.
+        uint32_t param2;      ///< Category-dependent: waitTime, flags, etc.
+        uint32_t param3;      ///< Additional context data
+        uint32_t param4;      ///< Additional context data
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcCFNotify,
+        STRUCT_FIELD(FFXIVIpcCFNotify, category),
+        STRUCT_FIELD(FFXIVIpcCFNotify, state),
+        STRUCT_FIELD(FFXIVIpcCFNotify, padding),
+        STRUCT_FIELD(FFXIVIpcCFNotify, param1),
+        STRUCT_FIELD(FFXIVIpcCFNotify, param2),
+        STRUCT_FIELD(FFXIVIpcCFNotify, param3),
+        STRUCT_FIELD(FFXIVIpcCFNotify, param4)
+    );
+#endif
+
+    /**
+     * @brief ContentFinder match pop notification (0x291)
+     * Sent when duty finder finds a match and shows the "Duty Ready" dialog
+     */
+    struct FFXIVIpcCFNotifyPop {
+        uint16_t category;      ///< Should be 10 for content notification
+        uint8_t state;          ///< Pop state (2+ triggers sub_140CC6570)
+        uint8_t padding;
+        uint32_t contentId;     ///< ContentFinderCondition.exd row ID
+        uint32_t param2;        ///< Additional data
+        uint32_t param3;
+        uint32_t param4;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcCFNotifyPop,
+        STRUCT_FIELD(FFXIVIpcCFNotifyPop, category),
+        STRUCT_FIELD(FFXIVIpcCFNotifyPop, state),
+        STRUCT_FIELD(FFXIVIpcCFNotifyPop, padding),
+        STRUCT_FIELD(FFXIVIpcCFNotifyPop, contentId),
+        STRUCT_FIELD(FFXIVIpcCFNotifyPop, param2),
+        STRUCT_FIELD(FFXIVIpcCFNotifyPop, param3),
+        STRUCT_FIELD(FFXIVIpcCFNotifyPop, param4)
+    );
+#endif
+
+    /**
+     * @brief ContentFinder enter ready notification (0x292)
+     * Sent when all players accept and instance is ready to enter
+     */
+    struct FFXIVIpcCFNotifyEnterReady {
+        uint16_t category;
+        uint8_t state;
+        uint8_t padding;
+        uint32_t contentId;     ///< ContentFinderCondition.exd row ID
+        uint32_t zoneId;        ///< Target zone/instance ID
+        uint32_t param3;
+        uint32_t param4;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcCFNotifyEnterReady,
+        STRUCT_FIELD(FFXIVIpcCFNotifyEnterReady, category),
+        STRUCT_FIELD(FFXIVIpcCFNotifyEnterReady, state),
+        STRUCT_FIELD(FFXIVIpcCFNotifyEnterReady, padding),
+        STRUCT_FIELD(FFXIVIpcCFNotifyEnterReady, contentId),
+        STRUCT_FIELD(FFXIVIpcCFNotifyEnterReady, zoneId),
+        STRUCT_FIELD(FFXIVIpcCFNotifyEnterReady, param3),
+        STRUCT_FIELD(FFXIVIpcCFNotifyEnterReady, param4)
+    );
+#endif
+
+    /**
+     * @brief ContentFinder party member update (0x293)
+     * Sent when party composition changes in queue
+     */
+    struct FFXIVIpcCFNotifyMemberUpdate {
+        uint16_t category;      ///< Should be 11 for state change
+        uint8_t state;
+        uint8_t padding;
+        uint16_t memberFlags;   ///< Bitmask: bit0=tank, bit1=healer, bit2=dps ready
+        uint8_t memberState;    ///< Member state byte
+        uint8_t reserved;
+        uint32_t param2;        ///< Passed to sub_140538010 as param2
+        uint32_t param3;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcCFNotifyMemberUpdate,
+        STRUCT_FIELD(FFXIVIpcCFNotifyMemberUpdate, category),
+        STRUCT_FIELD(FFXIVIpcCFNotifyMemberUpdate, state),
+        STRUCT_FIELD(FFXIVIpcCFNotifyMemberUpdate, padding),
+        STRUCT_FIELD(FFXIVIpcCFNotifyMemberUpdate, memberFlags),
+        STRUCT_FIELD(FFXIVIpcCFNotifyMemberUpdate, memberState),
+        STRUCT_FIELD(FFXIVIpcCFNotifyMemberUpdate, reserved),
+        STRUCT_FIELD(FFXIVIpcCFNotifyMemberUpdate, param2),
+        STRUCT_FIELD(FFXIVIpcCFNotifyMemberUpdate, param3)
+    );
+#endif
+
+    /**
+     * @brief ContentFinder queue/duty status update (0x294)
+     * Periodic updates for queue position, wait time, etc.
+     */
+    struct FFXIVIpcCFNotifyStatus {
+        uint16_t category;
+        uint8_t state;
+        uint8_t padding;
+        uint32_t queuePosition; ///< Position in queue (0 = not in queue)
+        uint32_t waitTime;      ///< Estimated wait time in seconds
+        uint32_t flags;         ///< Status flags
+        uint32_t param4;
+    };
+
+#ifdef DECLARE_PACKET_FIELDS
+    DECLARE_PACKET_FIELDS(FFXIVIpcCFNotifyStatus,
+        STRUCT_FIELD(FFXIVIpcCFNotifyStatus, category),
+        STRUCT_FIELD(FFXIVIpcCFNotifyStatus, state),
+        STRUCT_FIELD(FFXIVIpcCFNotifyStatus, padding),
+        STRUCT_FIELD(FFXIVIpcCFNotifyStatus, queuePosition),
+        STRUCT_FIELD(FFXIVIpcCFNotifyStatus, waitTime),
+        STRUCT_FIELD(FFXIVIpcCFNotifyStatus, flags),
+        STRUCT_FIELD(FFXIVIpcCFNotifyStatus, param4)
+    );
+#endif
+
 } // namespace PacketStructures::Server::Zone

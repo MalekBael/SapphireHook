@@ -5,6 +5,7 @@
 #include <sstream>
 #include <iomanip>
 #include <Psapi.h>
+#include <format>
 #pragma comment(lib, "psapi.lib")
 
 namespace SapphireHook {
@@ -686,6 +687,525 @@ namespace SapphireHook {
         result.isUtf16 = bestIsUtf16;
 
         return result;
+    }
+
+    // =========================================================================
+    // ASYNC PATTERN SCANNER IMPLEMENTATION
+    // =========================================================================
+
+    AsyncPatternScanner& AsyncPatternScanner::GetInstance() {
+        static AsyncPatternScanner instance;
+        return instance;
+    }
+
+    AsyncPatternScanner::~AsyncPatternScanner() {
+        Shutdown();
+    }
+
+    void AsyncPatternScanner::Initialize(size_t threadCount) {
+        if (m_initialized.exchange(true)) {
+            return; // Already initialized
+        }
+
+        // Cache module info
+        m_moduleBase = GetModuleBaseAddress(L"ffxiv_dx11.exe", m_moduleSize);
+        
+        // Auto-detect thread count if not specified
+        if (threadCount == 0) {
+            threadCount = std::thread::hardware_concurrency();
+            if (threadCount == 0) threadCount = 2;
+            // Use half the cores to avoid impacting game performance
+            threadCount = (std::max)(size_t(1), threadCount / 2);
+        }
+
+        LogInfo(std::format("[AsyncPatternScanner] Initializing with {} worker threads", threadCount));
+
+        m_shutdownRequested = false;
+        m_workers.reserve(threadCount);
+        
+        for (size_t i = 0; i < threadCount; ++i) {
+            m_workers.emplace_back(&AsyncPatternScanner::WorkerThread, this);
+        }
+    }
+
+    void AsyncPatternScanner::Shutdown() {
+        if (!m_initialized.load()) return;
+
+        LogInfo("[AsyncPatternScanner] Shutting down...");
+
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            m_shutdownRequested = true;
+        }
+        m_queueCondition.notify_all();
+
+        for (auto& worker : m_workers) {
+            if (worker.joinable()) {
+                worker.join();
+            }
+        }
+        m_workers.clear();
+
+        m_initialized = false;
+        LogInfo("[AsyncPatternScanner] Shutdown complete");
+    }
+
+    void AsyncPatternScanner::WorkerThread() {
+        while (true) {
+            std::shared_ptr<ScanJob> job;
+
+            {
+                std::unique_lock<std::mutex> lock(m_queueMutex);
+                m_queueCondition.wait(lock, [this] {
+                    return m_shutdownRequested || !m_pendingJobs.empty();
+                });
+
+                if (m_shutdownRequested && m_pendingJobs.empty()) {
+                    return;
+                }
+
+                if (!m_pendingJobs.empty()) {
+                    // Get highest priority job (last in sorted vector)
+                    job = m_pendingJobs.back();
+                    m_pendingJobs.pop_back();
+                }
+            }
+
+            if (job) {
+                ProcessJob(job);
+            }
+        }
+    }
+
+    void AsyncPatternScanner::ProcessJob(std::shared_ptr<ScanJob> job) {
+        m_runningCount++;
+
+        // Track as active
+        {
+            std::lock_guard<std::mutex> lock(m_resultsMutex);
+            m_activeJobs[job->id] = job;
+        }
+
+        // Execute the scan
+        AsyncScanResult result = ExecuteScan(job);
+
+        // Store result
+        {
+            std::lock_guard<std::mutex> lock(m_resultsMutex);
+            m_results[job->id] = result;
+            m_activeJobs.erase(job->id);
+        }
+
+        // Cache successful results
+        if (m_cachingEnabled && result.status == AsyncScanStatus::Completed && result.result) {
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            m_cache[result.pattern] = *result.result;
+        }
+
+        // Invoke completion callback
+        if (job->config.onComplete) {
+            try {
+                job->config.onComplete(result);
+            } catch (const std::exception& e) {
+                LogWarning(std::format("[AsyncPatternScanner] Completion callback threw: {}", e.what()));
+            }
+        }
+
+        // Set promise for waiters
+        try {
+            job->promise.set_value(result);
+        } catch (...) {
+            // Promise already satisfied or broken
+        }
+
+        m_runningCount--;
+        m_totalProcessed++;
+    }
+
+    AsyncScanResult AsyncPatternScanner::ExecuteScan(std::shared_ptr<ScanJob> job) {
+        AsyncScanResult result;
+        result.jobId = job->id;
+        result.name = job->config.name;
+        result.pattern = job->config.pattern;
+        result.status = AsyncScanStatus::Running;
+        result.startTime = std::chrono::steady_clock::now();
+
+        // Update result in storage for status queries
+        {
+            std::lock_guard<std::mutex> lock(m_resultsMutex);
+            m_results[job->id] = result;
+        }
+
+        // Check cancellation
+        if (job->cancelled.load()) {
+            result.status = AsyncScanStatus::Cancelled;
+            result.endTime = std::chrono::steady_clock::now();
+            return result;
+        }
+
+        // Check cache first
+        if (job->config.useCache) {
+            std::lock_guard<std::mutex> lock(m_cacheMutex);
+            auto it = m_cache.find(job->config.pattern);
+            if (it != m_cache.end()) {
+                result.result = it->second;
+                result.result->fromCache = true;
+                result.status = AsyncScanStatus::Completed;
+                result.endTime = std::chrono::steady_clock::now();
+                LogDebug(std::format("[AsyncPatternScanner] Cache hit for '{}'", job->config.name));
+                return result;
+            }
+        }
+
+        // Validate module
+        if (m_moduleBase == 0 || m_moduleSize == 0) {
+            result.status = AsyncScanStatus::Failed;
+            result.error = ScanError::ModuleNotFound;
+            result.errorMessage = "Main module not found";
+            result.endTime = std::chrono::steady_clock::now();
+            return result;
+        }
+
+        // Parse pattern
+        auto patternBytes = PatternScanner::PatternToBytes(job->config.pattern);
+        if (!patternBytes) {
+            result.status = AsyncScanStatus::Failed;
+            result.error = ScanError::InvalidPattern;
+            result.errorMessage = "Failed to parse pattern";
+            result.endTime = std::chrono::steady_clock::now();
+            return result;
+        }
+
+        // Perform chunked scan with progress updates
+        const size_t chunkSize = job->config.chunkSize;
+        const size_t patternSize = patternBytes->size();
+        
+        if (job->config.findAll) {
+            // Scan for all matches
+            for (size_t offset = 0; offset + patternSize <= m_moduleSize; offset += chunkSize) {
+                if (job->cancelled.load()) {
+                    result.status = AsyncScanStatus::Cancelled;
+                    result.endTime = std::chrono::steady_clock::now();
+                    return result;
+                }
+
+                size_t scanLength = (std::min)(chunkSize + patternSize - 1, m_moduleSize - offset);
+                auto chunkResults = PatternScanner::ScanAllPatterns(
+                    m_moduleBase + offset, scanLength, job->config.pattern);
+
+                for (auto& r : chunkResults) {
+                    result.allResults.push_back(r);
+                }
+
+                // Progress callback
+                if (job->config.onProgress) {
+                    job->config.onProgress(job->id, offset, m_moduleSize, job->config.name);
+                }
+            }
+
+            if (!result.allResults.empty()) {
+                result.result = result.allResults.front();
+            }
+        } else {
+            // Scan for first match with progress
+            for (size_t offset = 0; offset + patternSize <= m_moduleSize; offset += chunkSize) {
+                if (job->cancelled.load()) {
+                    result.status = AsyncScanStatus::Cancelled;
+                    result.endTime = std::chrono::steady_clock::now();
+                    return result;
+                }
+
+                size_t scanLength = (std::min)(chunkSize + patternSize - 1, m_moduleSize - offset);
+                auto scanResult = PatternScanner::ScanPattern(
+                    m_moduleBase + offset, scanLength, job->config.pattern);
+
+                if (scanResult) {
+                    result.result = scanResult;
+                    break;
+                }
+
+                // Progress callback
+                if (job->config.onProgress) {
+                    job->config.onProgress(job->id, offset, m_moduleSize, job->config.name);
+                }
+            }
+        }
+
+        result.endTime = std::chrono::steady_clock::now();
+
+        if (result.result) {
+            result.status = AsyncScanStatus::Completed;
+            LogInfo(std::format("[AsyncPatternScanner] Found '{}' at 0x{:X} ({:.2f}ms)",
+                job->config.name, result.result->address, result.GetDurationMs()));
+        } else {
+            result.status = AsyncScanStatus::Completed;
+            result.error = ScanError::NotFound;
+            LogDebug(std::format("[AsyncPatternScanner] '{}' not found ({:.2f}ms)",
+                job->config.name, result.GetDurationMs()));
+        }
+
+        return result;
+    }
+
+    uint32_t AsyncPatternScanner::GenerateJobId() {
+        return m_nextJobId.fetch_add(1);
+    }
+
+    uint32_t AsyncPatternScanner::QueueScan(const AsyncScanConfig& config) {
+        if (!m_initialized.load()) {
+            Initialize();
+        }
+
+        auto job = std::make_shared<ScanJob>();
+        job->id = GenerateJobId();
+        job->config = config;
+        job->future = job->promise.get_future().share();
+
+        // Initialize result entry
+        {
+            std::lock_guard<std::mutex> lock(m_resultsMutex);
+            AsyncScanResult initial;
+            initial.jobId = job->id;
+            initial.name = config.name;
+            initial.pattern = config.pattern;
+            initial.status = AsyncScanStatus::Pending;
+            m_results[job->id] = initial;
+        }
+
+        // Add to queue (sorted by priority, lowest first)
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            
+            auto insertPos = std::lower_bound(m_pendingJobs.begin(), m_pendingJobs.end(), job,
+                [](const auto& a, const auto& b) {
+                    return a->config.priority < b->config.priority;
+                });
+            m_pendingJobs.insert(insertPos, job);
+        }
+
+        m_queueCondition.notify_one();
+        return job->id;
+    }
+
+    uint32_t AsyncPatternScanner::QueueScan(const std::string& name, const std::string& pattern,
+                                            AsyncScanCompletionCallback onComplete) {
+        AsyncScanConfig config;
+        config.name = name;
+        config.pattern = pattern;
+        config.onComplete = onComplete;
+        return QueueScan(config);
+    }
+
+    uint32_t AsyncPatternScanner::ScanMainModuleAsync(const std::string& name, const std::string& pattern,
+                                                       AsyncScanCompletionCallback onComplete) {
+        return QueueScan(name, pattern, onComplete);
+    }
+
+    std::vector<uint32_t> AsyncPatternScanner::QueueBatchScan(const BatchScanConfig& config) {
+        std::vector<uint32_t> jobIds;
+        jobIds.reserve(config.patterns.size());
+
+        for (const auto& patternConfig : config.patterns) {
+            jobIds.push_back(QueueScan(patternConfig));
+        }
+
+        // If there's a batch completion callback, set up a watcher
+        if (config.onComplete) {
+            std::thread([this, jobIds, callback = config.onComplete]() {
+                std::vector<AsyncScanResult> results;
+                results.reserve(jobIds.size());
+
+                for (uint32_t id : jobIds) {
+                    auto result = WaitForJob(id);
+                    if (result) {
+                        results.push_back(*result);
+                    }
+                }
+
+                callback(results);
+            }).detach();
+        }
+
+        return jobIds;
+    }
+
+    std::vector<uint32_t> AsyncPatternScanner::QueueBatchScan(
+        const std::vector<std::pair<std::string, std::string>>& namesAndPatterns,
+        std::function<void(const std::vector<AsyncScanResult>&)> onComplete) {
+        
+        BatchScanConfig config;
+        for (const auto& [name, pattern] : namesAndPatterns) {
+            AsyncScanConfig scanConfig;
+            scanConfig.name = name;
+            scanConfig.pattern = pattern;
+            config.patterns.push_back(scanConfig);
+        }
+        config.onComplete = onComplete;
+
+        return QueueBatchScan(config);
+    }
+
+    bool AsyncPatternScanner::CancelJob(uint32_t jobId) {
+        std::lock_guard<std::mutex> lock(m_resultsMutex);
+        
+        auto it = m_activeJobs.find(jobId);
+        if (it != m_activeJobs.end()) {
+            it->second->cancelled = true;
+            return true;
+        }
+
+        // Check pending queue
+        {
+            std::lock_guard<std::mutex> queueLock(m_queueMutex);
+            for (auto& job : m_pendingJobs) {
+                if (job->id == jobId) {
+                    job->cancelled = true;
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    void AsyncPatternScanner::CancelAllJobs() {
+        // Cancel pending
+        {
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            for (auto& job : m_pendingJobs) {
+                job->cancelled = true;
+            }
+        }
+
+        // Cancel running
+        {
+            std::lock_guard<std::mutex> lock(m_resultsMutex);
+            for (auto& [id, job] : m_activeJobs) {
+                job->cancelled = true;
+            }
+        }
+    }
+
+    std::optional<AsyncScanResult> AsyncPatternScanner::GetJobResult(uint32_t jobId) const {
+        std::lock_guard<std::mutex> lock(m_resultsMutex);
+        auto it = m_results.find(jobId);
+        if (it != m_results.end()) {
+            return it->second;
+        }
+        return std::nullopt;
+    }
+
+    bool AsyncPatternScanner::IsJobComplete(uint32_t jobId) const {
+        auto result = GetJobResult(jobId);
+        return result && result->IsComplete();
+    }
+
+    std::optional<AsyncScanResult> AsyncPatternScanner::WaitForJob(uint32_t jobId, uint32_t timeoutMs) {
+        std::shared_future<AsyncScanResult> future;
+
+        {
+            std::lock_guard<std::mutex> lock(m_resultsMutex);
+            auto it = m_activeJobs.find(jobId);
+            if (it != m_activeJobs.end()) {
+                future = it->second->future;
+            } else {
+                // Check if already complete
+                auto resultIt = m_results.find(jobId);
+                if (resultIt != m_results.end() && resultIt->second.IsComplete()) {
+                    return resultIt->second;
+                }
+            }
+        }
+
+        if (!future.valid()) {
+            // Check pending queue
+            std::lock_guard<std::mutex> lock(m_queueMutex);
+            for (auto& job : m_pendingJobs) {
+                if (job->id == jobId) {
+                    future = job->future;
+                    break;
+                }
+            }
+        }
+
+        if (!future.valid()) {
+            return std::nullopt;
+        }
+
+        if (timeoutMs == 0) {
+            return future.get();
+        } else {
+            auto status = future.wait_for(std::chrono::milliseconds(timeoutMs));
+            if (status == std::future_status::ready) {
+                return future.get();
+            }
+            return std::nullopt;
+        }
+    }
+
+    void AsyncPatternScanner::WaitForAllJobs() {
+        while (true) {
+            size_t pending, running;
+            {
+                std::lock_guard<std::mutex> lock(m_queueMutex);
+                pending = m_pendingJobs.size();
+            }
+            running = m_runningCount.load();
+
+            if (pending == 0 && running == 0) {
+                break;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    std::vector<AsyncScanResult> AsyncPatternScanner::GetCompletedResults() const {
+        std::vector<AsyncScanResult> results;
+        std::lock_guard<std::mutex> lock(m_resultsMutex);
+        
+        for (const auto& [id, result] : m_results) {
+            if (result.IsComplete()) {
+                results.push_back(result);
+            }
+        }
+
+        return results;
+    }
+
+    void AsyncPatternScanner::ClearCompletedResults() {
+        std::lock_guard<std::mutex> lock(m_resultsMutex);
+        
+        for (auto it = m_results.begin(); it != m_results.end(); ) {
+            if (it->second.IsComplete()) {
+                it = m_results.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
+
+    size_t AsyncPatternScanner::GetPendingCount() const {
+        std::lock_guard<std::mutex> lock(m_queueMutex);
+        return m_pendingJobs.size();
+    }
+
+    size_t AsyncPatternScanner::GetRunningCount() const {
+        return m_runningCount.load();
+    }
+
+    void AsyncPatternScanner::ClearCache() {
+        std::lock_guard<std::mutex> lock(m_cacheMutex);
+        m_cache.clear();
+    }
+
+    std::optional<PatternScanner::ScanResult> AsyncPatternScanner::GetCachedResult(const std::string& pattern) const {
+        std::lock_guard<std::mutex> lock(m_cacheMutex);
+        auto it = m_cache.find(pattern);
+        if (it != m_cache.end()) {
+            return it->second;
+        }
+        return std::nullopt;
     }
 
 } // namespace SapphireHook
