@@ -21,6 +21,21 @@ void PacketDecoding::RegisterGenericPackets() {
     REGISTER_GENERIC_PACKET(1, false, 0x0145, "Resting");
     REGISTER_GENERIC_PACKET(1, false, 0x0149, "FreeCompany");
     REGISTER_GENERIC_PACKET(1, false, 0x014A, "RecastGroup");
+    
+    // Quest Tracker UI packets (S→C)
+    REGISTER_GENERIC_PACKET(1, false, 0x0150, "SetQuestUIFlag");
+    REGISTER_GENERIC_PACKET(1, false, 0x0151, "QuestTrackerData");
+    REGISTER_GENERIC_PACKET(1, false, 0x0152, "QuestTrackerEntry");
+    REGISTER_GENERIC_PACKET(1, false, 0x0153, "QuestTracker40");
+    REGISTER_GENERIC_PACKET(1, false, 0x0154, "QuestTracker60");
+    REGISTER_GENERIC_PACKET(1, false, 0x0155, "QuestTracker60Entry");
+    REGISTER_GENERIC_PACKET(1, false, 0x0156, "QuestTracker80");
+    REGISTER_GENERIC_PACKET(1, false, 0x0157, "QuestTrackerBig");
+    REGISTER_GENERIC_PACKET(1, false, 0x0158, "QuestTrackerBigEntry");
+    REGISTER_GENERIC_PACKET(1, false, 0x0159, "QuestUIState");
+    REGISTER_GENERIC_PACKET(1, false, 0x015A, "QuestFlags");
+    REGISTER_GENERIC_PACKET(1, false, 0x015B, "QuestComplete");
+    
     REGISTER_GENERIC_PACKET(1, false, 0x0191, "Delete");
     REGISTER_GENERIC_PACKET(1, false, 0x019D, "CreateObject");
     REGISTER_GENERIC_PACKET(1, false, 0x019E, "DeleteObject");
@@ -39,6 +54,7 @@ void PacketDecoding::RegisterGenericPackets() {
     REGISTER_GENERIC_PACKET(1, false, 0x02E4, "UpdateContent");
     REGISTER_GENERIC_PACKET(1, false, 0x0339, "FinishContentMatchToClient");
     REGISTER_GENERIC_PACKET(1, true, 0x01F9, "FindContent");
+    REGISTER_GENERIC_PACKET(1, true, 0x01FA, "FindContentAsRoulette");
     REGISTER_GENERIC_PACKET(1, true, 0x01FB, "AcceptContent");
     REGISTER_GENERIC_PACKET(1, true, 0x01FC, "CancelFindContent");
     REGISTER_GENERIC_PACKET(1, true, 0x01FD, "Find5Contents");

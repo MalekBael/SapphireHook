@@ -3506,4 +3506,16 @@ void PacketDecoding::RegisterZonePackets() {
     r.RegisterDecoder(1, false, 0x0292, MakeGenericDecoder<ServerZone::FFXIVIpcCFNotifyEnterReady>());
     r.RegisterDecoder(1, false, 0x0293, MakeGenericDecoder<ServerZone::FFXIVIpcCFNotifyMemberUpdate>());
     r.RegisterDecoder(1, false, 0x0294, MakeGenericDecoder<ServerZone::FFXIVIpcCFNotifyStatus>());
+
+    // Group 13: Miscellaneous missing decoders
+    r.RegisterDecoder(1, false, 0x0141, MakeGenericDecoder<ServerZone::FFXIVIpcActionIntegrity>());
+    r.RegisterDecoder(1, false, 0x028D, MakeGenericDecoder<ServerZone::FFXIVIpcEorzeaTimeOffset>());
+    r.RegisterDecoder(1, false, 0x00CD, MakeGenericDecoder<ServerZone::FFXIVIpcGetCommonlistDetailResult>());
+    r.RegisterDecoder(1, false, 0x0105, MakeGenericDecoder<ServerZone::FFXIVIpcGetItemSearchListResult>());
+    r.RegisterDecoder(1, false, 0x0109, MakeGenericDecoder<ServerZone::FFXIVIpcGetItemHistoryResult>());
+    r.RegisterDecoder(1, false, 0x0115, MakeGenericDecoder<ServerZone::FFXIVIpcGetFcActivityListResult>());
+    r.RegisterDecoder(1, false, 0x01AA, MakeGenericDecoder<ServerZone::FFXIVIpcRetainerList>());
+    r.RegisterDecoder(1, false, 0x01AB, MakeGenericDecoder<ServerZone::FFXIVIpcRetainerData>());
+    r.RegisterDecoder(1, false, 0x01AC, MakeGenericDecoder<ServerZone::FFXIVIpcMarketPriceHeader>());
+    r.RegisterDecoder(1, false, 0x01AD, MakeGenericDecoder<ServerZone::FFXIVIpcMarketPrice>());
 }

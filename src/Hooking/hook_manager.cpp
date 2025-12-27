@@ -18,6 +18,7 @@
 #include <mutex>
 #include "../Core/PacketInjector.h"
 #include "../Network/OpcodeNames.h"
+#include "../Monitor/NetworkMonitor.h"
 #include <cstdlib>
 #include <atomic>
 
@@ -70,6 +71,9 @@ namespace SapphireHook {
     DispatcherFn originalDispatcher = nullptr;
     static std::atomic<uint64_t> g_totalCallCount{ 0 };
     static std::atomic<uint64_t> g_totalExecMicros{ 0 };
+    
+    // Cached IPC handler thisPtr for packet injection
+    static std::atomic<void*> s_cachedIpcThisPtr{ nullptr };
 
     bool ValidateIPCHandler(uintptr_t address);
     bool FindIPCByOpcodeReferences(uintptr_t moduleBase, size_t moduleSize);
@@ -308,8 +312,8 @@ namespace SapphireHook {
         }
     }
 
-    extern "C" __declspec(noinline) void __fastcall CallOriginalIPC_NoExcept(void* thisPtr, uint16_t opcode, void* data) {
-        __try { originalHandleIPC(thisPtr, opcode, data); }
+    extern "C" __declspec(noinline) void __fastcall CallOriginalIPC_NoExcept(void* thisPtr, uint32_t actorId, void* packetData) {
+        __try { originalHandleIPC(thisPtr, actorId, packetData); }
         __except (EXCEPTION_EXECUTE_HANDLER) {   }
     }
 
@@ -325,13 +329,34 @@ namespace SapphireHook {
         }
     }
 
-    void __fastcall HookedHandleIPC(void* thisPtr, uint16_t opcode, void* data) {
+    // SEH-protected opcode extraction from packet data
+    extern "C" __declspec(noinline) bool ReadPacketOpcode_NoExcept(void* packetData, uint16_t* outOpcode) {
+        __try {
+            *outOpcode = *reinterpret_cast<uint16_t*>(reinterpret_cast<uintptr_t>(packetData) + 2);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            *outOpcode = 0;
+            return false;
+        }
+    }
+
+    void __fastcall HookedHandleIPC(void* thisPtr, uint32_t actorId, void* packetData) {
+        // Cache thisPtr for later packet injection
+        s_cachedIpcThisPtr.store(thisPtr, std::memory_order_relaxed);
+        
+        // Extract opcode from packet data at offset +2 (FFXIV 3.35 format)
+        uint16_t opcode = 0;
+        if (!ReadPacketOpcode_NoExcept(packetData, &opcode)) {
+            LogWarning("Failed to read opcode from packet data");
+        }
+        
         void* retAddr = _ReturnAddress();
         const char* opcodeName = GetOpcodeName(opcode);
 
         std::ostringstream ctx;
-        ctx << "IPC[" << opcodeName << "](0x" << std::hex << opcode << ") from 0x"
-            << reinterpret_cast<uintptr_t>(retAddr);
+        ctx << "IPC[" << opcodeName << "](0x" << std::hex << opcode << ") actor=0x"
+            << actorId << " from 0x" << reinterpret_cast<uintptr_t>(retAddr);
         LogInfo(ctx.str());
 
         try {
@@ -346,7 +371,7 @@ namespace SapphireHook {
             LogWarning(std::string("SECURITY: Kick/Ban opcode detected: ") + opcodeName);
 
         const auto start = std::chrono::high_resolution_clock::now();
-        CallOriginalIPC_NoExcept(thisPtr, opcode, data);
+        CallOriginalIPC_NoExcept(thisPtr, actorId, packetData);
         const auto end = std::chrono::high_resolution_clock::now();
         auto dur = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
@@ -394,7 +419,13 @@ namespace SapphireHook {
         const auto scanStart = std::chrono::high_resolution_clock::now();
         const auto maxScanTime = std::chrono::seconds(30);
 
+        // IPC handler patterns for FFXIV 3.35 64-bit
+        // sub_140DD9430: void __fastcall HandleIPC(__int64 a1, uint a2, __int64 packetData)
+        // Opcode read: movzx edx, word [r8 + 2] -> switch(*(_WORD*)(a3+2))
         const char* patterns[] = {
+            // 3.35 64-bit: sub_140DD9430 - prologue + movzx opcode read
+            "48 89 5C 24 08 57 48 83 EC 60 8B FA 41 0F B7 50 02",
+            // Legacy pattern (kept for reference)
             "40 53 48 83 EC ? 0F B7 DA 48 8B F9 66 85 D2",
         };
         const int patternCount = static_cast<int>(sizeof(patterns) / sizeof(patterns[0]));
@@ -805,6 +836,83 @@ namespace SapphireHook {
     std::chrono::milliseconds HookManager::GetTotalExecutionTime() {
         uint64_t micros = g_totalExecMicros.load(std::memory_order_relaxed);
         return std::chrono::milliseconds(micros / 1000);
+    }
+
+    // ============================================================================
+    // Server→Client Packet Injection
+    // ============================================================================
+    
+    // Separate function for SEH - cannot have objects with destructors
+    // FFXIV 3.35 format: handler(thisPtr, actorId, packetData)
+    //   packetData layout: [0-1 segmentType][2-3 opcode][4-15 header][16+ payload]
+    extern "C" __declspec(noinline) bool InjectServerPacket_SEH(
+        HandleIPC_t handler, void* thisPtr, uint32_t actorId, void* packetData) {
+        __try {
+            handler(thisPtr, actorId, packetData);
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+    
+    bool InjectServerPacket(uint16_t opcode, const void* payload, size_t payloadSize) {
+        // Get cached thisPtr from previous IPC calls
+        void* cachedThis = s_cachedIpcThisPtr.load(std::memory_order_relaxed);
+        if (!cachedThis) {
+            LogError("[InjectServerPacket] No cached IPC thisPtr - wait for game to receive a packet first");
+            return false;
+        }
+        
+        if (!originalHandleIPC) {
+            LogError("[InjectServerPacket] IPC handler not hooked");
+            return false;
+        }
+        
+        if (!payload || payloadSize == 0) {
+            LogError("[InjectServerPacket] Invalid payload");
+            return false;
+        }
+        
+        // Build packet data in FFXIV 3.35 format:
+        // [0-1]  segment type (0x0003 = IPC)
+        // [2-3]  opcode
+        // [4-15] header/padding (12 bytes)
+        // [16+]  actual payload
+        constexpr size_t headerSize = 16;
+        std::vector<uint8_t> buffer(headerSize + payloadSize, 0);
+        
+        // Segment type
+        *reinterpret_cast<uint16_t*>(&buffer[0]) = 0x0003;  // IPC segment
+        // Opcode
+        *reinterpret_cast<uint16_t*>(&buffer[2]) = opcode;
+        // Copy payload at offset 16
+        std::memcpy(&buffer[headerSize], payload, payloadSize);
+        
+        std::ostringstream oss;
+        oss << "[InjectServerPacket] Injecting opcode 0x" << std::hex << opcode 
+            << " with " << std::dec << payloadSize << " bytes payload";
+        LogInfo(oss.str());
+        
+        // Use actorId = 0 for self/local player context
+        bool result = InjectServerPacket_SEH(originalHandleIPC, cachedThis, 0, buffer.data());
+        
+        if (result) {
+            LogInfo("[InjectServerPacket] Injection successful");
+        } else {
+            LogError("[InjectServerPacket] Exception during injection");
+        }
+        
+        return result;
+    }
+    
+    bool IsIPCHandlerReady() {
+        return s_cachedIpcThisPtr.load(std::memory_order_relaxed) != nullptr 
+            && originalHandleIPC != nullptr;
+    }
+    
+    void* GetCachedIPCThisPtr() {
+        return s_cachedIpcThisPtr.load(std::memory_order_relaxed);
     }
 
 }   

@@ -175,6 +175,7 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="src\Modules\ZoneLayoutViewerModule.h" />
     <ClInclude Include="src\Modules\WorldOverlayModule.h" />
     <ClInclude Include="src\Modules\SignatureScannerModule.h" />
+    <ClInclude Include="src\Modules\PacketSenderModule.h" />
     <ClInclude Include="src\Tools\CollisionMeshLoader.h" />
     <ClInclude Include="src\Tools\NavMeshLoader.h" />
     <ClInclude Include="src\UI\imgui_overlay.h" />
@@ -256,6 +257,7 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClCompile Include="src\Modules\ZoneLayoutViewerModule.cpp" />
     <ClCompile Include="src\Modules\WorldOverlayModule.cpp" />
     <ClCompile Include="src\Modules\SignatureScannerModule.cpp" />
+    <ClCompile Include="src\Modules\PacketSenderModule.cpp" />
     <ClCompile Include="src\Tools\CollisionMeshLoader.cpp" />
     <ClCompile Include="src\Tools\NavMeshLoader.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />

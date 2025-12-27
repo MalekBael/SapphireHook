@@ -1085,4 +1085,202 @@ bool CommandInterface::ProcessCommand(const std::string& command)
 	return SendDebugCommand(command.c_str());
 }
 
+// ============================================================================
+// Generic IPC Packet Builder & Sender
+// ============================================================================
+
+bool CommandInterface::SendIpcPacketRaw(uint16_t opcode, const void* payloadData, size_t payloadSize,
+	uint16_t connectionType, uint32_t targetActorId)
+{
+	using SapphireHook::Logger;
+
+	Logger::Instance().InformationF("[CommandInterface] SendIpcPacketRaw: opcode=0x%04X, payloadSize=%zu, connType=%u, target=0x%X",
+		opcode, payloadSize, connectionType, targetActorId);
+
+	// Build the complete packet structure
+	const uint32_t ipcHeaderSize = sizeof(SapphireHook::FFXIVARR_IPC_HEADER);
+	const uint32_t dataSize = static_cast<uint32_t>(ipcHeaderSize + payloadSize);
+	const uint32_t segmentSize = sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER) + dataSize;
+	const uint32_t totalSize = sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + segmentSize;
+
+	std::vector<uint8_t> buffer(totalSize, 0);
+
+	// Packet header
+	auto* pktHdr = reinterpret_cast<SapphireHook::FFXIVARR_PACKET_HEADER*>(buffer.data());
+	pktHdr->timestamp = GetTickCount64();
+	pktHdr->size = totalSize;
+	pktHdr->connectionType = connectionType;
+	pktHdr->count = 1;
+	pktHdr->isCompressed = 0;
+
+	// Segment header
+	auto* segHdr = reinterpret_cast<SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER*>(buffer.data() + sizeof(SapphireHook::FFXIVARR_PACKET_HEADER));
+	segHdr->size = segmentSize;
+	segHdr->source_actor = GetLocalEntityId();
+	segHdr->target_actor = targetActorId != 0 ? targetActorId : segHdr->source_actor;
+	segHdr->type = 3;  // IPC segment
+
+	// IPC header
+	auto* ipcHdr = reinterpret_cast<SapphireHook::FFXIVARR_IPC_HEADER*>(buffer.data() + sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) + sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER));
+	ipcHdr->reserved = 0x14;
+	ipcHdr->type = opcode;
+	ipcHdr->timestamp = static_cast<uint32_t>(GetTickCount64());
+	ipcHdr->serverId = 0;
+
+	// Copy payload
+	if (payloadData && payloadSize > 0) {
+		uint8_t* payloadDest = buffer.data() + sizeof(SapphireHook::FFXIVARR_PACKET_HEADER) 
+			+ sizeof(SapphireHook::FFXIVARR_PACKET_SEGMENT_HEADER) 
+			+ sizeof(SapphireHook::FFXIVARR_IPC_HEADER);
+		std::memcpy(payloadDest, payloadData, payloadSize);
+	}
+
+	return SendRawPacket(buffer);
+}
+
+// Template implementation for typed packets
+template<typename T>
+bool CommandInterface::SendIpcPacket(uint16_t opcode, const T& payload, uint16_t connectionType, uint32_t targetActorId)
+{
+	return SendIpcPacketRaw(opcode, &payload, sizeof(T), connectionType, targetActorId);
+}
+
+// ============================================================================
+// ContentFinder / Duty Finder Packets
+// ============================================================================
+
+bool CommandInterface::QueueForDuties(const uint16_t* territoryTypes, uint8_t count, uint32_t flags)
+{
+	using SapphireHook::Logger;
+	(void)flags; // flags not used in Find5Contents - use FindContent (0x01FA) for single duty with flags
+
+	if (!territoryTypes || count == 0 || count > 5) {
+		Logger::Instance().Warning("[CommandInterface] QueueForDuties: Invalid parameters");
+		return false;
+	}
+
+	// Find5Contents packet structure (0x01FD) - matches Sapphire's FFXIVIpcFind5Contents
+	// Note: This packet uses TerritoryTypes, NOT ContentFinderCondition IDs!
+	// The server looks up InstanceContent by matching the TerritoryType field.
+	struct Find5ContentsPayload {
+		uint8_t acceptHalfway;      // Allow joining in-progress duties
+		uint8_t language;           // Language preference (0 = any, 1 = JP, 2 = EN, 3 = DE, 4 = FR)
+		uint16_t territoryTypes[5]; // Territory type IDs (e.g., Sastasha = 1036)
+	};
+
+	Find5ContentsPayload payload = {};
+	payload.acceptHalfway = 0;  // Don't accept in-progress by default
+	payload.language = 0;       // Any language
+	for (uint8_t i = 0; i < count && i < 5; ++i) {
+		payload.territoryTypes[i] = territoryTypes[i];
+	}
+
+	Logger::Instance().InformationF("[CommandInterface] QueueForDuties (Find5Contents): territories=[%u,%u,%u,%u,%u]",
+		count > 0 ? territoryTypes[0] : 0,
+		count > 1 ? territoryTypes[1] : 0,
+		count > 2 ? territoryTypes[2] : 0,
+		count > 3 ? territoryTypes[3] : 0,
+		count > 4 ? territoryTypes[4] : 0);
+
+	return SendIpcPacketRaw(0x01FD, &payload, sizeof(payload));
+}
+
+bool CommandInterface::AcceptDutyPop(uint32_t contentId)
+{
+	using SapphireHook::Logger;
+
+	// AcceptContent packet structure (0x01FB)
+	struct AcceptContentPayload {
+		uint32_t contentId;
+		uint8_t accepted;  // 1 = accept, 0 = decline
+		uint8_t padding[3];
+	};
+
+	AcceptContentPayload payload = {};
+	payload.contentId = contentId;
+	payload.accepted = 1;
+
+	Logger::Instance().InformationF("[CommandInterface] AcceptDutyPop: contentId=%u", contentId);
+
+	return SendIpcPacketRaw(0x01FB, &payload, sizeof(payload));
+}
+
+bool CommandInterface::CancelDutyQueue()
+{
+	using SapphireHook::Logger;
+
+	// CancelFindContent packet structure (0x01FC)
+	struct CancelFindContentPayload {
+		uint32_t reserved;
+	};
+
+	CancelFindContentPayload payload = {};
+
+	Logger::Instance().Information("[CommandInterface] CancelDutyQueue");
+
+	return SendIpcPacketRaw(0x01FC, &payload, sizeof(payload));
+}
+
+// ============================================================================
+// Quest / Event Packets
+// ============================================================================
+
+bool CommandInterface::SendEventTalk(uint32_t eventId, uint32_t actorId)
+{
+	using SapphireHook::Logger;
+
+	// EventHandlerTalk packet structure (0x01C2)
+	// Based on ClientZoneDef.h
+	struct EventHandlerTalkPayload {
+		uint32_t actorId;
+		uint32_t eventId;
+		uint32_t unknown1;
+		uint32_t unknown2;
+	};
+
+	EventHandlerTalkPayload payload = {};
+	payload.actorId = actorId;
+	payload.eventId = eventId;
+
+	Logger::Instance().InformationF("[CommandInterface] SendEventTalk: eventId=0x%X, actorId=0x%X", eventId, actorId);
+
+	return SendIpcPacketRaw(0x01C2, &payload, sizeof(payload));
+}
+
+// Explicit template instantiations for common packet types
+// Add more as needed for the packet types you want to send
+// Note: Templates are defined in the header, instantiated here for common types
+template bool CommandInterface::SendIpcPacket<uint32_t>(uint16_t, const uint32_t&, uint16_t, uint32_t);
+template bool CommandInterface::SendIpcPacket<uint64_t>(uint16_t, const uint64_t&, uint16_t, uint32_t);
+
+// Public accessor for local entity ID (wraps anonymous namespace function)
+uint32_t CommandInterface::GetLocalEntityId()
+{
+	// Call the internal anonymous namespace version
+	using SapphireHook::Logger;
+	uint32_t learned = SapphireHook::GetLearnedLocalActorId();
+	if (learned != 0 && learned != 0xFFFFFFFF)
+	{
+		return learned;
+	}
+	static uint32_t s_id = 0x200001;
+	static bool s_inited = false;
+	if (!s_inited)
+	{
+		s_inited = true;
+		if (const char* v = std::getenv("SAPPHIRE_ENTITYID"))
+		{
+			if (std::strlen(v) > 2 && (v[0] == '0') && (v[1] == 'x' || v[1] == 'X'))
+			{
+				s_id = static_cast<uint32_t>(std::strtoul(v + 2, nullptr, 16));
+			}
+			else
+			{
+				s_id = static_cast<uint32_t>(std::strtoul(v, nullptr, 10));
+			}
+		}
+	}
+	return s_id;
+}
+
 // (No changes below this point in existing file)

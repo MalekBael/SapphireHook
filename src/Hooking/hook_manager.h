@@ -176,14 +176,48 @@ namespace SapphireHook {
     bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize);
 
     // IPC Hook type definitions
-    typedef void(__fastcall* HandleIPC_t)(void* thisPtr, uint16_t opcode, void* data);
+    // FFXIV 3.35 64-bit: sub_140DD9430(thisPtr, actorId, packetData)
+    //   - a1 (rcx): thisPtr/handler context
+    //   - a2 (edx): actorId/index (unsigned int)
+    //   - a3 (r8):  packet data pointer, opcode at *(uint16_t*)(a3+2)
+    typedef void(__fastcall* HandleIPC_t)(void* thisPtr, uint32_t actorId, void* packetData);
 
     // Global variables declarations
     extern float g_SpeedMultiplier;
     extern HandleIPC_t originalHandleIPC;
 
     // Hook function declarations
-    void __fastcall HookedHandleIPC(void* thisPtr, uint16_t opcode, void* data);
+    void __fastcall HookedHandleIPC(void* thisPtr, uint32_t actorId, void* packetData);
+    
+    // ============================================================================
+    // Server→Client Packet Injection
+    // ============================================================================
+    
+    /**
+     * @brief Inject a server-to-client packet directly into the game's IPC handler
+     * @param opcode The IPC opcode to inject
+     * @param payload Pointer to the packet payload data
+     * @param payloadSize Size of the payload in bytes
+     * @return true if injection succeeded, false otherwise
+     * 
+     * This calls the game's actual IPC handler as if the server sent the packet.
+     * The game client will process it normally, triggering UI updates, state changes, etc.
+     * 
+     * IMPORTANT: The IPC handler must have been called at least once (game received any packet)
+     * before this function can be used, as it needs the cached 'thisPtr'.
+     */
+    bool InjectServerPacket(uint16_t opcode, const void* payload, size_t payloadSize);
+    
+    /**
+     * @brief Check if the IPC handler is ready for packet injection
+     * @return true if InjectServerPacket() can be called
+     */
+    bool IsIPCHandlerReady();
+    
+    /**
+     * @brief Get the cached IPC handler thisPtr (for debugging)
+     */
+    void* GetCachedIPCThisPtr();
 
 } // namespace SapphireHook
 

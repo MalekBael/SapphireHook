@@ -51,6 +51,8 @@
 #include "../Modules/WorldOverlayModule.h"
 // NEW: Signature Scanner module for async pattern scanning
 #include "../Modules/SignatureScannerModule.h"
+// NEW: Packet Sender module for testing IPC packets
+#include "../Modules/PacketSenderModule.h"
 // NEW: Camera extractor for player position display
 #include "../Tools/GameCameraExtractor.h"
 // Territory detection for zone display
@@ -392,6 +394,7 @@ void UIManager::RegisterDefaultModules()
 	TryRegisterModule<SapphireHook::ZoneLayoutViewerModule>("zone_layout_viewer", "Zone Layout Viewer", successCount);
 	TryRegisterModule<SapphireHook::WorldOverlayModule>("world_overlay", "World Overlay", successCount);
 	TryRegisterModule<SapphireHook::SignatureScannerModule>("signature_scanner", "Signature Scanner", successCount);
+	TryRegisterModule<SapphireHook::PacketSenderModule>("packet_sender", "Packet Sender", successCount);
 
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
 	LogInfo("Successfully registered: " + std::to_string(successCount) + " modules");
@@ -773,6 +776,26 @@ void UIManager::RenderMainMenu()
 				else
 				{
 					ImGui::MenuItem("Signature Scanner", nullptr, false, false);
+				}
+			}
+
+			// Packet Sender (IPC packet testing)
+			{
+				static UIModule* s_packetSender = nullptr;
+				if (!s_packetSender)
+					s_packetSender = GetModule("packet_sender");
+
+				if (s_packetSender)
+				{
+					bool open = s_packetSender->IsWindowOpen();
+					if (ImGui::MenuItem(s_packetSender->GetDisplayName(), nullptr, open))
+					{
+						s_packetSender->SetWindowOpen(!open);
+					}
+				}
+				else
+				{
+					ImGui::MenuItem("Packet Sender", nullptr, false, false);
 				}
 			}
 

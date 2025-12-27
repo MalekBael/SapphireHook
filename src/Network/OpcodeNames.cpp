@@ -627,6 +627,8 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x1103, "MarketBoardRequestItemListings" },
         { 0x1113, "ReqExamineFcInfo" },
 
+        { 0x01F9, "FindContent" },           // Single duty queue (with flags)
+        { 0x01FA, "FindContentAsRoulette" }, // Roulette queue
         { 0x01FB, "AcceptContent" },
         { 0x01FC, "CancelFindContent" },
         { 0x01FD, "Find5Contents" },

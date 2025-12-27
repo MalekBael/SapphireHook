@@ -105,6 +105,23 @@ namespace {
     constexpr size_t kOpcodeOffset = 0x30;
     constexpr uint16_t kChatIpcOpcode = 0x0067;
     constexpr std::array<uint8_t, 4> kFfxivMagic = { 0x52, 0x52, 0xA0, 0x41 };
+
+    // Track all sockets we've seen from hooks for better discovery
+    static std::mutex g_trackedSocketsMutex;
+    static std::vector<SOCKET> g_trackedSockets;
+    
+    static void TrackSocket(SOCKET s) {
+        if (s == INVALID_SOCKET) return;
+        std::lock_guard<std::mutex> lock(g_trackedSocketsMutex);
+        if (std::find(g_trackedSockets.begin(), g_trackedSockets.end(), s) == g_trackedSockets.end()) {
+            g_trackedSockets.push_back(s);
+        }
+    }
+    
+    static void UntrackSocket(SOCKET s) {
+        std::lock_guard<std::mutex> lock(g_trackedSocketsMutex);
+        g_trackedSockets.erase(std::remove(g_trackedSockets.begin(), g_trackedSockets.end(), s), g_trackedSockets.end());
+    }
 }
 
 static inline bool IsFfxivHeader(const uint8_t* b, int len) {
@@ -190,6 +207,9 @@ int WSAAPI Hook_recv(SOCKET s, char* buf, int len, int flags) {
 static decltype(&::closesocket) Real_closesocket = ::closesocket;
 static int WSAAPI Hook_closesocket(SOCKET s)
 {
+    // Untrack the socket being closed
+    UntrackSocket(s);
+    
     if (s == g_zoneSocket.load()) {
         g_zoneSocket.store(INVALID_SOCKET);
         if (PacketLogVerbose()) LogInfo("[PacketInjector] Zone socket closed -> cleared");
@@ -200,19 +220,27 @@ static int WSAAPI Hook_closesocket(SOCKET s)
     }
     if (s == g_lastZoneCandidate.load()) g_lastZoneCandidate.store(INVALID_SOCKET);
     if (s == g_lastChatCandidate.load()) g_lastChatCandidate.store(INVALID_SOCKET);
+    
+    // Also clear from PacketInjector static sockets
+    if (s == static_cast<SOCKET>(PacketInjector::s_zoneSocket)) {
+        PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(INVALID_SOCKET);
+        if (PacketLogVerbose()) LogInfo("[PacketInjector] s_zoneSocket closed -> cleared");
+    }
+    if (s == static_cast<SOCKET>(PacketInjector::s_chatSocket)) {
+        PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(INVALID_SOCKET);
+        if (PacketLogVerbose()) LogInfo("[PacketInjector] s_chatSocket closed -> cleared");
+    }
+    
     return Real_closesocket(s);
 }
 
 static SOCKET PickSocketForPacket(const uint8_t* buf, size_t len)
 {
-	if (buf && len >= static_cast<size_t>(kFfxivHeaderSize) && IsFfxivHeader(buf, static_cast<int>(len)) && IsChatOpcode(ReadOpcodeLE(buf))) {
-        SOCKET s = g_chatSocket.load();
-        return (s != INVALID_SOCKET) ? s : g_lastChatCandidate.load();
-    }
-    else {
-        SOCKET s = g_zoneSocket.load();
-        return (s != INVALID_SOCKET) ? s : g_lastZoneCandidate.load();
-    }
+    // FIXED: All game packets (including ChatHandler 0x0067) go to Zone connection
+    // The "chat socket" is only for lobby/world chat server, not for in-game commands
+    // ChatHandler 0x0067 is a ZONE opcode despite its name - it goes to the game server
+    SOCKET s = g_zoneSocket.load();
+    return (s != INVALID_SOCKET) ? s : g_lastZoneCandidate.load();
 }
 
 static bool SendHardenedInternal(const void* data, size_t bytes)
@@ -274,8 +302,9 @@ static bool IsReadable(const void* ptr, size_t minLen) noexcept
 }
 
 namespace SapphireHook {
-    void __fastcall HookedHandleIPC(void* thisPtr, uint16_t opcode, void* data);
-    extern void(__fastcall* originalHandleIPC)(void*, uint16_t, void*);
+    // FFXIV 3.35 signature: handler(thisPtr, actorId, packetData)
+    void __fastcall HookedHandleIPC(void* thisPtr, uint32_t actorId, void* packetData);
+    extern void(__fastcall* originalHandleIPC)(void*, uint32_t, void*);
 }
 
 using namespace SapphireHook;
@@ -372,9 +401,36 @@ namespace {
     static std::vector<SOCKET> FindActiveSockets()
     {
         std::vector<SOCKET> activeSockets;
-        std::vector<SOCKET> candidateRanges = { 7000, 7050, 7100, 6500, 6600, 6700 };
+        
+        // First, check our tracked sockets (most reliable)
+        {
+            std::lock_guard<std::mutex> lock(g_trackedSocketsMutex);
+            for (SOCKET s : g_trackedSockets) {
+                if (s == INVALID_SOCKET) continue;
+                int optval = 0; int optlen = sizeof(optval);
+                if (getsockopt(s, SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&optval), &optlen) == 0) {
+                    if (optval == SOCK_STREAM) {
+                        activeSockets.push_back(s);
+                        if (PacketLogVerbose()) {
+                            LogInfo("[PacketInjector] Found active tracked socket: " + std::to_string(static_cast<unsigned long long>(s)));
+                        }
+                    }
+                }
+            }
+        }
+        
+        // If we found tracked sockets, prefer those
+        if (!activeSockets.empty()) {
+            if (PacketLogVerbose()) {
+                LogInfo("[PacketInjector] Found " + std::to_string(activeSockets.size()) + " active tracked sockets");
+            }
+            return activeSockets;
+        }
+
+        // Fallback: scan wider ranges including typical FFXIV socket values
+        std::vector<SOCKET> candidateRanges = { 7000, 7500, 8000, 8500, 9000, 9500, 10000, 6500, 6000 };
         for (SOCKET baseSocket : candidateRanges) {
-            for (int offset = -100; offset <= 100; offset++) {
+            for (int offset = -200; offset <= 200; offset++) {
                 SOCKET testSocket = baseSocket + offset;
                 if (testSocket == INVALID_SOCKET || testSocket <= 0) continue;
                 int optval = 0; int optlen = sizeof(optval);
@@ -484,6 +540,9 @@ static int __stdcall WSASend_Detour(SOCKET s,
     LPWSAOVERLAPPED lpOverlapped,
     LPWSAOVERLAPPED_COMPLETION_ROUTINE lpCompletionRoutine)
 {
+    // Track this socket for discovery fallback
+    TrackSocket(s);
+    
     static bool s_logged = false;
     if (!s_logged && IsEnvEnabled("SAPPHIRE_AUTOFIND_IPC")) {
         if (PacketLogVerbose()) LogInfo("[AutoFind] Learning enabled (SAPPHIRE_AUTOFIND_IPC=1). Collecting WSASend call stacks...");
@@ -496,10 +555,9 @@ static int __stdcall WSASend_Detour(SOCKET s,
             const uint8_t* buf = reinterpret_cast<const uint8_t*>(lpBuffers[i].buf);
             const size_t len = lpBuffers[i].len;
             if (!buf || len == 0) continue;
+            // Always enqueue to NetworkMonitor so packets appear in UI
             if (::IsReadable(buf, 1)) {
-                if (PacketLogVerbose()) {
-                    SafeHookLogger::Instance().TryEnqueueFromHook(buf, len, true, (uint64_t)s);
-                }
+                SafeHookLogger::Instance().TryEnqueueFromHook(buf, len, true, (uint64_t)s);
             }
             if (len < 0x40 || !::IsReadable(buf, 0x40)) continue;
             uint16_t connType = 0;
@@ -552,59 +610,64 @@ static int __stdcall WSASend_Detour(SOCKET s,
 
 static int __stdcall send_Detour(SOCKET s, const char* buf, int len, int flags)
 {
+    // Track this socket for discovery fallback
+    TrackSocket(s);
+    
     if (PacketLogVerbose()) {
         LogInfo("[PacketInjector] send() called on socket " + std::to_string(static_cast<uint64_t>(s)) +
             ", len=" + std::to_string(len));
     }
+    // Always enqueue to NetworkMonitor (regardless of log level) so packets appear in UI
     if (buf && len > 0 && ::IsReadable(buf, 1)) {
-        if (PacketLogVerbose()) {
-            SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(len), true, (uint64_t)s);
-        }
+        SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(len), true, (uint64_t)s);
     }
-    if (buf && len >= 0x50 && ::IsReadable(buf, 0x50)) {
+    
+    // CONNECTION TYPE BASED SOCKET LEARNING (FIXED)
+    // Parse the FFXIV bundle header to determine connection type (Zone=1, Chat=2)
+    // Connection type is at offset 0x1C in the bundle header
+    if (buf && len >= 0x28 && ::IsReadable(buf, 0x28)) {
         const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
-
-        uint32_t segType32 = 0; uint16_t reserved16 = 0, ipcType = 0;
-        (void)ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x34, segType32);
-        (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x38, reserved16);
-        (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x3A, ipcType);
-        if (segType32 == 3 && reserved16 == 0x0014 && ipcType == 0x0067) {
-            uint32_t originEntityId = 0;
-            if (ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x4C, originEntityId)) {
-                if (originEntityId != 0 && originEntityId != 0xFFFFFFFF) {
-                    g_localActorId.store(originEntityId, std::memory_order_relaxed);
-                    if (PacketLogVerbose()) {
-                        LogInfo("[PacketInjector] Learned LocalActorId from ChatHandler: 0x" +
-                            std::to_string(originEntityId) + " (" + std::to_string(originEntityId) + ")");
-                    }
-                }
-            }
-
-            uint16_t connType = 0;
-            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x1C, connType);
-            bool isChat = false;
-            const bool looksZoneIpc = PacketInjector::ClassifyPacket(p, static_cast<size_t>(len), isChat);
-
-            if (connType == 1 || looksZoneIpc) {
-                if (PacketInjector::s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET)) {
-                    PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(s);
-                    if (PacketLogSummary()) {
-                        LogInfoWithContext("Socket learned",
-                            LogContext()
-                            .Add("component", "PacketInjector")
-                            .Add("socket_type", "zone")
-                            .Add("socket_id", static_cast<uintptr_t>(s))
-                            .Add("connection_type", connType));
-                    }
-                }
+        uint16_t connType = 0;
+        (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x1C, connType);  // FIXED: offset was 0x12, should be 0x1C
+        
+        if (connType == 1) {
+            // Zone connection
+            if (PacketInjector::s_zoneSocket != static_cast<std::uintptr_t>(s)) {
+                PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(s);
                 g_lastZoneSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
-            }
-            else if (connType == 2) {
-                if (PacketInjector::s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET)) {
-                    PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(s);
-                    if (PacketLogSummary()) LogInfo("[PacketInjector] Learned chat socket: " + Logger::HexFormat(static_cast<uintptr_t>(s)));
+                if (PacketLogSummary()) {
+                    LogInfo("[PacketInjector] Learned ZONE socket from connType=1: " + Logger::HexFormat(static_cast<uintptr_t>(s)));
                 }
+            }
+        }
+        else if (connType == 2) {
+            // Chat connection
+            if (PacketInjector::s_chatSocket != static_cast<std::uintptr_t>(s)) {
+                PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(s);
                 g_lastChatSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
+                if (PacketLogSummary()) {
+                    LogInfo("[PacketInjector] Learned CHAT socket from connType=2: " + Logger::HexFormat(static_cast<uintptr_t>(s)));
+                }
+            }
+        }
+        
+        // Learn LocalActorId from ChatHandler opcode 0x0067
+        if (len >= 0x50 && ::IsReadable(buf, 0x50)) {
+            uint32_t segType32 = 0; uint16_t reserved16 = 0, ipcType = 0;
+            (void)ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x34, segType32);
+            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x38, reserved16);
+            (void)ReadLE<uint16_t>(p, static_cast<size_t>(len), 0x3A, ipcType);
+            if (segType32 == 3 && reserved16 == 0x0014 && ipcType == 0x0067) {
+                uint32_t originEntityId = 0;
+                if (ReadLE<uint32_t>(p, static_cast<size_t>(len), 0x4C, originEntityId)) {
+                    if (originEntityId != 0 && originEntityId != 0xFFFFFFFF) {
+                        g_localActorId.store(originEntityId, std::memory_order_relaxed);
+                        if (PacketLogVerbose()) {
+                            LogInfo("[PacketInjector] Learned LocalActorId from ChatHandler: " +
+                                std::to_string(originEntityId));
+                        }
+                    }
+                }
             }
         }
     }
@@ -625,17 +688,46 @@ static int __stdcall send_Detour(SOCKET s, const char* buf, int len, int flags)
 
 static int __stdcall recv_Detour(SOCKET s, char* buf, int len, int flags)
 {
+    // Track this socket for discovery fallback
+    TrackSocket(s);
+    
     if (PacketLogVerbose()) {
         LogDebug("[PacketInjector] recv() called on socket " + std::to_string(static_cast<long long>(s)) +
             ", len=" + std::to_string(len));
     }
     int rc = g_realRecv ? g_realRecv(s, buf, len, flags) : SOCKET_ERROR;
     if (rc > 0) {
-        if (buf && ::IsReadable(buf, 1) && PacketLogVerbose()) {
+        // Always enqueue to NetworkMonitor so packets appear in UI
+        if (buf && ::IsReadable(buf, 1)) {
             SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(rc), false, (uint64_t)s);
         }
         g_recvOk.fetch_add(1, std::memory_order_relaxed);
         g_bytesRecv.fetch_add(static_cast<uint64_t>(rc), std::memory_order_relaxed);
+        
+        // Learn socket from incoming packets (same socket used for send/recv)
+        // Parse packet header to determine connection type
+        if (buf && rc >= 0x30 && ::IsReadable(buf, 0x30)) {
+            const uint8_t* p = reinterpret_cast<const uint8_t*>(buf);
+            uint16_t connType = 0;
+            if (ReadLE<uint16_t>(p, static_cast<size_t>(rc), 0x12, connType)) {
+                if (connType == 1) {
+                    // Zone connection
+                    if (PacketInjector::s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET)) {
+                        PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(s);
+                        if (PacketLogSummary()) LogInfo("[PacketInjector] Learned zone socket (recv): " + Logger::HexFormat(static_cast<uintptr_t>(s)));
+                    }
+                    g_lastZoneSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
+                }
+                else if (connType == 2) {
+                    // Chat connection
+                    if (PacketInjector::s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET)) {
+                        PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(s);
+                        if (PacketLogSummary()) LogInfo("[PacketInjector] Learned chat socket (recv): " + Logger::HexFormat(static_cast<uintptr_t>(s)));
+                    }
+                    g_lastChatSock.store(static_cast<std::uintptr_t>(s), std::memory_order_relaxed);
+                }
+            }
+        }
     }
     return rc;
 }
@@ -646,7 +738,8 @@ static int __stdcall sendto_Detour(SOCKET s, const char* buf, int len, int flags
         LogDebug("[PacketInjector] sendto() called on socket " + std::to_string(static_cast<long long>(s)) +
             ", len=" + std::to_string(len));
     }
-    if (buf && len > 0 && ::IsReadable(buf, 1) && PacketLogVerbose()) {
+    // Always enqueue to NetworkMonitor so packets appear in UI
+    if (buf && len > 0 && ::IsReadable(buf, 1)) {
         SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(len), true, (uint64_t)s);
     }
     if (PacketInjector::s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET)) {
@@ -663,7 +756,8 @@ static int __stdcall recvfrom_Detour(SOCKET s, char* buf, int len, int flags, so
             ", len=" + std::to_string(len));
     }
     int rc = g_realRecvFrom ? g_realRecvFrom(s, buf, len, flags, from, fromlen) : SOCKET_ERROR;
-    if (rc > 0 && buf && ::IsReadable(buf, 1) && PacketLogVerbose()) {
+    // Always enqueue to NetworkMonitor so packets appear in UI
+    if (rc > 0 && buf && ::IsReadable(buf, 1)) {
         SafeHookLogger::Instance().TryEnqueueFromHook(buf, static_cast<size_t>(rc), false, (uint64_t)s);
     }
     return rc;
@@ -681,6 +775,8 @@ static bool SendOnSocket(std::uintptr_t sockVal, const uint8_t* data, size_t len
                     if (PacketLogVerbose()) {
                         LogInfo("[PacketInjector] Injected " + std::to_string(rc) + " bytes via send() on socket " + Logger::HexFormat(static_cast<unsigned long long>(sock)));
                     }
+                    // Enqueue to NetworkMonitor so injected packets appear in UI (true = outgoing C->S)
+                    SafeHookLogger::Instance().TryEnqueueFromHook(data, len, true, static_cast<uint64_t>(sock));
                     return true;
                 }
                 int wsa = WSAGetLastError();
@@ -701,6 +797,8 @@ static bool SendOnSocket(std::uintptr_t sockVal, const uint8_t* data, size_t len
                     }
                     g_sendOk.fetch_add(1, std::memory_order_relaxed);
                     g_bytesSent.fetch_add(static_cast<uint64_t>(sent), std::memory_order_relaxed);
+                    // Enqueue to NetworkMonitor so injected packets appear in UI (true = outgoing C->S)
+                    SafeHookLogger::Instance().TryEnqueueFromHook(data, len, true, static_cast<uint64_t>(sock));
                     return true;
                 }
                 int wsa = WSAGetLastError();
@@ -712,10 +810,37 @@ static bool SendOnSocket(std::uintptr_t sockVal, const uint8_t* data, size_t len
             }
         }
         else {
+            // Socket is no longer valid - CRITICAL: reset the learned socket so we can relearn
             if (PacketLogSummary()) {
                 LogWarning("[PacketInjector] Socket " + Logger::HexFormat(static_cast<unsigned long long>(sock)) +
-                    " is no longer valid (WSAGetLastError=" + std::to_string(WSAGetLastError()) + ")");
+                    " is no longer valid (WSAGetLastError=" + std::to_string(WSAGetLastError()) + ") - resetting");
             }
+            
+            // Reset the socket that matched so we can relearn from hooks
+            if (sockVal == PacketInjector::s_zoneSocket) {
+                PacketInjector::s_zoneSocket = static_cast<std::uintptr_t>(INVALID_SOCKET);
+                // Try to get the most recent zone socket from hooks
+                auto lastZone = g_lastZoneSock.load(std::memory_order_relaxed);
+                if (lastZone != static_cast<std::uintptr_t>(INVALID_SOCKET) && lastZone != sockVal) {
+                    PacketInjector::s_zoneSocket = lastZone;
+                    if (PacketLogSummary()) {
+                        LogInfo("[PacketInjector] Using fallback zone socket from recent traffic: " + Logger::HexFormat(lastZone));
+                    }
+                }
+            }
+            if (sockVal == PacketInjector::s_chatSocket) {
+                PacketInjector::s_chatSocket = static_cast<std::uintptr_t>(INVALID_SOCKET);
+                auto lastChat = g_lastChatSock.load(std::memory_order_relaxed);
+                if (lastChat != static_cast<std::uintptr_t>(INVALID_SOCKET) && lastChat != sockVal) {
+                    PacketInjector::s_chatSocket = lastChat;
+                    if (PacketLogSummary()) {
+                        LogInfo("[PacketInjector] Using fallback chat socket from recent traffic: " + Logger::HexFormat(lastChat));
+                    }
+                }
+            }
+            
+            // Untrack this invalid socket
+            UntrackSocket(sock);
         }
     }
 
@@ -809,12 +934,27 @@ bool PacketInjector::Send(const uint8_t* data, size_t len)
     }
     if (s_zoneSocket == static_cast<std::uintptr_t>(INVALID_SOCKET)) {
         auto last = g_lastZoneSock.load(std::memory_order_relaxed);
-        if (last != static_cast<std::uintptr_t>(INVALID_SOCKET)) s_zoneSocket = last;
+        if (last != static_cast<std::uintptr_t>(INVALID_SOCKET)) {
+            s_zoneSocket = last;
+            if (PacketLogSummary()) LogInfo("[PacketInjector] Updated zone socket from g_lastZoneSock: " + Logger::HexFormat(last));
+        }
     }
     if (s_chatSocket == static_cast<std::uintptr_t>(INVALID_SOCKET)) {
         auto last = g_lastChatSock.load(std::memory_order_relaxed);
-        if (last != static_cast<std::uintptr_t>(INVALID_SOCKET)) s_chatSocket = last;
+        if (last != static_cast<std::uintptr_t>(INVALID_SOCKET)) {
+            s_chatSocket = last;
+            if (PacketLogSummary()) LogInfo("[PacketInjector] Updated chat socket from g_lastChatSock: " + Logger::HexFormat(last));
+        }
     }
+    
+    // Debug: log current socket state
+    if (PacketLogSummary()) {
+        LogInfo("[PacketInjector] Send() - zoneSocket=" + Logger::HexFormat(s_zoneSocket) + 
+                ", chatSocket=" + Logger::HexFormat(s_chatSocket) +
+                ", g_lastZone=" + Logger::HexFormat(g_lastZoneSock.load()) +
+                ", g_lastChat=" + Logger::HexFormat(g_lastChatSock.load()));
+    }
+    
     bool isChat{};
     (void)ClassifyPacket(data, len, isChat);
     const std::uintptr_t targetSock = isChat ? s_chatSocket : s_zoneSocket;
