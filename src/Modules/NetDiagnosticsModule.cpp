@@ -148,11 +148,12 @@ void NetDiagnosticsModule::RenderWindow() {
     if (!g_init) { g_ring.init(300); g_init = true; }
     sample_once();
 
-    // Initial size hint (first use)
-    ImGui::SetNextWindowSize(ImVec2(1260, 700), ImGuiCond_FirstUseEver);
+    // Initial size hint (first use) - make it wider to accommodate the packet list UI
+    ImGui::SetNextWindowSize(ImVec2(1400, 750), ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Network Monitor", &m_windowOpen)) {
-        // If auto-highlighting is enabled, ensure the right pane is wide enough; expand window if needed
-        const float leftFrac = g_enableHexRegions ? 0.45f : 0.50f; // give a bit more room to the right when enabled
+        // Favor the left panel (packet list) which has more UI elements
+        // Use 55% for left by default, or 52% if hex highlighting needs more room
+        const float leftFrac = g_enableHexRegions ? 0.52f : 0.55f;
         const float totalAvailBefore = ImGui::GetContentRegionAvail().x;
         const float rightTargetBefore = totalAvailBefore * (1.0f - leftFrac) - ImGui::GetStyle().ItemSpacing.x;
         if (g_enableHexRegions) {
@@ -168,8 +169,10 @@ void NetDiagnosticsModule::RenderWindow() {
             }
         }
 
-        // Left: packet view
-        const float leftWidth = ImGui::GetContentRegionAvail().x * leftFrac;
+        // Left: packet view - ensure minimum width for UI elements
+        const float minLeftWidth = 680.0f;  // Minimum to fit filters/buttons without clipping
+        float leftWidth = ImGui::GetContentRegionAvail().x * leftFrac;
+        leftWidth = (std::max)(leftWidth, minLeftWidth);
         ImGui::BeginChild("left", ImVec2(leftWidth, 0), true);
         SafeHookLogger::Instance().DrawImGuiEmbedded();
         ImGui::EndChild();

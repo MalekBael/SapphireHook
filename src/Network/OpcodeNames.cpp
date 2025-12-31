@@ -1,6 +1,8 @@
 #include "OpcodeNames.h"
 #include <unordered_map>
 #include <cstdint>
+#include "../Core/LibraryIntegration.h"
+#include "../Core/ActorControlEnums.h"
 
 namespace {
 
@@ -229,22 +231,22 @@ inline bool IsChatConn(uint16_t connType) {
         { 0x01DE, "ResumeEventScene128" },
         { 0x01DF, "ResumeEventScene255" },
 
-        // Event Scene system packets
-        { 0x01E0, "EventSceneInit" },          // Event scene initialization (16-byte entries)
-        { 0x01E1, "EventSceneSlot" },          // Event scene slot (5 params, slot < 0x1E)
-        { 0x01E2, "EventSceneData" },          // Event scene data (310 + 32 bytes)
-        { 0x01E3, "EventSceneFlags" },         // Event scene flags (word + 3 bools)
-        { 0x01E4, "EventScenePos" },           // Event scene position data
-        { 0x01E5, "EventSceneSlot4" },         // Event scene slot variant (4 params)
-        { 0x01E6, "EventSceneBulk200" },       // Event scene bulk data (200 bytes)
-        { 0x01E7, "EventSceneState" },         // Event scene state (word + bool)
+        // Quest/Leve system packets (confirmed via binary analysis - see OPCODE_MAPPING_2014.md)
+        { 0x01E0, "Quests" },                  // Active quest list (30 slots)
+        { 0x01E1, "Quest" },                   // Single quest update (index + QuestData)
+        { 0x01E2, "QuestCompleteFlags" },      // Quest completion bitmask (310 bytes)
+        { 0x01E3, "QuestCompleteFlag" },       // Single quest completion flag (questId + flags)
+        { 0x01E4, "Guildleves" },              // Active guildleve list
+        { 0x01E5, "Guildleve" },               // Single guildleve update
+        { 0x01E6, "LeveCompleteFlags" },       // Leve completion bitmask
+        { 0x01E7, "LeveCompleteFlag" },        // Single leve complete flag
         { 0x01E9, "EventLogParam1" },          // Event log with 1 param
         { 0x01EA, "EventLogParam2" },          // Event log with 2 params
         { 0x01EB, "EventLogParam3" },          // Event log with 3 params
         { 0x01EC, "EventLogParam4" },          // Event log with 4 params
-        { 0x01ED, "EventLogParam5" },          // Event log with 5 params
-        { 0x01EE, "EventScenePad5" },          // Event scene padding (5 units)
-        { 0x01EF, "InspectUpdate" },           // Inspect data update (uses dword_1505540)
+        { 0x01ED, "Notice32" },                // Quest notice message (32 args)
+        { 0x01EE, "Tracking" },                // Quest tracker (5 tracked quests)
+        { 0x01EF, "IsMarket" },                // Market board availability check
 
         { 0x01F0, "LegacyQuestCompleteFlags" },
         { 0x01F1, "ResumeEventSceneHeaderStr" },
@@ -1050,6 +1052,18 @@ const char* LookupOpcodeName(uint16_t opcode,
 }
 
 const char* LookupActorControlCategoryName(uint16_t category) noexcept {
+    // First try magic_enum for type-safe lookup (O(1) at compile time)
+    auto enumVal = magic_enum::enum_cast<SapphireHook::ActorControlCategory>(category);
+    if (enumVal.has_value()) {
+        auto name = magic_enum::enum_name(*enumVal);
+        if (!name.empty()) {
+            // magic_enum returns string_view, but we need persistent storage
+            // Use the existing map as fallback for now (it has the same values)
+            if (auto it = kActorControlCategories.find(category); it != kActorControlCategories.end())
+                return it->second;
+        }
+    }
+    // Fallback to static map for any values not in the enum
     if (auto it = kActorControlCategories.find(category); it != kActorControlCategories.end())
         return it->second;
     return "?";

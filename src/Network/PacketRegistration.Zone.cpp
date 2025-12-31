@@ -3428,18 +3428,18 @@ void PacketDecoding::RegisterZonePackets() {
     r.RegisterDecoder(1, false, 0x0195, MakeGenericDecoder<ServerZone::FFXIVIpcTerritorySetup>());
     r.RegisterDecoder(1, false, 0x0197, MakeGenericDecoder<ServerZone::FFXIVIpcActorGauge>());
 
-    // Group 7: Event Scene (0x1E0-0x1EA) - 11 opcodes with struct decoders
-    r.RegisterDecoder(1, false, 0x01E0, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneStart>());
-    r.RegisterDecoder(1, false, 0x01E1, MakeGenericDecoder<ServerZone::FFXIVIpcEventScenePlay>());
-    r.RegisterDecoder(1, false, 0x01E2, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneSequence>());
-    r.RegisterDecoder(1, false, 0x01E3, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneChoice>());
-    r.RegisterDecoder(1, false, 0x01E4, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneAction>());
-    r.RegisterDecoder(1, false, 0x01E5, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneCamera>());
-    r.RegisterDecoder(1, false, 0x01E6, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneDialogue>());
-    r.RegisterDecoder(1, false, 0x01E7, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneEnd>());
-    r.RegisterDecoder(1, false, 0x01E8, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneParams>());
-    r.RegisterDecoder(1, false, 0x01E9, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneData>());
-    r.RegisterDecoder(1, false, 0x01EA, MakeGenericDecoder<ServerZone::FFXIVIpcEventSceneComplete>());
+    // Group 7: Quest/Leve System (0x1E0-0x1EE) - Confirmed via binary analysis (OPCODE_MAPPING_2014.md)
+    r.RegisterDecoder(1, false, 0x01E0, MakeGenericDecoder<ServerZone::FFXIVIpcQuests>());          // Quests: all 30 active quests
+    r.RegisterDecoder(1, false, 0x01E1, MakeGenericDecoder<ServerZone::FFXIVIpcQuest>());           // Quest: single quest update
+    r.RegisterDecoder(1, false, 0x01E2, MakeGenericDecoder<ServerZone::FFXIVIpcQuestCompleteList>()); // QuestCompleteFlags: 310-byte bitmask
+    r.RegisterDecoder(1, false, 0x01E3, MakeGenericDecoder<ServerZone::FFXIVIpcQuestFinish>());     // QuestCompleteFlag: single completion
+    // 0x01E4-0x01E7: Guildleves (structures TBD)
+    // r.RegisterDecoder(1, false, 0x01E4, MakeGenericDecoder<ServerZone::FFXIVIpcGuildleves>());   // Guildleves
+    // r.RegisterDecoder(1, false, 0x01E5, MakeGenericDecoder<ServerZone::FFXIVIpcGuildleve>());    // Guildleve
+    // r.RegisterDecoder(1, false, 0x01E6, MakeGenericDecoder<ServerZone::FFXIVIpcLeveCompleteFlags>());
+    // r.RegisterDecoder(1, false, 0x01E7, MakeGenericDecoder<ServerZone::FFXIVIpcLeveCompleteFlag>());
+    // 0x01ED: Notice32 (quest notice) - uses FFXIVIpcNoticeN<32>
+    r.RegisterDecoder(1, false, 0x01EE, MakeGenericDecoder<ServerZone::FFXIVIpcQuestTracker>());    // Tracking: 5 tracked quests
 
     // Group 8: Housing Buddy/Stable (0x30A-0x310) - 7 opcodes
     r.RegisterDecoder(1, false, 0x030A, MakeGenericDecoder<ServerZone::FFXIVIpcHousingBuddyInit>());

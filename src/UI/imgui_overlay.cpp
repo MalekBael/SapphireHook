@@ -10,9 +10,14 @@
 #include <format>
 #include <cmath>
 #include <algorithm>  // for std::clamp
+#include <atomic>     // for g_overlayShutdown flag
 #include "../vendor/imgui/imgui.h"
 #include "../../vendor/imgui/backends/imgui_impl_dx11.h"
 #include "../../vendor/imgui/backends/imgui_impl_win32.h"
+// NEW: ImGuiNotify for toast notifications
+#include "../../vendor/imgui/IconsFontAwesome6.h"
+#include "../../vendor/imgui/fa-solid-900.h"
+#include "../../vendor/imgui/ImGuiNotify.hpp"
 #include <MinHook.h>
 #include "../UI/UIManager.h"
 // NEW: ImPlot for charts
@@ -43,6 +48,11 @@ VSSetConstantBuffers_t oVSSetConstantBuffers = nullptr;
 Present_t oPresent = nullptr;
 ResizeBuffers_t oResizeBuffers = nullptr;
 
+// Store hook target addresses for cleanup
+static void* g_pPresentTarget = nullptr;
+static void* g_pResizeBuffersTarget = nullptr;
+static void* g_pUpdateSubresourceTarget = nullptr;
+
 HWND g_hWnd = nullptr;
 ID3D11Device* g_pd3dDevice = nullptr;
 ID3D11DeviceContext* g_pd3dDeviceContext = nullptr;
@@ -52,6 +62,7 @@ static bool g_isMinimized = false;
 static bool g_deviceLost = false;
 static bool g_renderTargetValid = false;
 static bool g_overlayInitialized = false;
+static std::atomic<bool> g_overlayShutdown{ false };  // Signals hooks to stop processing
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -108,13 +119,16 @@ void __stdcall hkUpdateSubresource(ID3D11DeviceContext* context, ID3D11Resource*
                                     UINT dstSubresource, const D3D11_BOX* dstBox, 
                                     const void* srcData, UINT srcRowPitch, UINT srcDepthPitch)
 {
-    // Wrap matrix capture in SEH to prevent crashes
-    __try {
-        SapphireHook::DebugVisuals::D3D11MatrixCapture::GetInstance().OnUpdateSubresource(
-            dstResource, dstSubresource, dstBox, srcData, srcRowPitch, srcDepthPitch);
-    }
-    __except(EXCEPTION_EXECUTE_HANDLER) {
-        // Silently ignore exceptions in matrix capture
+    // Check shutdown flag - if set, just call original
+    if (!g_overlayShutdown.load(std::memory_order_acquire)) {
+        // Wrap matrix capture in SEH to prevent crashes
+        __try {
+            SapphireHook::DebugVisuals::D3D11MatrixCapture::GetInstance().OnUpdateSubresource(
+                dstResource, dstSubresource, dstBox, srcData, srcRowPitch, srcDepthPitch);
+        }
+        __except(EXCEPTION_EXECUTE_HANDLER) {
+            // Silently ignore exceptions in matrix capture
+        }
     }
     
     // Call original
@@ -125,9 +139,12 @@ void __stdcall hkUpdateSubresource(ID3D11DeviceContext* context, ID3D11Resource*
 void __stdcall hkVSSetConstantBuffers(ID3D11DeviceContext* context, UINT startSlot, 
                                        UINT numBuffers, ID3D11Buffer* const* buffers)
 {
-    // Forward to matrix capture for analysis (reads buffer contents when bound)
-    SapphireHook::DebugVisuals::D3D11MatrixCapture::GetInstance().OnVSSetConstantBuffers(
-        startSlot, numBuffers, buffers, context);
+    // Check shutdown flag - if set, just call original
+    if (!g_overlayShutdown.load(std::memory_order_acquire)) {
+        // Forward to matrix capture for analysis (reads buffer contents when bound)
+        SapphireHook::DebugVisuals::D3D11MatrixCapture::GetInstance().OnVSSetConstantBuffers(
+            startSlot, numBuffers, buffers, context);
+    }
     
     // Call original
     oVSSetConstantBuffers(context, startSlot, numBuffers, buffers);
@@ -136,6 +153,12 @@ void __stdcall hkVSSetConstantBuffers(ID3D11DeviceContext* context, UINT startSl
 HRESULT __stdcall hkResizeBuffers(IDXGISwapChain* pSwapChain, UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags)
 {
     using namespace SapphireHook;
+    
+    // Check shutdown flag - if set, just call original
+    if (g_overlayShutdown.load(std::memory_order_acquire))
+    {
+        return oResizeBuffers(pSwapChain, BufferCount, Width, Height, NewFormat, SwapChainFlags);
+    }
     
     LogDebug("ResizeBuffers called: " + std::to_string(Width) + "x" + std::to_string(Height));
     
@@ -155,6 +178,12 @@ WNDPROC oWndProc = nullptr;
 LRESULT __stdcall WndProc(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
     using namespace SapphireHook;
+    
+    // Check shutdown flag - if set, just call original WndProc
+    if (g_overlayShutdown.load(std::memory_order_acquire))
+    {
+        return oWndProc ? CallWindowProc(oWndProc, hWnd, uMsg, wParam, lParam) : DefWindowProc(hWnd, uMsg, wParam, lParam);
+    }
     
     if (uMsg == WM_KEYDOWN && wParam == VK_INSERT)
     {
@@ -256,6 +285,13 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
 {
     using namespace SapphireHook;
     
+    // CRITICAL: Check shutdown flag first - if set, just call original and exit immediately
+    // This prevents any resource access during/after cleanup
+    if (g_overlayShutdown.load(std::memory_order_acquire))
+    {
+        return oPresent(pSwapChain, SyncInterval, Flags);
+    }
+    
     if (g_isMinimized)
     {
         return oPresent(pSwapChain, SyncInterval, Flags);
@@ -280,6 +316,31 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
             io.MouseDrawCursor = false;
 
             ImGui::StyleColorsDark();
+
+            // Load default font and merge Font Awesome icons for notifications
+            {
+                // Add default font first
+                io.Fonts->AddFontDefault();
+                
+                // Configure Font Awesome glyph range
+                static const ImWchar icons_ranges[] = { ICON_MIN_FA, ICON_MAX_FA, 0 };
+                ImFontConfig icons_config;
+                icons_config.MergeMode = true;
+                icons_config.PixelSnapH = true;
+                icons_config.GlyphMinAdvanceX = 13.0f;
+                icons_config.GlyphOffset = ImVec2(0.0f, 1.0f);
+                
+                // Merge Font Awesome icons into the default font
+                io.Fonts->AddFontFromMemoryCompressedTTF(
+                    fa_solid_900_compressed_data,
+                    fa_solid_900_compressed_size,
+                    13.0f,
+                    &icons_config,
+                    icons_ranges
+                );
+                
+                LogInfo("Font Awesome 6 icons loaded for notifications");
+            }
 
             ImGui_ImplWin32_Init(g_hWnd);
             ImGui_ImplDX11_Init(g_pd3dDevice, g_pd3dDeviceContext);
@@ -687,6 +748,9 @@ HRESULT __stdcall hkPresent(IDXGISwapChain* pSwapChain, UINT SyncInterval, UINT 
         debugRendererRef.EndFrame();
     }
 
+    // Render toast notifications on top of everything
+    ImGui::RenderNotifications();
+
     ImGui::Render();
     
     if (g_mainRenderTargetView)
@@ -740,6 +804,11 @@ void InitOverlay()
     void** pContextVTable = *(void***)pContext;
     void* pUpdateSubresource = pContextVTable[48];  // ID3D11DeviceContext::UpdateSubresource is at index 48
     void* pVSSetConstantBuffers = pContextVTable[7]; // ID3D11DeviceContext::VSSetConstantBuffers is at index 7
+
+    // Store for cleanup
+    g_pPresentTarget = pPresent;
+    g_pResizeBuffersTarget = pResizeBuffers;
+    g_pUpdateSubresourceTarget = pUpdateSubresource;
 
     std::ostringstream oss;
     oss << "Found Present function at: 0x" << std::hex << reinterpret_cast<uintptr_t>(pPresent);
@@ -831,7 +900,28 @@ void CleanupOverlay()
     
     LogInfo("Cleaning up overlay...");
 
+    // CRITICAL: Set shutdown flag FIRST to stop all hooks from doing any work
+    // This must happen before any resource cleanup
+    g_overlayShutdown.store(true, std::memory_order_release);
+    LogInfo("Overlay shutdown flag set - hooks will now passthrough");
+    
+    // Wait for any in-flight hook calls to see the flag and exit
+    // Present runs at ~60fps, so 50ms should be enough for 3+ frames
+    Sleep(50);
+    
     g_overlayInitialized = false;
+
+    // Note: Hooks should already be disabled by MH_DisableHook(MH_ALL_HOOKS) in dllmain
+    // But we still call disable on our specific hooks as a safety measure
+    if (g_pPresentTarget) {
+        MH_DisableHook(g_pPresentTarget);
+    }
+    if (g_pResizeBuffersTarget) {
+        MH_DisableHook(g_pResizeBuffersTarget);
+    }
+    if (g_pUpdateSubresourceTarget) {
+        MH_DisableHook(g_pUpdateSubresourceTarget);
+    }
 
     // Shutdown Game Camera Extractor first
     auto& cameraExtractor = DebugVisuals::GameCameraExtractor::GetInstance();
@@ -887,6 +977,26 @@ void CleanupOverlay()
         g_pd3dDevice->Release();
         g_pd3dDevice = nullptr;
     }
+
+    // Now remove hooks (after resources are cleaned up)
+    LogInfo("Removing overlay hooks...");
+    if (g_pPresentTarget) {
+        MH_RemoveHook(g_pPresentTarget);
+        g_pPresentTarget = nullptr;
+    }
+    if (g_pResizeBuffersTarget) {
+        MH_RemoveHook(g_pResizeBuffersTarget);
+        g_pResizeBuffersTarget = nullptr;
+    }
+    if (g_pUpdateSubresourceTarget) {
+        MH_RemoveHook(g_pUpdateSubresourceTarget);
+        g_pUpdateSubresourceTarget = nullptr;
+    }
+    
+    // Clear original function pointers
+    oPresent = nullptr;
+    oResizeBuffers = nullptr;
+    oUpdateSubresource = nullptr;
 
     g_hWnd = nullptr;
     g_isMinimized = false;

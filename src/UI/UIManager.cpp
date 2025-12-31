@@ -53,6 +53,8 @@
 #include "../Modules/SignatureScannerModule.h"
 // NEW: Packet Sender module for testing IPC packets
 #include "../Modules/PacketSenderModule.h"
+// NEW: Network Hooks module for high-level network hook control
+#include "../Modules/NetworkHooksModule.h"
 // NEW: Camera extractor for player position display
 #include "../Tools/GameCameraExtractor.h"
 // Territory detection for zone display
@@ -395,6 +397,7 @@ void UIManager::RegisterDefaultModules()
 	TryRegisterModule<SapphireHook::WorldOverlayModule>("world_overlay", "World Overlay", successCount);
 	TryRegisterModule<SapphireHook::SignatureScannerModule>("signature_scanner", "Signature Scanner", successCount);
 	TryRegisterModule<SapphireHook::PacketSenderModule>("packet_sender", "Packet Sender", successCount);
+	TryRegisterModule<SapphireHook::NetworkHooksModule>("network_hooks", "Network Hooks", successCount);
 
 	LogInfo("=== MODULE REGISTRATION COMPLETE ===");
 	LogInfo("Successfully registered: " + std::to_string(successCount) + " modules");
@@ -796,6 +799,26 @@ void UIManager::RenderMainMenu()
 				else
 				{
 					ImGui::MenuItem("Packet Sender", nullptr, false, false);
+				}
+			}
+
+			// Network Hooks (low-level network hook control)
+			{
+				static UIModule* s_networkHooks = nullptr;
+				if (!s_networkHooks)
+					s_networkHooks = GetModule("network_hooks");
+
+				if (s_networkHooks)
+				{
+					bool open = s_networkHooks->IsWindowOpen();
+					if (ImGui::MenuItem(s_networkHooks->GetDisplayName(), nullptr, open))
+					{
+						s_networkHooks->SetWindowOpen(!open);
+					}
+				}
+				else
+				{
+					ImGui::MenuItem("Network Hooks", nullptr, false, false);
 				}
 			}
 

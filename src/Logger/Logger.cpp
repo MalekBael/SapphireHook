@@ -34,6 +34,11 @@ namespace SapphireHook {
 
 std::unique_ptr<Logger> Logger::s_instance;
 std::mutex Logger::s_mutex;
+std::atomic<bool> Logger::s_shuttingDown{ false };
+
+void Logger::PrepareForShutdown() {
+    s_shuttingDown.store(true, std::memory_order_release);
+}
 
 std::filesystem::path Logger::GetDefaultTempDir() {
     return BuildTempSapphireDir();
@@ -298,6 +303,7 @@ std::string Logger::HexFormat(uintptr_t v) {
 }
 
 void Logger::WriteLog(LogLevel level, const std::string& message) {
+    if (s_shuttingDown.load(std::memory_order_acquire)) return;  // No logging during shutdown
     if (level < m_minimumLevel) return;
     if (!m_logger) return;
 

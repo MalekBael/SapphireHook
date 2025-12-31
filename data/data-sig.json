@@ -1,4 +1,66 @@
 {
+  "network": {
+    "version": "3.35",
+    "comment": "Network layer signatures discovered via radare2 analysis",
+    "functions": {
+      "RecvWrapper": {
+        "sig": "48 83 EC 28 48 8B 49 08 45 33 C9",
+        "address_3_35": "0x140e90870",
+        "description": "Game's internal wrapper around WS2_32.recv",
+        "calling_convention": "__fastcall(netObj*, buffer*, length)"
+      },
+      "SendWrapper": {
+        "sig": "48 83 EC 28 48 8B 49 08 45 33 C9 45 8B D0",
+        "address_3_35": "0x140e90840",
+        "description": "Game's internal wrapper around WS2_32.send"
+      },
+      "SocketReceiveHandler": {
+        "sig": "48 89 74 24 10 57 48 83 EC 20 44 8B 81 00 01 00 00",
+        "address_3_35": "0x140dec130",
+        "description": "Main receive loop for active connections (State 4)"
+      },
+      "PacketQueueHandler": {
+        "sig": "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 83 B9 88 01 00 00 40",
+        "address_3_35": "0x140deb310",
+        "description": "Manages received packet queue"
+      },
+      "ConnectionStateMachine": {
+        "sig": "48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 48 83 EC 20 8B 81 F8 00 00 00",
+        "address_3_35": "0x140decb90",
+        "description": "Connection lifecycle state dispatcher"
+      },
+      "IPCDispatcher": {
+        "sig": "48 89 5C 24 08 57 48 83 EC 60 8B FA 41 0F B7 50 02",
+        "address_3_35": "0x140DD9430",
+        "description": "Main IPC opcode dispatch function with switch table",
+        "switch_table_offset": "0xddb078",
+        "opcode_base": "0x0067"
+      }
+    },
+    "offsets": {
+      "NetworkConnection": {
+        "socket": "0x08",
+        "packetCounter": "0x98",
+        "bytesReceived": "0xa0",
+        "bufferSize": "0x100",
+        "recvBuffer": "0x130",
+        "queueBase": "0x168",
+        "queueCapacity": "0x178",
+        "queueWritePos": "0x180",
+        "queueCount": "0x188"
+      }
+    }
+  },
+  "game_objects": {
+    "version": "3.35",
+    "comment": "Game object RTTI strings for vtable discovery",
+    "rtti_strings": {
+      "Client.Game.GameObject": "0x14126e860",
+      "Client.Game.Character": "0x14126ff68",
+      "Client.Game.EventObject": "0x14126ec98",
+      "Client.Game.Event.EventSceneModule": "0x14123bb6e"
+    }
+  },
   "classes": {
     "Client::UI2::AddonCharaMakeFeatureColorL": {
       "ctor": "40 53 48 83 EC 20 48 8B D9 E8 ? ? ? ? 4C 8D 1D ? ? ? ? 4C 89 1B"

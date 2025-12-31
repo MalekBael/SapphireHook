@@ -115,6 +115,7 @@ namespace SapphireHook {
 	class Logger {
 		static std::unique_ptr<Logger> s_instance;
 		static std::mutex s_mutex;
+		static std::atomic<bool> s_shuttingDown;  // Prevents logging after shutdown
 
 		std::shared_ptr<spdlog::logger> m_logger;         // Main logger (multi-sink)
 		LogLevel m_minimumLevel = LogLevel::Information;
@@ -162,6 +163,12 @@ namespace SapphireHook {
 			bool createDirectoryIfMissing = true);
 
 		static Logger& Instance();
+
+		/// @brief Signal that logging should stop (call before spdlog::shutdown)
+		static void PrepareForShutdown();
+		
+		/// @brief Check if logging is still safe
+		static bool IsShuttingDown() { return s_shuttingDown.load(std::memory_order_acquire); }
 
 		// Core logging methods
 		void Debug(const std::string& message);

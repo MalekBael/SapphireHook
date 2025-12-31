@@ -51,7 +51,7 @@
       <WholeProgramOptimization>false</WholeProgramOptimization>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
       <EnableModules>false</EnableModules>
-      <AdditionalOptions>/FS /bigobj /Gy /Gw /sdl- %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>/FS /bigobj /Gy /Gw /sdl- /utf-8 %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <PreprocessorDefinitions>SAPPHIREHOOK_ENABLE_ZLIB;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
@@ -70,7 +70,10 @@
       <Command>echo [BUILD] SapphireHookDLL Debug (static Capstone + MinHook)
 if not exist "$(OutDir)data" mkdir "$(OutDir)data"
 xcopy /Y /E /I "$(ProjectDir)data\*" "$(OutDir)data\" &gt;nul 2&gt;&amp;1
-echo [BUILD] Copied data folder to output directory</Command>
+echo [BUILD] Copied data folder to output directory
+echo [BUILD] Copying vcpkg debug DLLs...
+xcopy /Y "$(ProjectDir)vcpkg\installed\x64-windows\debug\bin\*.dll" "$(OutDir)" &gt;nul 2&gt;&amp;1
+echo [BUILD] Copied vcpkg DLLs to output directory</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <!-- Release: same /MDd runtime for now & static libs -->
@@ -83,6 +86,7 @@ echo [BUILD] Copied data folder to output directory</Command>
       <Optimization>MaxSpeed</Optimization>
       <WholeProgramOptimization>true</WholeProgramOptimization>
       <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/FS /bigobj /Gy /Gw /sdl- /utf-8 %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
       <AdditionalDependencies>capstone.lib;libMinHook.x64.lib;Detour.lib;Recast.lib;DebugUtils.lib;DetourCrowd.lib;DetourTileCache.lib;zlib.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -99,7 +103,10 @@ echo [BUILD] Copied data folder to output directory</Command>
       <Command>echo [BUILD] SapphireHookDLL Release (static Capstone + MinHook)
 if not exist "$(OutDir)data" mkdir "$(OutDir)data"
 xcopy /Y /E /I "$(ProjectDir)data\*" "$(OutDir)data\" &gt;nul 2&gt;&amp;1
-echo [BUILD] Copied data folder to output directory</Command>
+echo [BUILD] Copied data folder to output directory
+echo [BUILD] Copying vcpkg release DLLs...
+xcopy /Y "$(ProjectDir)vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)" &gt;nul 2&gt;&amp;1
+echo [BUILD] Copied vcpkg DLLs to output directory</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <!-- Headers -->
@@ -176,6 +183,8 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClInclude Include="src\Modules\WorldOverlayModule.h" />
     <ClInclude Include="src\Modules\SignatureScannerModule.h" />
     <ClInclude Include="src\Modules\PacketSenderModule.h" />
+    <ClInclude Include="src\Modules\NetworkHooksModule.h" />
+    <ClInclude Include="src\Hooking\NetworkHooks.h" />
     <ClInclude Include="src\Tools\CollisionMeshLoader.h" />
     <ClInclude Include="src\Tools\NavMeshLoader.h" />
     <ClInclude Include="src\UI\imgui_overlay.h" />
@@ -242,6 +251,7 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClCompile Include="src\Modules\LuaGameScriptModule.cpp" />
     <ClCompile Include="src\Modules\Weather.cpp" />
     <ClCompile Include="src\Network\PacketDecoder.cpp" />
+    <ClCompile Include="src\Network\PacketDatabase.cpp" />
     <ClCompile Include="src\Tools\LiveTraceMonitor.cpp" />
     <ClCompile Include="src\Tools\LuaGameScriptScanner.cpp" />
     <ClCompile Include="src\Tools\MemoryScanner.cpp" />
@@ -258,6 +268,8 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClCompile Include="src\Modules\WorldOverlayModule.cpp" />
     <ClCompile Include="src\Modules\SignatureScannerModule.cpp" />
     <ClCompile Include="src\Modules\PacketSenderModule.cpp" />
+    <ClCompile Include="src\Modules\NetworkHooksModule.cpp" />
+    <ClCompile Include="src\Hooking\NetworkHooks.cpp" />
     <ClCompile Include="src\Tools\CollisionMeshLoader.cpp" />
     <ClCompile Include="src\Tools\NavMeshLoader.cpp" />
     <ClCompile Include="vendor\ImGuiFD\ImGuiFD.cpp" />
@@ -313,6 +325,7 @@ echo [BUILD] Copied data folder to output directory</Command>
     <ClCompile Include="vendor\imgui\imgui_draw.cpp" />
     <ClCompile Include="vendor\imgui\imgui_tables.cpp" />
     <ClCompile Include="vendor\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="vendor\imgui\TextEditor.cpp" />
     <ClCompile Include="vendor\imgui\misc\cpp\imgui_stdlib.cpp" />
     <ClCompile Include="vendor\imgui\misc\fonts\binary_to_compressed_c.cpp" />
     <ClCompile Include="vendor\implot\implot.cpp" />

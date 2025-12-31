@@ -2,6 +2,8 @@
 #include "../Logger/Logger.h"
 #include "../Helper/CapstoneWrapper.h"
 #include "../vendor/imgui/imgui.h"
+#include "../vendor/imgui/imspinner.h"
+#include "../Core/LibraryIntegration.h"
 #include <sstream>
 #include <fstream>
 #include <iomanip>
@@ -434,8 +436,13 @@ void SapphireHook::MemoryScanner::RenderWindow()
 		StopScan();
 	}
 
-	// Progress bar if scanning
+	// Progress bar with spinner if scanning
 	if (m_scanState.running) {
+		// Show animated spinner while scanning
+		ImGui::SameLine();
+		ImSpinner::SpinnerRotatingHeart("scanning", 16.0f, 3.0f, 
+			ImGui::GetColorU32(ImGuiCol_Text), ImGui::GetColorU32(ImGuiCol_TextDisabled), 6.0f);
+		
 		float progress = (m_scanState.totalRegions > 0)
 			? static_cast<float>(m_scanState.regionsProcessed) / m_scanState.totalRegions
 			: 0.0f;

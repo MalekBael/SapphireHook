@@ -322,6 +322,10 @@ static bool InjectDLL(DWORD pid, const std::wstring& fullDllPath) {
         return true;
     }
 
+    // Extract the directory containing the DLL for SetDllDirectoryW
+    fs::path dllDir = fs::path(fullDllPath).parent_path();
+    std::wstring dllDirStr = dllDir.wstring();
+
     HANDLE hProc = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
         PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, pid);
     if (!hProc) {
@@ -329,6 +333,32 @@ static bool InjectDLL(DWORD pid, const std::wstring& fullDllPath) {
         return false;
     }
 
+    HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
+    if (!k32) {
+        Log(LogLevel::Error, "GetModuleHandleW(kernel32.dll) failed");
+        CloseHandle(hProc);
+        return false;
+    }
+
+    // Step 1: Call SetDllDirectoryW in the target process to add our DLL's directory to search path
+    auto pSetDllDirectoryW = reinterpret_cast<LPTHREAD_START_ROUTINE>(GetProcAddress(k32, "SetDllDirectoryW"));
+    if (pSetDllDirectoryW) {
+        size_t dirBytes = (dllDirStr.size() + 1) * sizeof(wchar_t);
+        LPVOID remoteDirMem = VirtualAllocEx(hProc, nullptr, dirBytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+        if (remoteDirMem) {
+            if (WriteProcessMemory(hProc, remoteDirMem, dllDirStr.c_str(), dirBytes, nullptr)) {
+                HANDLE hDirThread = CreateRemoteThread(hProc, nullptr, 0, pSetDllDirectoryW, remoteDirMem, 0, nullptr);
+                if (hDirThread) {
+                    WaitForSingleObject(hDirThread, 5000);
+                    CloseHandle(hDirThread);
+                    Log(LogLevel::Info, "SetDllDirectoryW called in target process");
+                }
+            }
+            VirtualFreeEx(hProc, remoteDirMem, 0, MEM_RELEASE);
+        }
+    }
+
+    // Step 2: Now load the DLL
     size_t bytes = (fullDllPath.size() + 1) * sizeof(wchar_t);
     LPVOID remoteMem = VirtualAllocEx(hProc, nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remoteMem) {
@@ -344,13 +374,6 @@ static bool InjectDLL(DWORD pid, const std::wstring& fullDllPath) {
         return false;
     }
 
-    HMODULE k32 = GetModuleHandleW(L"kernel32.dll");
-    if (!k32) {
-        Log(LogLevel::Error, "GetModuleHandleW(kernel32.dll) failed");
-        VirtualFreeEx(hProc, remoteMem, 0, MEM_RELEASE);
-        CloseHandle(hProc);
-        return false;
-    }
     auto pLoadLibraryW = reinterpret_cast<LPTHREAD_START_ROUTINE>(GetProcAddress(k32, "LoadLibraryW"));
     if (!pLoadLibraryW) {
         Log(LogLevel::Error, "GetProcAddress(LoadLibraryW) failed");

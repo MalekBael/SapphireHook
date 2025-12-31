@@ -8,6 +8,7 @@
 #include <spdlog/spdlog.h>
 
 #include "../Hooking/hook_manager.h"
+#include "../Hooking/NetworkHooks.h"
 #include "../UI/imgui_overlay.h"
 #include "../Hooking/lua_hook.h"
 #include "../Analysis/PatternScanner.h"
@@ -62,6 +63,8 @@ static void PerformSafeUnload()
     try {
         LogInfo("=== Starting Safe DLL Unload ===");
 
+        // PHASE 1: Stop all monitoring and close UI windows
+        LogInfo("Phase 1: Stopping monitors and closing windows...");
         if (SapphireHook::UIManager::HasInstance()) {
             auto& ui = SapphireHook::UIManager::GetInstance();
 
@@ -81,34 +84,63 @@ static void PerformSafeUnload()
             LogInfo("All module windows closed");
         }
 
-        // Tear down overlay next
-        CleanupOverlay();
+        // PHASE 2: Signal overlay hooks to stop processing (before disabling hooks)
+        // This allows hooks to see the flag and exit cleanly before MinHook removes them
+        LogInfo("Phase 2: Signaling overlay shutdown...");
+        CleanupOverlay();  // This sets g_overlayShutdown flag and waits 50ms
         LogInfo("Overlay cleanup completed");
 
-        // Shutdown UI manager
+        // PHASE 3: Disable ALL hooks (overlay + network) 
+        // After this, hooks will jump directly to original functions
+        LogInfo("Phase 3: Disabling all hooks...");
+        MH_DisableHook(MH_ALL_HOOKS);
+        LogInfo("All hooks disabled via MH_DisableHook(MH_ALL_HOOKS)");
+        
+        // Wait for any in-flight hook calls that may have started before disable
+        LogInfo("Waiting for in-flight hook calls to complete...");
+        Sleep(300);  // Increased from 200ms for safety
+
+        // PHASE 4: Shutdown UI manager
+        LogInfo("Phase 4: Shutting down UIManager...");
         SapphireHook::UIManager::Shutdown();
         LogInfo("UIManager shutdown completed");
 
-        // Shutdown HookManager (disables and removes all hooks)
+        // PHASE 5: Shutdown high-level network hooks
+        LogInfo("Phase 5: Shutting down NetworkHooks...");
+        try {
+            SapphireHook::NetworkHooks::GetInstance().Shutdown();
+            LogInfo("NetworkHooks shutdown completed");
+        } catch (...) {
+            LogWarning("NetworkHooks shutdown exception (continuing)");
+        }
+
+        // PHASE 6: Shutdown HookManager and MinHook
+        LogInfo("Phase 6: Shutting down HookManager...");
         SapphireHook::HookManager::Shutdown();
         LogInfo("HookManager shutdown completed");
 
-        // Defensive: ensure MinHook is uninitialized even if monitor was not present
-        const MH_STATUS st = MH_Uninitialize();
-        if (st == MH_OK) {
-            LogInfo("MinHook uninitialized");
-        } else if (st != MH_ERROR_NOT_INITIALIZED) {
-            LogWarning("MinHook uninitialize returned: " + std::to_string(st));
-        }
-
         LogInfo("=== Safe DLL Unload Complete ===");
+        
+        // Final wait to ensure all logging completes before spdlog shutdown
+        Sleep(100);
+        
+        // Signal that logging should stop - no more logging after this point
+        SapphireHook::Logger::PrepareForShutdown();
+        Sleep(50);
+        
+        // Flush all spdlog sinks before shutdown
+        spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) {
+            l->flush();
+        });
+        Sleep(50);
         
         // Shutdown spdlog to release file handles
         spdlog::shutdown();
         
-        Sleep(250);
+        // Final wait before thread exit
+        Sleep(200);
     } catch (...) {
-        LogError("Exception during cleanup - proceeding with unload");
+        // Don't log here - spdlog may already be shut down
     }
 }
 
@@ -241,6 +273,20 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
         LogError("InitHooks failed with C++ exception");
     }
 
+    // Initialize high-level network hooks (safe, non-fatal if fails)
+    try {
+        LogInfo("Initializing high-level network hooks...");
+        if (SapphireHook::NetworkHooks::GetInstance().Initialize()) {
+            LogInfo("NetworkHooks initialized successfully");
+        } else {
+            LogWarning("NetworkHooks: Some hooks could not be installed (signatures may not match this client version)");
+        }
+    } catch (const std::exception& e) {
+        LogWarning("NetworkHooks initialization failed: " + std::string(e.what()));
+    } catch (...) {
+        LogWarning("NetworkHooks initialization failed with unknown exception");
+    }
+
     Sleep(1000);
 
     bool luaInitialized = false;
@@ -342,9 +388,21 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
 {
     switch (reason) {
     case DLL_PROCESS_ATTACH:
-        g_hModule = hModule;
-        DisableThreadLibraryCalls(hModule);
-        CreateThread(nullptr, 0x10000, MainThread, hModule, 0, nullptr);
+        {
+            g_hModule = hModule;
+            DisableThreadLibraryCalls(hModule);
+            
+            // Add our DLL's directory to the DLL search path so dependencies can be found
+            wchar_t dllPath[MAX_PATH];
+            if (GetModuleFileNameW(hModule, dllPath, MAX_PATH) > 0) {
+                std::filesystem::path dllDir = std::filesystem::path(dllPath).parent_path();
+                SetDllDirectoryW(dllDir.c_str());
+                // Also add to PATH for any child processes or delay-loaded DLLs
+                AddDllDirectory(dllDir.c_str());
+            }
+            
+            CreateThread(nullptr, 0x10000, MainThread, hModule, 0, nullptr);
+        }
         break;
     case DLL_PROCESS_DETACH:
         // No heavy work here; PerformSafeUnload runs from MainThread or ShutdownThread.

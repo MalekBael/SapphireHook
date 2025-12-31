@@ -1,11 +1,11 @@
 #include "PatternScanner.h"
 #include "../Logger/Logger.h"
 #include "../Helper/WindowsAPIWrapper.h"
+#include "../Core/LibraryIntegration.h"
 #include <algorithm>
 #include <sstream>
 #include <iomanip>
 #include <Psapi.h>
-#include <format>
 #pragma comment(lib, "psapi.lib")
 
 namespace SapphireHook {
@@ -718,7 +718,7 @@ namespace SapphireHook {
             threadCount = (std::max)(size_t(1), threadCount / 2);
         }
 
-        LogInfo(std::format("[AsyncPatternScanner] Initializing with {} worker threads", threadCount));
+        LogInfo(fmt::format("[AsyncPatternScanner] Initializing with {} worker threads", threadCount));
 
         m_shutdownRequested = false;
         m_workers.reserve(threadCount);
@@ -807,7 +807,7 @@ namespace SapphireHook {
             try {
                 job->config.onComplete(result);
             } catch (const std::exception& e) {
-                LogWarning(std::format("[AsyncPatternScanner] Completion callback threw: {}", e.what()));
+                LogWarning(fmt::format("[AsyncPatternScanner] Completion callback threw: {}", e.what()));
             }
         }
 
@@ -852,7 +852,7 @@ namespace SapphireHook {
                 result.result->fromCache = true;
                 result.status = AsyncScanStatus::Completed;
                 result.endTime = std::chrono::steady_clock::now();
-                LogDebug(std::format("[AsyncPatternScanner] Cache hit for '{}'", job->config.name));
+                LogDebug(fmt::format("[AsyncPatternScanner] Cache hit for '{}'", job->config.name));
                 return result;
             }
         }
@@ -935,12 +935,12 @@ namespace SapphireHook {
 
         if (result.result) {
             result.status = AsyncScanStatus::Completed;
-            LogInfo(std::format("[AsyncPatternScanner] Found '{}' at 0x{:X} ({:.2f}ms)",
+            LogInfo(fmt::format("[AsyncPatternScanner] Found '{}' at 0x{:X} ({:.2f}ms)",
                 job->config.name, result.result->address, result.GetDurationMs()));
         } else {
             result.status = AsyncScanStatus::Completed;
             result.error = ScanError::NotFound;
-            LogDebug(std::format("[AsyncPatternScanner] '{}' not found ({:.2f}ms)",
+            LogDebug(fmt::format("[AsyncPatternScanner] '{}' not found ({:.2f}ms)",
                 job->config.name, result.GetDurationMs()));
         }
 

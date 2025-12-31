@@ -422,3 +422,16 @@ resources/folders.csv
 vcpkg/
 project.json
 sonar-project.properties
+data/ida/data.yml
+data/data-sig.json
+data/ida/ffxiv_structs.yml
+data/ida/generated_data.yml
+data/ida/signatures.yml
+data/data-sig.json
+data/ida/vtables_raw.txt
+data/data-sig.json
+debug_test.txt
+data/data-sig.json
+data/data-sig.json
+/data/ida/
+/notes/
