@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <zlib.h>
 
-// Prevent Windows min/max macros from interfering
 #ifdef min
 #undef min
 #endif
@@ -14,8 +13,6 @@
 #endif
 
 namespace SqPack {
-
-	// ===== CRC32 Implementation (IEEE 802.3) =====
 	const uint32_t* Reader::GetCrcTable() {
 		static uint32_t table[256] = {};
 		static bool initialized = false;
@@ -43,7 +40,6 @@ namespace SqPack {
 		return Crc32(reinterpret_cast<const uint8_t*>(str.data()), str.size());
 	}
 
-	// ===== IO Helpers =====
 	bool Reader::ReadAt(std::ifstream& stream, uint64_t offset, void* buffer, size_t bytes) {
 		stream.seekg(static_cast<std::streamoff>(offset), std::ios::beg);
 		if (!stream.good()) return false;
@@ -51,7 +47,6 @@ namespace SqPack {
 		return stream.good() || stream.gcount() == static_cast<std::streamsize>(bytes);
 	}
 
-	// ===== Hash Utilities =====
 	uint64_t Reader::HashIndex1(std::string_view fullPathLower) {
 		auto pos = fullPathLower.find_last_of('/');
 		std::string_view folder = (pos == std::string_view::npos) ? std::string_view{} : fullPathLower.substr(0, pos);
@@ -64,7 +59,6 @@ namespace SqPack {
 
 	std::filesystem::path Reader::DatPathFor(const std::filesystem::path& indexPath, uint32_t dataFileId) {
 		auto name = indexPath.filename().string();
-		// Replace .index or .index2 with .dat{N}
 		std::string base = name;
 		if (base.size() >= 7 && base.rfind(".index2") == base.size() - 7) {
 			base.erase(base.size() - 7);
@@ -76,7 +70,6 @@ namespace SqPack {
 		return indexPath.parent_path() / base;
 	}
 
-	// ===== Content Detection =====
 	bool Reader::IsLuaBytecode(std::span<const uint8_t> data) {
 		if (data.size() < 5) return false;
 		if (data[0] != 0x1B || data[1] != 'L' || data[2] != 'u' || data[3] != 'a') return false;
@@ -95,7 +88,6 @@ namespace SqPack {
 		return false;
 	}
 
-	// ===== Decompression =====
 	bool Reader::DecompressBlock(const uint8_t* compressedData, size_t compressedSize,
 		uint8_t* outputBuffer, size_t outputSize) {
 		z_stream strm{};
@@ -109,7 +101,6 @@ namespace SqPack {
 		return ret == Z_STREAM_END;
 	}
 
-	// ===== Index Loading =====
 	std::vector<IndexFileEntry> Reader::LoadIndex(const std::filesystem::path& indexPath) {
 		std::vector<IndexFileEntry> entries;
 		std::ifstream fs(indexPath, std::ios::binary);
@@ -118,7 +109,6 @@ namespace SqPack {
 			return entries;
 		}
 
-		// Skip to index header at 0x400
 		fs.seekg(0x400, std::ios::beg);
 		SqPackIndexHeader hdr{};
 		if (!fs.read(reinterpret_cast<char*>(&hdr), sizeof(hdr))) {
@@ -153,7 +143,6 @@ namespace SqPack {
 		return entries;
 	}
 
-	// ===== File Extraction =====
 	ExtractResult Reader::ExtractFile(const std::filesystem::path& datPath, const IndexFileEntry& entry, size_t maxBytes) {
 		return ExtractFileAt(datPath, entry.GetFileOffset(), maxBytes);
 	}
@@ -175,7 +164,6 @@ namespace SqPack {
 			return result;
 		}
 
-		// Read data entry header
 		dat.seekg(static_cast<std::streamoff>(fileOffset), std::ios::beg);
 		DataEntryHeader header{};
 		if (!dat.read(reinterpret_cast<char*>(&header), sizeof(header))) {
@@ -185,27 +173,23 @@ namespace SqPack {
 
 		result.contentType = header.contentType;
 
-		// Only handle type 2 (binary/standard) for now
 		if (header.contentType != 0x02 || header.uncompressedSize == 0 || header.numBlocks == 0) {
 			result.error = "Unsupported content type or empty file";
 			return result;
 		}
 
-		// Read block entries
 		std::vector<Type2BlockEntry> blocks(header.numBlocks);
 		if (!dat.read(reinterpret_cast<char*>(blocks.data()), header.numBlocks * sizeof(Type2BlockEntry))) {
 			result.error = "Failed to read block entries";
 			return result;
 		}
 
-		// Determine how much to extract
 		size_t targetSize = header.uncompressedSize;
 		if (maxBytes > 0 && maxBytes < targetSize) {
 			targetSize = maxBytes;
 		}
 		result.data.reserve(targetSize);
 
-		// Extract blocks
 		for (size_t bi = 0; bi < blocks.size() && result.data.size() < targetSize; ++bi) {
 			const auto& be = blocks[bi];
 			uint64_t blockPos = fileOffset + header.headerLength + be.offset;
@@ -218,7 +202,6 @@ namespace SqPack {
 			}
 
 			if (bh.IsUncompressed()) {
-				// Uncompressed block
 				size_t toRead = std::min<size_t>(bh.decompressedLength, targetSize - result.data.size());
 				size_t oldSize = result.data.size();
 				result.data.resize(oldSize + toRead);
@@ -229,7 +212,6 @@ namespace SqPack {
 				}
 			}
 			else {
-				// Compressed block
 				std::vector<uint8_t> compressed(bh.compressedLength);
 				if (!dat.read(reinterpret_cast<char*>(compressed.data()), compressed.size())) {
 					result.error = "Failed to read compressed block";
@@ -250,5 +232,4 @@ namespace SqPack {
 		result.success = !result.data.empty();
 		return result;
 	}
-
-} // namespace SqPack
+}

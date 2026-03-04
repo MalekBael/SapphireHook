@@ -257,6 +257,11 @@ void WorldOverlayModule::RenderAppearanceSettings() {
         ImGui::SliderFloat("Scale", &settings.Scale, 0.1f, 5.0f, "%.2f");
         ImGui::SliderFloat("Max Distance", &settings.MaxRenderDistance, 0.0f, 500.0f, "%.0f");
         ImGui::Checkbox("Show Labels", &settings.ShowLabels);
+        if (settings.ShowLabels) {
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SliderFloat("Label Scale", &settings.LabelScale, 0.5f, 5.0f, "%.1f");
+        }
     }
 }
 

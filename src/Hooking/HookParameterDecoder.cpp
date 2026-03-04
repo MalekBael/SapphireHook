@@ -9,10 +9,6 @@
 
 namespace SapphireHook {
 
-// ============================================================================
-// Static Registry for Known Signatures
-// ============================================================================
-
 namespace {
     std::mutex s_signatureMutex;
     std::unordered_map<std::string, FunctionSignature> s_signatures;
@@ -22,10 +18,6 @@ namespace {
         return className + "::" + funcName;
     }
 }
-
-// ============================================================================
-// ParamType ToString
-// ============================================================================
 
 const char* ToString(ParamType type) {
     switch (type) {
@@ -72,10 +64,6 @@ const char* ToString(ParamType type) {
         default: return "Unknown";
     }
 }
-
-// ============================================================================
-// DecodedParam Static Constructors
-// ============================================================================
 
 DecodedParam DecodedParam::FromInt(const std::string& name, int64_t value) {
     DecodedParam p;
@@ -212,7 +200,6 @@ DecodedParam DecodedParam::FromEntityId(const std::string& name, uint32_t entity
     p.name = name;
     p.rawValue = entityId;
     
-    // Classify entity ID by range
     if (entityId >= 0x10000000 && entityId < 0x20000000) {
         p.details = "Player/Party";
     } else if (entityId >= 0x40000000 && entityId < 0x50000000) {
@@ -228,10 +215,6 @@ DecodedParam DecodedParam::FromEntityId(const std::string& name, uint32_t entity
     p.isValid = entityId != 0 && entityId != 0xE0000000;
     return p;
 }
-
-// ============================================================================
-// Main Decoding Functions
-// ============================================================================
 
 DecodedParam HookParameterDecoder::DecodeParameter(ParamType type, uint64_t rawValue, const std::string& name) {
     switch (type) {
@@ -282,7 +265,6 @@ DecodedParam HookParameterDecoder::DecodeParameter(ParamType type, uint64_t rawV
         case ParamType::ActorId:
             return DecodedParam::FromEntityId(name, static_cast<uint32_t>(rawValue));
             
-        // Additional game data types
         case ParamType::BNpcId: {
             DecodedParam p;
             p.type = type;
@@ -471,7 +453,6 @@ DecodedParam HookParameterDecoder::DecodeBytes(ParamType type, const void* data,
         DecodedParam p;
         p.type = ParamType::String;
         p.name = name;
-        // Safe string read
         const char* str = static_cast<const char*>(data);
         size_t strLen = strnlen(str, length);
         p.displayValue = std::string(str, strLen);
@@ -500,7 +481,6 @@ DecodedParam HookParameterDecoder::DecodeBytes(ParamType type, const void* data,
         return p;
     }
     
-    // Default: read as raw value
     uint64_t rawValue = 0;
     std::memcpy(&rawValue, data, (std::min)(length, sizeof(uint64_t)));
     return DecodeParameter(type, rawValue, name);
@@ -513,8 +493,6 @@ std::vector<DecodedParam> HookParameterDecoder::DecodeFunctionCall(
 {
     std::vector<DecodedParam> results;
     
-    // x64 calling convention: first 4 args in RCX, RDX, R8, R9
-    // Additional args on stack
     size_t regCount = (std::min)(sig.parameters.size(), size_t(4));
     
     for (size_t i = 0; i < sig.parameters.size(); ++i) {
@@ -524,9 +502,8 @@ std::vector<DecodedParam> HookParameterDecoder::DecodeFunctionCall(
         if (i < 4 && registers) {
             value = registers[i];
         } else if (stack) {
-            // Stack args start after shadow space (32 bytes) and return address
             const uint64_t* stackArgs = static_cast<const uint64_t*>(stack);
-            value = stackArgs[i - 4 + 5]; // +5 for shadow + return addr
+            value = stackArgs[i - 4 + 5];       
         } else {
             continue;
         }
@@ -588,10 +565,6 @@ std::string HookParameterDecoder::FormatFunctionCall(
     return result;
 }
 
-// ============================================================================
-// Signature Registry
-// ============================================================================
-
 void HookParameterDecoder::RegisterSignature(const FunctionSignature& sig) {
     std::lock_guard<std::mutex> lock(s_signatureMutex);
     std::string key = MakeKey(sig.className, sig.functionName);
@@ -639,28 +612,19 @@ void HookParameterDecoder::MapAddressToSignature(
 }
 
 void HookParameterDecoder::LoadFromSignatureDatabase() {
-    // TODO: Load from SignatureDatabase::GetResolvedFunctionsWithInfo()
-    // and convert to FunctionSignature entries
 }
-
-// ============================================================================
-// Type Inference Helpers
-// ============================================================================
 
 ParamType HookParameterDecoder::InferType(uint64_t value) {
     uint32_t low32 = static_cast<uint32_t>(value);
     
-    // Check for pointer (high bits set, in valid address range)
     if (LooksLikePointer(value)) {
         return ParamType::Pointer;
     }
     
-    // Check for entity ID patterns
     if (LooksLikeEntityId(low32)) {
         return ParamType::EntityId;
     }
     
-    // Check game data types
     if (LooksLikeActionId(low32)) {
         return ParamType::ActionId;
     }
@@ -674,7 +638,6 @@ ParamType HookParameterDecoder::InferType(uint64_t value) {
         return ParamType::TerritoryId;
     }
     
-    // Default to integer
     if (value <= 0xFFFFFFFF) {
         return ParamType::UInt32;
     }
@@ -682,21 +645,16 @@ ParamType HookParameterDecoder::InferType(uint64_t value) {
 }
 
 bool HookParameterDecoder::LooksLikePointer(uint64_t value) {
-    // Check if high bits are set (64-bit address space)
-    // Typical user-mode addresses: 0x00000000`00000000 - 0x00007FFF`FFFFFFFF
-    // Kernel addresses start at 0xFFFF...
     return (value >= 0x10000 && value <= 0x00007FFFFFFFFFFF);
 }
 
 bool HookParameterDecoder::LooksLikeEntityId(uint32_t value) {
-    // Entity IDs typically 0x10000000+ or 0x40000000+ or 0xE0000000+
     return (value >= 0x10000000 && value < 0x20000000) ||
            (value >= 0x40000000 && value < 0x50000000) ||
            (value >= 0xE0000000);
 }
 
 bool HookParameterDecoder::LooksLikeItemId(uint32_t value) {
-    // Items 1-50000, HQ items 1000000+
     if (value >= 1 && value <= 50000) {
         return GameData::LookupItemName(value) != nullptr;
     }
@@ -727,4 +685,4 @@ bool HookParameterDecoder::LooksLikeTerritoryId(uint32_t value) {
     return false;
 }
 
-} // namespace SapphireHook
+}   

@@ -52,11 +52,9 @@ namespace SapphireHook {
 			std::chrono::steady_clock::time_point started{};
 			std::vector<XrefRow> rows;
 
-			// Progress
 			std::atomic<size_t> mapProcessed{ 0 };
 			size_t mapTotal = 0;
 
-			// NEW: accumulate partial results for cancel
 			std::unordered_map<uintptr_t, std::vector<std::string>> interimMap;
 		} m_state;
 

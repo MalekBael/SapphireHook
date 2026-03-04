@@ -1,85 +1,83 @@
 #pragma once
 
-#include <atomic>
-#include <array>
-#include <vector>
-#include <cstdint>
-#include <chrono>
-#include <string>
-#include <cstring>
 #include "../vendor/imgui/imgui.h"
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <vector>
 
-// -------- Configuration --------
-inline constexpr size_t SLOT_COUNT       = 16384;  // number of preallocated slots
-inline constexpr size_t SLOT_PAYLOAD_CAP = 8192;   // max bytes per slot
-inline constexpr size_t UI_BATCH_CAP     = 16384;  // max packets drained to UI per frame
+inline constexpr size_t SLOT_COUNT = 16384;
+inline constexpr size_t SLOT_PAYLOAD_CAP = 8192;
+inline constexpr size_t UI_BATCH_CAP =
+16384;
 
-// -------- Data structures --------
 struct HookPacket {
-    bool outgoing = false; // true = send, false = recv
-    uint64_t connection_id = 0;
-    std::chrono::system_clock::time_point ts{};
-    uint32_t len = 0;
-    std::array<uint8_t, SLOT_PAYLOAD_CAP> buf{};
+	bool outgoing = false;
+	uint64_t connection_id = 0;
+	std::chrono::system_clock::time_point ts{};
+	uint32_t len = 0;
+	std::array<uint8_t, SLOT_PAYLOAD_CAP> buf{};
 };
 
-// Internal slot state machine
 enum class SlotState : uint8_t {
-    EMPTY = 0,
-    WRITING = 1,
-    READY = 2,
-    READING = 3
+	EMPTY = 0,
+	WRITING = 1,
+	READY = 2,
+	READING = 3
 };
 
-// Renamed: SafeHookLogger -> PacketCapture (reflects real role)
-// (Optional temporary alias for backward compatibility – remove after refactor completion)
 class PacketCapture {
 public:
-    static PacketCapture& Instance();
+	struct LastIpcSnapshot {
+		bool valid = false;
+		bool outgoing = false;
+		bool compressed = false;
+		uint64_t connection_id = 0;
+		uint16_t connType = 0xFFFF;
+		uint16_t opcode = 0;
+		uint64_t time_epoch_ms = 0;
+	};
 
-    PacketCapture(const PacketCapture&) = delete;
-    PacketCapture& operator=(const PacketCapture&) = delete;
+	static PacketCapture& Instance();
 
-    // Called from hook context (fast, non-blocking).
-    // Copies up to SLOT_PAYLOAD_CAP bytes into a preallocated slot.
-    // Returns true if enqueued, false if no slot available.
-    bool TryEnqueueFromHook(const void* data, size_t len,
-        bool outgoing, uint64_t conn_id = 0) noexcept;
+	PacketCapture(const PacketCapture&) = delete;
+	PacketCapture& operator=(const PacketCapture&) = delete;
 
-    // Called from UI/main thread.
-    // Moves all READY slots into `out` and marks them EMPTY again.
-    void DrainToVector(std::vector<HookPacket>& out);
+	bool TryEnqueueFromHook(const void* data, size_t len, bool outgoing,
+		uint64_t conn_id = 0) noexcept;
 
-    // Convenience ImGui window (simple logger view).
-    // For more control, call DrainToVector() and render your own UI.
-    void DrawImGuiSimple();
-    void DrawImGuiSimple(bool* p_open); // with close button controlled by caller
+	void DrainToVector(std::vector<HookPacket>& out);
 
-    // Embedded content (no Begin/End) for composing with other widgets
-    void DrawImGuiEmbedded();
+	void DrawImGuiSimple();
+	void DrawImGuiSimple(bool* p_open);
 
-    // hex dump helper (exposed for utility rendering helpers)
-    static void DumpHexAscii(const HookPacket& hp);
-    // colored/highlighted version — colors.size() must be >= hp.len (IM_COL32)
-    static void DumpHexAsciiColored(const HookPacket& hp, const std::vector<unsigned int>& colors);
+	void DrawImGuiEmbedded();
 
-    // Provide currently selected packet copy for external views (e.g., diagnostics pane)
-    static bool TryGetSelectedPacket(HookPacket& out);
+	static void DumpHexAscii(const HookPacket& hp);
+	static void DumpHexAsciiColored(const HookPacket& hp,
+		const std::vector<unsigned int>& colors);
+
+	static bool TryGetSelectedPacket(HookPacket& out);
+
+	static bool TryGetLastIncomingIpcSnapshot(LastIpcSnapshot& out);
+	static bool TryGetLastOutgoingIpcSnapshot(LastIpcSnapshot& out);
 
 private:
-    PacketCapture();
-    ~PacketCapture();
+	PacketCapture();
+	~PacketCapture();
 
-    static inline constexpr size_t SLOT_PROBES = 8;
+	static inline constexpr size_t SLOT_PROBES = 8;
 
-    struct Slot {
-        std::atomic<uint8_t> state; // SlotState
-        HookPacket packet;
-    };
-    alignas(64) Slot slots_[SLOT_COUNT];
+	struct Slot {
+		std::atomic<uint8_t> state;
+		HookPacket packet;
+	};
+	alignas(64) Slot slots_[SLOT_COUNT];
 
-    std::atomic<size_t> producer_fetch_{ 0 };
+	std::atomic<size_t> producer_fetch_{ 0 };
 };
 
-// Backward compatibility (remove after codebase updated)
 using SafeHookLogger = PacketCapture;

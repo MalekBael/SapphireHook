@@ -1,24 +1,9 @@
 #pragma once
-/**
- * @file ActorControlEnums.h
- * @brief ActorControl category enums for magic_enum reflection
- * 
- * Based on Sapphire's CommonActorControl.h ActorControlType enum.
- * Using magic_enum enables automatic enum-to-string conversion at compile time.
- */
-
 #include <cstdint>
 
 namespace SapphireHook {
 
-/**
- * @brief ActorControl (Order) packet category types
- * 
- * These categories are used in ActorControl, ActorControlSelf, and ActorControlTarget
- * packets (opcodes 0x0142, 0x0143, 0x0144) to distinguish the type of control command.
- */
 enum class ActorControlCategory : uint16_t {
-    // === Core Combat & Status (0x00 - 0x1F) ===
     ToggleWeapon = 0x00,
     AutoAttack = 0x01,
     SetStatus = 0x02,
@@ -47,7 +32,6 @@ enum class ActorControlCategory : uint16_t {
     LevelUpLimitBreakRate = 0x1C,
     SetCasting = 0x1D,
     
-    // === UI & Effects (0x20 - 0x5F) ===
     CombatIndicationShow = 0x22,
     SpawnEffect = 0x25,
     ToggleInvisible = 0x26,
@@ -76,7 +60,6 @@ enum class ActorControlCategory : uint16_t {
     SetItemLevel = 0x5A,
     ItemRepairMsg = 0x5C,
     
-    // === Actions & Learning (0x60 - 0x8F) ===
     RequestEmote = 0x5E,
     SetCriticalHit = 0x5F,
     SetDirectHit = 0x60,
@@ -109,13 +92,13 @@ enum class ActorControlCategory : uint16_t {
     ActionRejected = 0x8D,
     MoveType = 0x8E,
     
-    // === Daily/Quest/Fate (0x90 - 0xBF) ===
     SyncReset = 0x8F,
     DailyQuestSeed = 0x90,
     SetBeastReputation = 0x91,
     QuestOpenGlobalFlag = 0x93,
     LogMessage = 0x95,
     SetModelScale = 0x96,
+    SetRetainerCount = 0x98,         
     SetFateProgress = 0x9B,
     SetFateRank = 0x9D,
     SetPvpRank = 0x9E,
@@ -134,7 +117,6 @@ enum class ActorControlCategory : uint16_t {
     RequestGcMemberCount = 0xB1,
     SetForceEquip = 0xB5,
     
-    // === Teleport & Zone (0xC0 - 0xFF) ===
     Appear = 0xC8,
     ZoneInDefaultPos = 0xC9,
     SetZoneIntention = 0xCA,
@@ -160,7 +142,6 @@ enum class ActorControlCategory : uint16_t {
     SetBuddyAction = 0xE4,
     SetTerritoryType = 0xF0,
     
-    // === Companion/Mount (0xFD - 0x12F) ===
     CompanionUnlock = 0xFD,
     ObtainBarding = 0xFE,
     EquipBarding = 0xFF,
@@ -180,7 +161,6 @@ enum class ActorControlCategory : uint16_t {
     SetMinionAction = 0x113,
     SetOrnamentAction = 0x114,
     
-    // === Emote/Pose (0x120 - 0x14F) ===
     Emote = 0x122,
     EmoteInterrupt = 0x123,
     EmoteModeInterrupt = 0x124,
@@ -194,7 +174,6 @@ enum class ActorControlCategory : uint16_t {
     CraftingQualityUp = 0x12E,
     CraftingStatusUp = 0x12F,
     
-    // === Gathering/Mining (0x130 - 0x15F) ===
     GatheringSenseMsg = 0x130,
     PartyMsg = 0x131,
     GatheringSenseMsg1 = 0x132,
@@ -212,7 +191,6 @@ enum class ActorControlCategory : uint16_t {
     GatheringYield = 0x13E,
     GatheringAttempts = 0x13F,
     
-    // === Fishing (0x140 - 0x15F) ===
     FishingMsg = 0x140,
     FishingStart = 0x141,
     FishingTotalFishCaught = 0x142,
@@ -227,7 +205,6 @@ enum class ActorControlCategory : uint16_t {
     SpearFishingStart = 0x14B,
     SpearFishingEnd = 0x14C,
     
-    // === Materia/Glamour/Dye (0x15E - 0x170) ===
     MateriaConvertMsg = 0x15E,
     MeldSuccessMsg = 0x15F,
     MeldFailMsg = 0x160,
@@ -244,7 +221,6 @@ enum class ActorControlCategory : uint16_t {
     GlamourCastMsg = 0x16D,
     GlamourRemoveMsg = 0x16E,
     
-    // === Gold Saucer (0x2A0 - 0x2CF) ===
     GoldSaucerUpdate = 0x2A0,
     SetMGP = 0x2A1,
     ChocoboRaceResult = 0x2A2,
@@ -254,18 +230,15 @@ enum class ActorControlCategory : uint16_t {
     LordOfVerminion = 0x2A6,
     MahjongUpdate = 0x2A7,
     
-    // === Housing (0x3E9+) ===
     HousingPlaceItem = 0x3E9,
     HousingMoveItem = 0x3EA,
     HousingRemoveItem = 0x3EB,
     HousingEditMode = 0x3F3,
     
-    // === Island Sanctuary (0x600+) ===
     IslandSanctuaryInit = 0x600,
     IslandSanctuaryGather = 0x601,
     
-    // === Misc ===
     SetCurrency = 0x800,
 };
 
-} // namespace SapphireHook
+}   

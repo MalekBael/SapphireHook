@@ -27,13 +27,12 @@ static std::atomic<bool> g_unloadStarted{ false };
 
 bool g_SafeToInitialize = false;
 
-// New: prevent accidental unloads via false-positive hotkey while minimized/not focused
 static bool ShouldAcceptHotkeys()
 {
     HWND gameWindow = FindWindowW(L"FFXIVGAME", nullptr);
     if (!gameWindow) return false;
-    if (IsIconic(gameWindow)) return false;                  // minimized => ignore
-    return GetForegroundWindow() == gameWindow;              // only when game has focus
+    if (IsIconic(gameWindow)) return false;                     
+    return GetForegroundWindow() == gameWindow;                   
 }
 
 static void RebindConsoleStreams()
@@ -51,10 +50,8 @@ static void RebindConsoleStreams()
 
 static bool IsGameWindowMinimized();
 
-// Centralized, idempotent cleanup (safe to call multiple times)
 static void PerformSafeUnload()
 {
-    // Ensure we only run once even if called by hotkey and export
     bool expected = false;
     if (!g_unloadStarted.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
         return;
@@ -63,12 +60,10 @@ static void PerformSafeUnload()
     try {
         LogInfo("=== Starting Safe DLL Unload ===");
 
-        // PHASE 1: Stop all monitoring and close UI windows
         LogInfo("Phase 1: Stopping monitors and closing windows...");
         if (SapphireHook::UIManager::HasInstance()) {
             auto& ui = SapphireHook::UIManager::GetInstance();
 
-            // Stop and unhook the function monitor first (removes MinHook/VEH)
             auto* functionMonitor =
                 dynamic_cast<FunctionCallMonitor*>(ui.GetModule("function_monitor"));
             if (functionMonitor) {
@@ -77,35 +72,27 @@ static void PerformSafeUnload()
                 LogInfo("Function monitor safely stopped");
             }
 
-            // Close all module windows
             auto& modules = ui.GetModules();
             for (auto& module : modules)
                 if (module) module->SetWindowOpen(false);
             LogInfo("All module windows closed");
         }
 
-        // PHASE 2: Signal overlay hooks to stop processing (before disabling hooks)
-        // This allows hooks to see the flag and exit cleanly before MinHook removes them
         LogInfo("Phase 2: Signaling overlay shutdown...");
-        CleanupOverlay();  // This sets g_overlayShutdown flag and waits 50ms
+        CleanupOverlay();         
         LogInfo("Overlay cleanup completed");
 
-        // PHASE 3: Disable ALL hooks (overlay + network) 
-        // After this, hooks will jump directly to original functions
         LogInfo("Phase 3: Disabling all hooks...");
         MH_DisableHook(MH_ALL_HOOKS);
         LogInfo("All hooks disabled via MH_DisableHook(MH_ALL_HOOKS)");
         
-        // Wait for any in-flight hook calls that may have started before disable
         LogInfo("Waiting for in-flight hook calls to complete...");
-        Sleep(300);  // Increased from 200ms for safety
+        Sleep(300);       
 
-        // PHASE 4: Shutdown UI manager
         LogInfo("Phase 4: Shutting down UIManager...");
         SapphireHook::UIManager::Shutdown();
         LogInfo("UIManager shutdown completed");
 
-        // PHASE 5: Shutdown high-level network hooks
         LogInfo("Phase 5: Shutting down NetworkHooks...");
         try {
             SapphireHook::NetworkHooks::GetInstance().Shutdown();
@@ -114,33 +101,26 @@ static void PerformSafeUnload()
             LogWarning("NetworkHooks shutdown exception (continuing)");
         }
 
-        // PHASE 6: Shutdown HookManager and MinHook
         LogInfo("Phase 6: Shutting down HookManager...");
         SapphireHook::HookManager::Shutdown();
         LogInfo("HookManager shutdown completed");
 
         LogInfo("=== Safe DLL Unload Complete ===");
         
-        // Final wait to ensure all logging completes before spdlog shutdown
         Sleep(100);
         
-        // Signal that logging should stop - no more logging after this point
         SapphireHook::Logger::PrepareForShutdown();
         Sleep(50);
         
-        // Flush all spdlog sinks before shutdown
         spdlog::apply_all([](std::shared_ptr<spdlog::logger> l) {
             l->flush();
         });
         Sleep(50);
         
-        // Shutdown spdlog to release file handles
         spdlog::shutdown();
         
-        // Final wait before thread exit
         Sleep(200);
     } catch (...) {
-        // Don't log here - spdlog may already be shut down
     }
 }
 
@@ -149,7 +129,6 @@ static DWORD WINAPI ShutdownThread(LPVOID)
     __try {
         PerformSafeUnload();
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        // best-effort shutdown
     }
 
     if (g_hModule) {
@@ -158,7 +137,6 @@ static DWORD WINAPI ShutdownThread(LPVOID)
     return 0;
 }
 
-// Exported entry to request a clean unload from an injector or UI button
 extern "C" __declspec(dllexport) void __stdcall SapphireHook_Shutdown()
 {
     HANDLE th = CreateThread(nullptr, 0, ShutdownThread, nullptr, 0, nullptr);
@@ -179,20 +157,15 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
     }
 
     try {
-        // Support custom directory via env:
-        //   SAPPHIREHOOK_LOG_DIR=<absolute dir>
-        //   SAPPHIREHOOK_LOG_NOCREATE=1  (do not create if missing; fallback to default)
         const char* envDir = std::getenv("SAPPHIREHOOK_LOG_DIR");
         bool noCreate = (std::getenv("SAPPHIREHOOK_LOG_NOCREATE") != nullptr);
         if (envDir && *envDir) {
-            // treatAsDirectory=true, createDirectoryIfMissing = !noCreate
             SapphireHook::Logger::Initialize(envDir,
                                              true,
                                              SapphireHook::LogLevel::Debug,
                                              true,
                                              !noCreate);
         } else {
-            // default: supply nominal name; we want default temp\SapphireHook
             SapphireHook::Logger::Initialize("sapphire_hook.log",
                                              true,
                                              SapphireHook::LogLevel::Debug,
@@ -229,9 +202,7 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
         Sleep(1000);
     }
 
-    // Initialize game data lookups (items, actions, etc.) from sqpack
     try {
-        // First check if user has set a custom sqpack path in settings
         auto& settings = SettingsManager::Instance();
         std::filesystem::path sqpackPath;
         
@@ -239,11 +210,8 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
             sqpackPath = settings.GetSqpackPath();
             LogInfo("GameData: Using custom sqpack path from settings: " + sqpackPath.string());
         } else {
-            // Auto-detect: Get FFXIV sqpack path from the game's executable directory
-            // The injected process is ffxiv_dx11.exe at <game_install>/game/ffxiv_dx11.exe
-            // sqpack is at <game_install>/game/sqpack
             wchar_t gamePath[MAX_PATH];
-            GetModuleFileNameW(nullptr, gamePath, MAX_PATH);  // nullptr = main exe (ffxiv_dx11.exe)
+            GetModuleFileNameW(nullptr, gamePath, MAX_PATH);       
             sqpackPath = std::filesystem::path(gamePath).parent_path() / "sqpack";
             LogInfo("GameData: Auto-detected sqpack path: " + sqpackPath.string());
         }
@@ -273,7 +241,6 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
         LogError("InitHooks failed with C++ exception");
     }
 
-    // Initialize high-level network hooks (safe, non-fatal if fails)
     try {
         LogInfo("Initializing high-level network hooks...");
         if (SapphireHook::NetworkHooks::GetInstance().Initialize()) {
@@ -317,8 +284,8 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
         LogInfo("UIManager instance: " + std::to_string(reinterpret_cast<uintptr_t>(&uiManager)));
 
         uiManager.RegisterDefaultModules();
-        uiManager.VerifyDefaultModules();      // dynamic verification
-        uiManager.LogModuleSummary();          // enumerate what actually loaded
+        uiManager.VerifyDefaultModules();        
+        uiManager.LogModuleSummary();              
 
         LogInfo("UI module initialization sequence complete");
     } catch (const std::exception& e) {
@@ -330,21 +297,18 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
     LogInfo("=== All systems initialized! ===");
     LogInfo("Press INSERT to toggle menu, END to unload");
 
-    // New: allow disabling the END hotkey via environment
     const bool disableEndHotkey = (std::getenv("SAPPHIREHOOK_DISABLE_END_HOTKEY") != nullptr);
-    // New: robust edge-based hotkey detection
     static bool s_endWasDown = false;
 
     while (true) {
-        // Robust END detection: only when game is foreground, not minimized, and on down edge
         bool endPressed = false;
         if (!disableEndHotkey && ShouldAcceptHotkeys()) {
             SHORT state = GetAsyncKeyState(VK_END);
-            bool endDown = (state & 0x8000) != 0;      // high bit: currently down
-            endPressed = endDown && !s_endWasDown;     // edge detect
+            bool endDown = (state & 0x8000) != 0;          
+            endPressed = endDown && !s_endWasDown;       
             s_endWasDown = endDown;
         } else {
-            s_endWasDown = false; // reset when not accepting hotkeys
+            s_endWasDown = false;      
         }
 
         const bool uiUnload = (UIManager::HasInstance() && UIManager::IsUnloadRequested());
@@ -355,7 +319,6 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
             break;
         }
 
-        // Respect UI unload when not minimized; defer if minimized
         if (uiUnload && !minimized) {
             LogInfo("Unloading requested by UI");
             break;
@@ -373,7 +336,6 @@ DWORD WINAPI MainThread(LPVOID lpReserved)
         Sleep(100);
     }
 
-    // Centralized cleanup
     PerformSafeUnload();
 
     LogInfo("SapphireHook unloading...");
@@ -392,12 +354,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
             g_hModule = hModule;
             DisableThreadLibraryCalls(hModule);
             
-            // Add our DLL's directory to the DLL search path so dependencies can be found
             wchar_t dllPath[MAX_PATH];
             if (GetModuleFileNameW(hModule, dllPath, MAX_PATH) > 0) {
                 std::filesystem::path dllDir = std::filesystem::path(dllPath).parent_path();
                 SetDllDirectoryW(dllDir.c_str());
-                // Also add to PATH for any child processes or delay-loaded DLLs
                 AddDllDirectory(dllDir.c_str());
             }
             
@@ -405,7 +365,6 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID lpReserved)
         }
         break;
     case DLL_PROCESS_DETACH:
-        // No heavy work here; PerformSafeUnload runs from MainThread or ShutdownThread.
         break;
     }
     return TRUE;

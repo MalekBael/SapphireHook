@@ -312,7 +312,7 @@ void WorldOverlayManager::RenderBNpcOverlays() {
             const char* name = GameData::LookupBNpcName(npc.NameId);
             std::string label = name ? std::format("{} L{}", name, npc.Level) 
                                      : std::format("BNpc {} L{}", npc.NameId, npc.Level);
-            renderer.DrawText3D(top, label, color, 0.8f);
+            renderer.DrawText3D(top, label, color, 0.8f * m_settings.LabelScale);
         }
     }
 }
@@ -344,7 +344,7 @@ void WorldOverlayManager::RenderENpcOverlays() {
             top.y += 2.5f * m_settings.Scale;
             const char* name = GameData::LookupENpcName(npc.ENpcId);
             std::string label = name ? name : std::format("ENpc {}", npc.ENpcId);
-            renderer.DrawText3D(top, label, color, 0.8f);
+            renderer.DrawText3D(top, label, color, 0.8f * m_settings.LabelScale);
         }
     }
 }
@@ -374,7 +374,7 @@ void WorldOverlayManager::RenderEventObjectOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.5f * m_settings.Scale;
-            renderer.DrawText3D(labelPos, std::format("EObj {}", obj.BaseId), color, 0.7f);
+            renderer.DrawText3D(labelPos, std::format("EObj {}", obj.BaseId), color, 0.7f * m_settings.LabelScale);
         }
     }
 }
@@ -411,7 +411,7 @@ void WorldOverlayManager::RenderFateRangeOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 2.0f;
-            renderer.DrawText3D(labelPos, std::format("FATE #{}", idx), color, 1.0f);
+            renderer.DrawText3D(labelPos, std::format("FATE #{}", idx), color, 1.0f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -448,7 +448,7 @@ void WorldOverlayManager::RenderExitOverlays() {
             const char* destName = GameData::LookupTerritoryName(exit.DestTerritoryType);
             std::string label = destName ? std::format("-> {}", destName) 
                                          : std::format("-> Zone {}", exit.DestTerritoryType);
-            renderer.DrawText3D(labelPos, label, color, 1.0f);
+            renderer.DrawText3D(labelPos, label, color, 1.0f * m_settings.LabelScale);
         }
     }
 }
@@ -490,7 +490,7 @@ void WorldOverlayManager::RenderPopRangeOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.5f;
-            renderer.DrawText3D(labelPos, std::format("Pop #{}", idx), color, 0.7f);
+            renderer.DrawText3D(labelPos, std::format("Pop #{}", idx), color, 0.7f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -522,7 +522,7 @@ void WorldOverlayManager::RenderGatheringOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 2.0f * m_settings.Scale;
-            renderer.DrawText3D(labelPos, std::format("Gather #{}", idx), color, 0.6f);
+            renderer.DrawText3D(labelPos, std::format("Gather #{}", idx), color, 0.6f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -554,7 +554,7 @@ void WorldOverlayManager::RenderTreasureOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.0f * m_settings.Scale;
-            renderer.DrawText3D(labelPos, std::format("Chest #{}", idx), color, 0.6f);
+            renderer.DrawText3D(labelPos, std::format("Chest #{}", idx), color, 0.6f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -597,7 +597,7 @@ void WorldOverlayManager::RenderAetheryteOverlays() {
             } else {
                 label = "Aetheryte";
             }
-            renderer.DrawText3D(labelPos, label.c_str(), color, 1.0f);
+            renderer.DrawText3D(labelPos, label.c_str(), color, 1.0f * m_settings.LabelScale);
         }
     }
 }
@@ -660,7 +660,7 @@ void WorldOverlayManager::RenderMapRangeOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += halfExtents.y + 0.5f;
-            renderer.DrawText3D(labelPos, std::format("Map #{}", idx), color, 0.6f);
+            renderer.DrawText3D(labelPos, std::format("Map #{}", idx), color, 0.6f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -694,7 +694,7 @@ void WorldOverlayManager::RenderEventRangeOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.0f;
-            renderer.DrawText3D(labelPos, std::format("EvRange #{}", idx), color, 0.5f);
+            renderer.DrawText3D(labelPos, std::format("EvRange #{}", idx), color, 0.5f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -725,7 +725,7 @@ void WorldOverlayManager::RenderMarkerOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 top = pos;
             top.y += 3.5f * m_settings.Scale;
-            renderer.DrawText3D(top, std::format("Marker T{}", m.Type), color, 0.6f);
+            renderer.DrawText3D(top, std::format("Marker T{}", m.Type), color, 0.6f * m_settings.LabelScale);
         }
     }
 }
@@ -861,8 +861,8 @@ void WorldOverlayManager::RenderNavMeshPathOverlays() {
         DebugVisuals::Vec3 startPos(path.startPos.x, path.startPos.y + 2.0f, path.startPos.z);
         DebugVisuals::Vec3 endPos(path.endPos.x, path.endPos.y + 2.0f, path.endPos.z);
         
-        renderer.DrawText3D(startPos, "START", startColor, 0.8f);
-        renderer.DrawText3D(endPos, "TARGET", endColor, 0.8f);
+        renderer.DrawText3D(startPos, "START", startColor, 0.8f * m_settings.LabelScale);
+        renderer.DrawText3D(endPos, "TARGET", endColor, 0.8f * m_settings.LabelScale);
         
         // Draw target marker
         DebugVisuals::Vec3 targetGround(path.endPos.x, path.endPos.y, path.endPos.z);
@@ -921,7 +921,7 @@ void WorldOverlayManager::RenderOffMeshLinkOverlays() {
                     (start.z + end.z) * 0.5f
                 );
                 std::string label = conn.direction == 0 ? "Jump (1-way)" : "Jump (2-way)";
-                renderer.DrawText3D(labelPos, label, linkColor, 0.5f);
+                renderer.DrawText3D(labelPos, label, linkColor, 0.5f * m_settings.LabelScale);
             }
         }
     }
@@ -964,7 +964,7 @@ void WorldOverlayManager::RenderBgPartOverlays() {
             std::string label = (lastSlash != std::string::npos) 
                 ? part.ModelPath.substr(lastSlash + 1) 
                 : part.ModelPath;
-            renderer.DrawText3D(labelPos, label, color, 0.4f);
+            renderer.DrawText3D(labelPos, label, color, 0.4f * m_settings.LabelScale);
         }
     }
 }
@@ -1015,7 +1015,7 @@ void WorldOverlayManager::RenderServerPathOverlays() {
         if (m_settings.ShowLabels && !path.ControlPoints.empty()) {
             const auto& firstPt = path.ControlPoints[0];
             DebugVisuals::Vec3 labelPos(firstPt.Position.x, firstPt.Position.y + 1.0f, firstPt.Position.z);
-            renderer.DrawText3D(labelPos, std::format("Path {}", path.PathId), color, 0.5f);
+            renderer.DrawText3D(labelPos, std::format("Path {}", path.PathId), color, 0.5f * m_settings.LabelScale);
         }
     }
 }
@@ -1092,7 +1092,7 @@ void WorldOverlayManager::RenderNavMeshRangeOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += halfExtents.y + 0.5f;
-            renderer.DrawText3D(labelPos, std::format("NavMesh #{}", idx), color, 0.5f);
+            renderer.DrawText3D(labelPos, std::format("NavMesh #{}", idx), color, 0.5f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -1128,7 +1128,7 @@ void WorldOverlayManager::RenderDoorRangeOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += height * 0.5f + 0.5f;
-            renderer.DrawText3D(labelPos, std::format("Door #{}", idx), color, 0.6f);
+            renderer.DrawText3D(labelPos, std::format("Door #{}", idx), color, 0.6f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -1163,7 +1163,7 @@ void WorldOverlayManager::RenderGimmickRangeOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.5f;
-            renderer.DrawText3D(labelPos, std::format("Gimmick #{}", idx), color, 0.5f);
+            renderer.DrawText3D(labelPos, std::format("Gimmick #{}", idx), color, 0.5f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -1203,7 +1203,7 @@ void WorldOverlayManager::RenderKeepRangeOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 2.0f;
-            renderer.DrawText3D(labelPos, std::format("Keep #{}", idx), color, 1.0f);
+            renderer.DrawText3D(labelPos, std::format("Keep #{}", idx), color, 1.0f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -1244,7 +1244,7 @@ void WorldOverlayManager::RenderChairMarkerOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 0.8f * m_settings.Scale;
-            renderer.DrawText3D(labelPos, std::format("Chair #{}", idx), color, 0.5f);
+            renderer.DrawText3D(labelPos, std::format("Chair #{}", idx), color, 0.5f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -1287,7 +1287,7 @@ void WorldOverlayManager::RenderVfxLocationOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.0f * m_settings.Scale;
-            renderer.DrawText3D(labelPos, std::format("VFX #{}", idx), color, 0.4f);
+            renderer.DrawText3D(labelPos, std::format("VFX #{}", idx), color, 0.4f * m_settings.LabelScale);
         }
         ++idx;
     }
@@ -1322,7 +1322,7 @@ void WorldOverlayManager::RenderSoundLocationOverlays() {
         if (m_settings.ShowLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.0f * m_settings.Scale;
-            renderer.DrawText3D(labelPos, std::format("Sound #{}", idx), color, 0.4f);
+            renderer.DrawText3D(labelPos, std::format("Sound #{}", idx), color, 0.4f * m_settings.LabelScale);
         }
         ++idx;
     }

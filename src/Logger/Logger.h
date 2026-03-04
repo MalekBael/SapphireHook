@@ -13,7 +13,6 @@
 #include <type_traits>
 #include <iomanip>
 
-// spdlog - SPDLOG_USE_STD_FORMAT is defined by the NuGet package
 #include <spdlog/spdlog.h>
 #include <spdlog/logger.h>
 
@@ -22,13 +21,12 @@
 #endif
 
 namespace SapphireHook {
-	/// @brief Log levels matching spdlog levels for easy conversion
 	enum class LogLevel : int {
-		Debug = 0,       // spdlog::level::debug
-		Information = 1, // spdlog::level::info
-		Warning = 2,     // spdlog::level::warn
-		Error = 3,       // spdlog::level::err
-		Fatal = 4        // spdlog::level::critical
+		Debug = 0,        
+		Information = 1,  
+		Warning = 2,      
+		Error = 3,        
+		Fatal = 4         
 	};
 
 	constexpr const char* LogLevelToString(LogLevel level) {
@@ -42,7 +40,6 @@ namespace SapphireHook {
 		}
 	}
 
-	/// @brief Convert our LogLevel to spdlog level
 	inline spdlog::level::level_enum ToSpdlogLevel(LogLevel level) {
 		switch (level) {
 		case LogLevel::Debug:       return spdlog::level::debug;
@@ -75,7 +72,6 @@ namespace SapphireHook {
 		lhs = lhs | rhs; return lhs;
 	}
 
-	/// @brief Structured logging context for key-value pairs
 	class LogContext {
 		std::unordered_map<std::string, std::string> m_data;
 	public:
@@ -99,7 +95,6 @@ namespace SapphireHook {
 
 	struct LoggerConfig;
 
-	/// @brief Binary logger for high-volume data (stub implementation)
 	class BinaryLogger {
 		void* m_mappedMemory = nullptr;
 		size_t m_mappedSize = 0;
@@ -110,14 +105,12 @@ namespace SapphireHook {
 		void Flush();
 	};
 
-	/// @brief Main logger class backed by spdlog
-	/// Provides a stable API while leveraging spdlog for performance and features
 	class Logger {
 		static std::unique_ptr<Logger> s_instance;
 		static std::mutex s_mutex;
-		static std::atomic<bool> s_shuttingDown;  // Prevents logging after shutdown
+		static std::atomic<bool> s_shuttingDown;      
 
-		std::shared_ptr<spdlog::logger> m_logger;         // Main logger (multi-sink)
+		std::shared_ptr<spdlog::logger> m_logger;            
 		LogLevel m_minimumLevel = LogLevel::Information;
 		bool m_logToConsole = true;
 		bool m_logToFile = true;
@@ -155,7 +148,6 @@ namespace SapphireHook {
 		Logger();
 		~Logger();
 
-		/// @brief Initialize the logger with optional configuration
 		static bool Initialize(const std::filesystem::path& pathOrFile,
 			bool enableConsole = true,
 			LogLevel minLevel = LogLevel::Information,
@@ -164,42 +156,33 @@ namespace SapphireHook {
 
 		static Logger& Instance();
 
-		/// @brief Signal that logging should stop (call before spdlog::shutdown)
 		static void PrepareForShutdown();
 		
-		/// @brief Check if logging is still safe
 		static bool IsShuttingDown() { return s_shuttingDown.load(std::memory_order_acquire); }
 
-		// Core logging methods
 		void Debug(const std::string& message);
 		void Information(const std::string& message);
 		void Warning(const std::string& message);
 		void Error(const std::string& message);
 		void Fatal(const std::string& message);
 
-		// Printf-style logging
 		void DebugF(const char* format, ...);
 		void InformationF(const char* format, ...);
 		void WarningF(const char* format, ...);
 		void ErrorF(const char* format, ...);
 
-		// Context-aware logging
 		void InfoWithContext(const std::string& message, const LogContext& context);
 		void ErrorWithContext(const std::string& message, const LogContext& context);
 
-		/// @brief Format an address as hex string
 		static std::string HexFormat(uintptr_t value);
 
-		/// @brief Log an exception with optional context
 		void LogException(const std::exception& ex, std::string_view context = "");
 
-		// Configuration setters
 		void SetMinimumLevel(LogLevel level);
 		void SetConsoleOutput(bool enable) { m_logToConsole = enable; }
 		void SetFileOutput(bool enable) { m_logToFile = enable; }
 		void SetAsyncLogging(bool enable);
 
-		// Configuration getters
 		bool IsConsoleOutputEnabled() const { return m_logToConsole; }
 		bool IsFileOutputEnabled() const { return m_logToFile; }
 		LogLevel GetMinimumLevel() const { return m_minimumLevel; }
@@ -213,7 +196,6 @@ namespace SapphireHook {
 		const LoggerMetrics& GetMetrics() const { return m_metrics; }
 		void ResetMetrics() { m_metrics.Reset(); }
 
-		// Category filtering
 		void SetEnabledCategories(uint32_t categories) { m_enabledCategories = categories; }
 		void EnableCategory(LogCategory category) { m_enabledCategories |= static_cast<uint32_t>(category); }
 		void DisableCategory(LogCategory category) { m_enabledCategories &= ~static_cast<uint32_t>(category); }
@@ -237,10 +219,8 @@ namespace SapphireHook {
 
 		void ReattachConsole();
 
-		/// @brief Get default temp directory: %TEMP%\SapphireHook
 		static std::filesystem::path GetDefaultTempDir();
 
-		/// @brief Get the underlying spdlog logger (for advanced use)
 		std::shared_ptr<spdlog::logger> GetSpdLogger() const { return m_logger; }
 
 	private:
@@ -269,7 +249,6 @@ namespace SapphireHook {
 		bool SaveToFile(const std::filesystem::path& configPath) { (void)configPath; return true; }
 	};
 
-	// Convenience free functions - these are the primary API used throughout the codebase
 	inline void LogDebug(const std::string& message) { Logger::Instance().Debug(message); }
 	inline void LogInfo(const std::string& message) { Logger::Instance().Information(message); }
 	inline void LogWarning(const std::string& message) { Logger::Instance().Warning(message); }
@@ -289,4 +268,4 @@ namespace SapphireHook {
 	inline void LogException(const std::exception& ex, std::string_view ctx = {}) {
 		Logger::Instance().LogException(ex, ctx);
 	}
-} // namespace SapphireHook
+}   

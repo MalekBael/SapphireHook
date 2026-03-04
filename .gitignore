@@ -401,14 +401,10 @@ external/*/bin/
 /prompt.txt
 
 # Local-only instruction files
-/copilot-instructions.md
-/.github/copilot-instructions.md
+/.github/
 
 # VS Code C++ configuration (local)
 CppProperties.json
-
-# Local developer scratch docs (moved under notes/; notes/ is ignored)
-/PseudocodeGenerator.md
 
 # Tool outputs / local artifacts
 /tools/
@@ -435,3 +431,5 @@ data/data-sig.json
 data/data-sig.json
 /data/ida/
 /notes/
+/build_cmake/
+/build_vs/

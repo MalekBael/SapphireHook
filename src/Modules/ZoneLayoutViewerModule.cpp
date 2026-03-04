@@ -450,6 +450,10 @@ void ZoneLayoutViewerModule::RenderOverlaySettings() {
         ImGui::SliderFloat("Alpha", &m_overlayAlpha, 0.1f, 1.0f, "%.2f");
         ImGui::SliderFloat("Scale", &m_overlayScale, 0.1f, 5.0f, "%.2f");
         ImGui::SliderFloat("Max Distance", &m_maxRenderDistance, 50.0f, 500.0f, "%.0f");
+        if (m_showLabels) {
+            ImGui::SetNextItemWidth(120.0f);
+            ImGui::SliderFloat("Label Scale", &m_labelScale, 0.5f, 5.0f, "%.1f");
+        }
         ImGui::TreePop();
     }
 }
@@ -821,7 +825,7 @@ void ZoneLayoutViewerModule::RenderBNpcOverlays() {
             const char* name = GameData::LookupBNpcName(npc.NameId);
             std::string label = name ? std::format("{} L{}", name, npc.Level) 
                                      : std::format("BNpc {} L{}", npc.NameId, npc.Level);
-            renderer.DrawText3D(top, label, color, 0.8f);
+            renderer.DrawText3D(top, label, color, 0.8f * m_labelScale);
         }
     }
 }
@@ -857,7 +861,7 @@ void ZoneLayoutViewerModule::RenderENpcOverlays() {
         if (m_showLabels) {
             const char* name = GameData::LookupENpcName(npc.ENpcId);
             std::string label = name ? name : std::format("ENpc {}", npc.ENpcId);
-            renderer.DrawText3D(top, label, color, 0.8f);
+            renderer.DrawText3D(top, label, color, 0.8f * m_labelScale);
         }
     }
 }
@@ -925,7 +929,7 @@ void ZoneLayoutViewerModule::RenderExitOverlays() {
             const char* destName = GameData::LookupTerritoryName(exit.DestTerritoryType);
             std::string label = destName ? std::format("-> {}", destName) 
                                          : std::format("-> Zone {}", exit.DestTerritoryType);
-            renderer.DrawText3D(labelPos, label, color, 1.0f);
+            renderer.DrawText3D(labelPos, label, color, 1.0f * m_labelScale);
         }
     }
 }
@@ -971,7 +975,7 @@ void ZoneLayoutViewerModule::RenderPopRangeOverlays() {
         if (m_showLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.5f;
-            renderer.DrawText3D(labelPos, std::format("Pop #{}", idx), color, 0.7f);
+            renderer.DrawText3D(labelPos, std::format("Pop #{}", idx), color, 0.7f * m_labelScale);
         }
         
         ++idx;
@@ -1009,7 +1013,7 @@ void ZoneLayoutViewerModule::RenderMapRangeOverlays() {
         if (m_showLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += halfExtents.y + 0.5f;
-            renderer.DrawText3D(labelPos, std::format("Map #{}", idx), color, 0.6f);
+            renderer.DrawText3D(labelPos, std::format("Map #{}", idx), color, 0.6f * m_labelScale);
         }
         
         ++idx;
@@ -1386,7 +1390,7 @@ void ZoneLayoutViewerModule::RenderEventObjectOverlays() {
         if (m_showLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.5f * m_overlayScale;
-            renderer.DrawText3D(labelPos, std::format("EObj {}", obj.BaseId), color, 0.7f);
+            renderer.DrawText3D(labelPos, std::format("EObj {}", obj.BaseId), color, 0.7f * m_labelScale);
         }
     }
 }
@@ -1427,7 +1431,7 @@ void ZoneLayoutViewerModule::RenderFateRangeOverlays() {
         if (m_showLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 2.0f;
-            renderer.DrawText3D(labelPos, std::format("FATE #{}", idx), color, 1.0f);
+            renderer.DrawText3D(labelPos, std::format("FATE #{}", idx), color, 1.0f * m_labelScale);
         }
         
         ++idx;
@@ -1466,7 +1470,7 @@ void ZoneLayoutViewerModule::RenderGatheringOverlays() {
         if (m_showLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 2.0f * m_overlayScale;
-            renderer.DrawText3D(labelPos, std::format("Gather #{}", idx), color, 0.6f);
+            renderer.DrawText3D(labelPos, std::format("Gather #{}", idx), color, 0.6f * m_labelScale);
         }
         
         ++idx;
@@ -1500,7 +1504,7 @@ void ZoneLayoutViewerModule::RenderTreasureOverlays() {
         if (m_showLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.0f * m_overlayScale;
-            renderer.DrawText3D(labelPos, std::format("Chest #{}", idx), color, 0.6f);
+            renderer.DrawText3D(labelPos, std::format("Chest #{}", idx), color, 0.6f * m_labelScale);
         }
         
         ++idx;
@@ -1539,7 +1543,7 @@ void ZoneLayoutViewerModule::RenderAetheryteOverlays() {
         if (m_showLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 5.0f * m_overlayScale;
-            renderer.DrawText3D(labelPos, "Aetheryte", color, 1.0f);
+            renderer.DrawText3D(labelPos, "Aetheryte", color, 1.0f * m_labelScale);
         }
         
         ++idx;
@@ -1575,7 +1579,7 @@ void ZoneLayoutViewerModule::RenderEventRangeOverlays() {
         if (m_showLabels) {
             DebugVisuals::Vec3 labelPos = pos;
             labelPos.y += 1.0f;
-            renderer.DrawText3D(labelPos, std::format("EvRange #{}", idx), color, 0.5f);
+            renderer.DrawText3D(labelPos, std::format("EvRange #{}", idx), color, 0.5f * m_labelScale);
         }
         
         ++idx;
@@ -1614,7 +1618,7 @@ void ZoneLayoutViewerModule::RenderMarkerOverlays() {
         if (m_showLabels) {
             DebugVisuals::Vec3 labelPos = top;
             labelPos.y += 0.5f;
-            renderer.DrawText3D(labelPos, std::format("Marker T{}", m.Type), color, 0.6f);
+            renderer.DrawText3D(labelPos, std::format("Marker T{}", m.Type), color, 0.6f * m_labelScale);
         }
         
         ++idx;

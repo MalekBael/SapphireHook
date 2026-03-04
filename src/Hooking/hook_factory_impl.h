@@ -1,6 +1,6 @@
 #pragma once
 
-#include "hook_manager.h"          // Must provide IHook, HookManager::CreateHook, ValidateHookAddress, IsAddressHooked
+#include "hook_manager.h"                
 #include "../Logger/Logger.h"
 
 #include <memory>
@@ -9,11 +9,8 @@
 
 namespace SapphireHook {
 
-// Provided by another translation unit (implemented in hook_manager.cpp or similar)
 extern bool GetMainModuleInfo(uintptr_t& baseAddress, size_t& moduleSize);
 
-// HookFactory: creates hooks given a detour function pointer.
-// TDelegate is the detour function pointer type (e.g. decltype(&MyDetour)).
 class HookFactory {
 public:
     HookFactory() = default;
@@ -53,4 +50,4 @@ public:
     }
 };
 
-} // namespace SapphireHook
+}   

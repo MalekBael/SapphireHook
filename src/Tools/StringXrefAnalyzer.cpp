@@ -14,10 +14,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
-#include <sstream> // NEW
+#include <sstream>
 #include <cstring>
 
-// Windows + psapi for module/sections
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -30,14 +29,12 @@
 #undef max
 #pragma comment(lib, "psapi.lib")
 
-// Scanners
 #include "../Analysis/FunctionScanner.h"
 #include "../Analysis/PatternScanner.h"
 
 using namespace SapphireHook;
 
 namespace {
-	// Helper to build timestamped filename like "prefix.20251209.001234.ext"
 	static std::string BuildTimestampedFilename(const std::string& prefix, const std::string& ext) {
 		const auto now = std::chrono::system_clock::now();
 		const auto tt = std::chrono::system_clock::to_time_t(now);
@@ -52,9 +49,6 @@ namespace {
 		return name.str();
 	}
 
-	// CHANGE NOTE (2025-12-15): Clipboard writes were previously repeating the same pattern:
-	// GlobalAlloc -> GlobalLock -> memcpy -> GlobalUnlock -> SetClipboardData.
-	// This helper centralizes the logic, checks GlobalLock/SetClipboardData failures, and avoids leaking HGLOBAL.
 	static bool CopyTextToClipboard(const std::string& text) {
 		if (!OpenClipboard(nullptr)) return false;
 		struct ClipboardCloser {
@@ -74,11 +68,9 @@ namespace {
 			GlobalFree(hg);
 			return false;
 		}
-		// On success, clipboard owns hg.
 		return true;
 	}
 
-	// Load .rdata section range
 	static bool GetSectionRange(HMODULE mod, const char* name, uint8_t*& begin, size_t& size) {
 		auto base = reinterpret_cast<uint8_t*>(mod);
 		auto dos = reinterpret_cast<IMAGE_DOS_HEADER*>(base);
@@ -148,7 +140,6 @@ namespace {
 		}
 	}
 
-	// NEW: Sanitize string for embedding in Python comments
 	static std::string SanitizePyString(const std::string& s) {
 		std::string out; out.reserve(s.size());
 		for (char c : s) {
@@ -170,7 +161,6 @@ namespace {
 		return out;
 	}
 
-	// NEW: Export IDA Python script that adds repeatable comments (no renaming)
 	static bool ExportIdaComments(const std::vector<StringXrefAnalyzer::XrefRow>& rows, std::string& outPath) {
 		using SapphireHook::Logger;
 
@@ -220,13 +210,11 @@ namespace {
 		return true;
 	}
 
-	// Read printable ASCII string at address (stop at NUL / non-printable), minLen gate
 	static bool ReadAsciiString(uintptr_t addr, std::string& out, size_t minLen = 3, size_t maxLen = 512)
 	{
 		out.clear();
 		if (!addr) return false;
 
-		// Quick memory validation
 		MEMORY_BASIC_INFORMATION mbi{};
 		if (VirtualQuery(reinterpret_cast<LPCVOID>(addr), &mbi, sizeof(mbi)) == 0) return false;
 		const DWORD readable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY |
@@ -266,9 +254,7 @@ namespace {
 			}
 			__except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 
-			// terminator
 			if (lo == 0 && hi == 0) break;
-			// expect ASCII in UTF-16LE (hi==0)
 			if (hi != 0 || lo < 32 || lo > 126) return false;
 
 			out.push_back(static_cast<char>(lo));
@@ -276,20 +262,17 @@ namespace {
 		return out.size() >= minLen;
 	}
 
-	// Collect strings referenced by RIP-relative instructions within the function window
 	static std::vector<std::string> CollectStringsFromFunction(uintptr_t fnStart,
 		size_t maxScanBytes = 0x300, size_t minLen = 3)
 	{
 		std::vector<std::string> out;
 		if (!fnStart) return out;
 
-		// PE sections
 		HMODULE mod = GetModuleHandleW(nullptr);
 		auto rdata = SapphireHook::PatternScanner::GetPESection(mod, ".rdata");
 		auto data = SapphireHook::PatternScanner::GetPESection(mod, ".data");
 
 		auto inReadableData = [&](uintptr_t target) -> bool {
-			// Check against .rdata or .data
 			if (rdata && target >= reinterpret_cast<uintptr_t>(rdata.baseAddress) &&
 				target < (reinterpret_cast<uintptr_t>(rdata.baseAddress) + rdata.size))
 				return true;
@@ -304,11 +287,9 @@ namespace {
 		for (size_t off = 0; off < maxScanBytes; ) {
 			uintptr_t target = 0;
 			size_t insLen = 0;
-			// Use existing instruction helper; returns true for RIP-rel instructions and gives target+length
 			if (SapphireHook::PatternScanner::ParseRipRelativeInstruction(ip + off, target, insLen) && insLen > 0) {
 				if (inReadableData(target)) {
 					std::string s;
-					// Try ASCII first, then UTF-16(LE ASCII)
 					if (ReadAsciiString(target, s, minLen) || ReadUtf16AsciiString(target, s, minLen)) {
 						if (uniq.insert(s).second) out.push_back(std::move(s));
 					}
@@ -316,28 +297,24 @@ namespace {
 				off += insLen;
 			}
 			else {
-				// Fallback: step 1 byte on unknown instruction
 				off += 1;
 			}
 		}
 		return out;
 	}
 
-	// Parse address text: supports 0x..., decimal, IDA absolute rebased to runtime, or RVA prefixed with "rva:"
 	static bool ParseAddressFlexible(const std::string& txt, uintptr_t& outAddr)
 	{
 		outAddr = 0;
 		if (txt.empty()) return false;
 
 		std::string s = txt;
-		// trim
 		s.erase(s.begin(), std::find_if(s.begin(), s.end(), [](unsigned char c) { return !std::isspace(c); }));
 		s.erase(std::find_if(s.rbegin(), s.rend(), [](unsigned char c) { return !std::isspace(c); }).base(), s.end());
 
 		HMODULE mod = GetModuleHandleW(nullptr);
 		const uintptr_t base = reinterpret_cast<uintptr_t>(mod);
 
-		// rva:<hex|dec>
 		if (s.rfind("rva:", 0) == 0 || s.rfind("RVA:", 0) == 0) {
 			std::string tail = s.substr(4);
 			uint64_t v = 0;
@@ -351,13 +328,11 @@ namespace {
 			return outAddr != 0;
 		}
 
-		// Hex
 		if (s.rfind("0x", 0) == 0 || s.rfind("0X", 0) == 0) {
 			uint64_t v = 0;
 			std::stringstream ss; ss << std::hex << s.substr(2); ss >> v;
 			if (!ss.fail()) {
 				outAddr = static_cast<uintptr_t>(v);
-				// Rebase IDA abs if needed
 				constexpr uintptr_t IDA_BASE = 0x0000000140000000ULL;
 				if (outAddr >= IDA_BASE && outAddr < IDA_BASE + 0x20000000ULL) {
 					outAddr = (outAddr - IDA_BASE) + base;
@@ -366,13 +341,11 @@ namespace {
 			}
 		}
 
-		// Decimal
 		{
 			uint64_t v = 0;
 			std::stringstream ss; ss << s; ss >> v;
 			if (!ss.fail()) {
 				outAddr = static_cast<uintptr_t>(v);
-				// Also rebase if looks like IDA abs in decimal range
 				constexpr uintptr_t IDA_BASE = 0x0000000140000000ULL;
 				if (outAddr >= IDA_BASE && outAddr < IDA_BASE + 0x20000000ULL) {
 					outAddr = (outAddr - IDA_BASE) + base;
@@ -383,7 +356,7 @@ namespace {
 
 		return false;
 	}
-} // anonymous
+}
 
 StringXrefAnalyzer::StringXrefAnalyzer() = default;
 StringXrefAnalyzer::~StringXrefAnalyzer()
@@ -412,7 +385,6 @@ void StringXrefAnalyzer::RenderWindow()
 		return;
 	}
 
-	// Controls
 	ImGui::Text("String \xe2\x86\x92 Function XREF analysis");
 	ImGui::Separator();
 
@@ -445,7 +417,6 @@ void StringXrefAnalyzer::RenderWindow()
 				}
 			}
 			ImGui::SameLine();
-			// NEW: IDA comments export (no renaming)
 			if (ImGui::Button("Export IDA Comments (.py)")) {
 				std::string path;
 				if (ExportIdaComments(m_state.rows, path)) {
@@ -479,7 +450,6 @@ void StringXrefAnalyzer::RenderWindow()
 	ImGui::Text("ASCII strings: %zu | UTF-16 strings: %zu | Functions: %zu",
 		m_state.totalAscii, m_state.totalUtf16, m_state.rows.size());
 
-	// NEW: String search panel (no heuristics; substring match)
 	if (!m_state.rows.empty()) {
 		ImGui::Separator();
 		if (ImGui::CollapsingHeader("String search", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -489,7 +459,6 @@ void StringXrefAnalyzer::RenderWindow()
 			ImGui::SameLine();
 			ImGui::TextDisabled("Substring match across function strings");
 
-			// Collect matches
 			struct Hit { uintptr_t addr; std::string preview; };
 			std::vector<Hit> hits;
 			std::string q = query;
@@ -506,7 +475,7 @@ void StringXrefAnalyzer::RenderWindow()
 						}
 					}
 					if (matched) hits.push_back({ r.addr, std::move(preview) });
-					if (hits.size() >= 1000) break; // throttle UI
+					if (hits.size() >= 1000) break;
 				}
 			}
 
@@ -530,7 +499,6 @@ void StringXrefAnalyzer::RenderWindow()
 					}
 					ImGui::EndTable();
 
-					// Copy addresses helper
 					if (ImGui::Button("Copy VAs")) {
 						std::ostringstream ss;
 						for (const auto& h : hits)
@@ -552,7 +520,6 @@ void StringXrefAnalyzer::RenderWindow()
 
 	ImGui::Separator();
 
-	// Results table
 	if (!m_state.rows.empty()) {
 		if (ImGui::BeginTable("xref_rows", 3, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 160.f);
@@ -599,7 +566,7 @@ void StringXrefAnalyzer::RenderWindow()
 			std::string path;
 			if (ExportToIDAPython(path)) {
 				LogInfo("IDA script exported to: " + path);
-					CopyTextToClipboard(path);
+				CopyTextToClipboard(path);
 			}
 		}
 		ImGui::SetItemTooltip("Generate IDA Python script to add string comments");
@@ -647,7 +614,7 @@ void StringXrefAnalyzer::StartAnalysis(int minStringLength, size_t maxStringsPer
 	m_state.totalAscii = 0;
 	m_state.totalUtf16 = 0;
 	m_state.rows.clear();
-	m_state.interimMap.clear(); // NEW: reset interim accumulation
+	m_state.interimMap.clear();
 	m_state.status = "Preparing...";
 	m_state.cancel.store(false, std::memory_order_relaxed);
 	m_state.started = std::chrono::steady_clock::now();
@@ -697,7 +664,7 @@ void StringXrefAnalyzer::StartAnalysis(int minStringLength, size_t maxStringsPer
 						uintptr_t fn = scanner->FindFunctionStart(ref);
 						if (!fn) continue;
 
-						auto& vec = m_state.interimMap[fn]; // NEW: accumulate partials
+						auto& vec = m_state.interimMap[fn];
 						if (std::find(vec.begin(), vec.end(), s) == vec.end()) {
 							vec.push_back(s);
 							++taken;
@@ -705,7 +672,6 @@ void StringXrefAnalyzer::StartAnalysis(int minStringLength, size_t maxStringsPer
 					}
 				}
 
-				// Progress update
 				m_state.mapProcessed.fetch_add(1, std::memory_order_relaxed);
 				if ((m_state.mapProcessed.load(std::memory_order_relaxed) & 0x3FF) == 0) {
 					size_t done = m_state.mapProcessed.load(std::memory_order_relaxed);
@@ -719,7 +685,6 @@ void StringXrefAnalyzer::StartAnalysis(int minStringLength, size_t maxStringsPer
 		if (!m_state.cancel.load(std::memory_order_relaxed))
 			mapBatch(utf16Strings);
 
-		// Build rows from whatever we have (complete or partial)
 		auto finalizeRows = [this]() {
 			m_state.rows.clear();
 			m_state.rows.reserve(m_state.interimMap.size());
@@ -737,7 +702,7 @@ void StringXrefAnalyzer::StartAnalysis(int minStringLength, size_t maxStringsPer
 			};
 
 		if (m_state.cancel.load(std::memory_order_relaxed)) {
-			finalizeRows(); // NEW: produce partial results on cancel
+			finalizeRows();
 			const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
 				std::chrono::steady_clock::now() - m_state.started).count();
 			m_state.status = "Cancelled (" + std::to_string(m_state.rows.size()) + " funcs) in " + std::to_string(ms) + "ms";
@@ -745,7 +710,7 @@ void StringXrefAnalyzer::StartAnalysis(int minStringLength, size_t maxStringsPer
 			return;
 		}
 
-		finalizeRows(); // normal completion
+		finalizeRows();
 		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::steady_clock::now() - m_state.started).count();
 		m_state.status = "Done in " + std::to_string(ms) + "ms";
@@ -760,7 +725,6 @@ void StringXrefAnalyzer::CancelAnalysis()
 		try { m_state.task.wait(); }
 		catch (...) {}
 	}
-	// Do not clear results on cancel; they were finalized (partial) in the worker if any
 	if (!m_state.running && !m_state.rows.empty() && m_state.status.rfind("Cancelled", 0) != 0) {
 		m_state.status = "Cancelled (" + std::to_string(m_state.rows.size()) + " funcs)";
 	}
@@ -778,7 +742,6 @@ bool StringXrefAnalyzer::ExportResultsToText(std::string& outPath) const
 
 	if (m_state.rows.empty()) return false;
 
-	// Build a filename in the SapphireHook temp directory
 	std::filesystem::path baseDir = Logger::GetDefaultTempDir();
 	std::error_code ec;
 	std::filesystem::create_directories(baseDir, ec);
@@ -791,26 +754,21 @@ bool StringXrefAnalyzer::ExportResultsToText(std::string& outPath) const
 		return false;
 	}
 
-	// Header
 	ofs << "String XREF Results\n";
 	ofs << "====================\n\n";
 	ofs << "Functions: " << m_state.rows.size()
 		<< " | ASCII strings: " << m_state.totalAscii
 		<< " | UTF-16 strings: " << m_state.totalUtf16 << "\n\n";
 
-	// One function per line, strings joined with " | "
 	for (const auto& r : m_state.rows) {
-		// Address + name
 		ofs << "0x" << std::hex << std::setw(16) << std::setfill('0')
 			<< static_cast<unsigned long long>(r.addr) << std::dec << "  ";
 		ofs << (r.name.empty() ? "(unnamed)" : r.name);
 
-		// Joined strings
 		if (!r.strings.empty()) {
 			ofs << " | ";
 			for (size_t i = 0; i < r.strings.size(); ++i) {
 				std::string s = r.strings[i];
-				// Sanitize any embedded newlines/tabs so the export stays one-line-per-function
 				for (char& c : s) {
 					if (c == '\r' || c == '\n' || c == '\t') c = ' ';
 				}
@@ -828,9 +786,6 @@ bool StringXrefAnalyzer::ExportResultsToText(std::string& outPath) const
 	return true;
 }
 
-// Add these methods to StringXrefAnalyzer class:
-
-// 1. Export to IDA Python script - just addresses and raw strings, no guessing
 bool StringXrefAnalyzer::ExportToIDAPython(std::string& outPath) const
 {
 	if (m_state.rows.empty()) return false;
@@ -846,7 +801,6 @@ bool StringXrefAnalyzer::ExportToIDAPython(std::string& outPath) const
 	HMODULE hMod = GetModuleHandleW(nullptr);
 	uintptr_t imageBase = reinterpret_cast<uintptr_t>(hMod);
 
-	// Generate IDA script that adds comments with string references
 	ofs << "# IDA Pro String XREF Comments\n";
 	ofs << "# Generated by SapphireHook StringXrefAnalyzer\n";
 	ofs << "# Functions with strings: " << m_state.rows.size() << "\n\n";
@@ -860,12 +814,10 @@ bool StringXrefAnalyzer::ExportToIDAPython(std::string& outPath) const
 	ofs << "commented = 0\n";
 	ofs << "failed = 0\n\n";
 
-	// Just add comments with the actual strings found
 	for (const auto& r : m_state.rows) {
 		ofs << "try:\n";
 		ofs << "    addr = rebase(0x" << std::hex << r.addr << ")\n";
 
-		// Build comment from strings
 		ofs << "    comment = \"XREF Strings: ";
 		for (size_t i = 0; i < r.strings.size(); ++i) {
 			if (i) ofs << " | ";
@@ -873,7 +825,7 @@ bool StringXrefAnalyzer::ExportToIDAPython(std::string& outPath) const
 		}
 		ofs << "\"\n";
 
-		ofs << "    idc.set_func_cmt(addr, comment, 0)\n";  // Set as regular comment
+		ofs << "    idc.set_func_cmt(addr, comment, 0)\n";
 		ofs << "    print(f\"Added comment at 0x{addr:X}\")\n";
 		ofs << "    commented += 1\n";
 		ofs << "except:\n";
@@ -888,7 +840,6 @@ bool StringXrefAnalyzer::ExportToIDAPython(std::string& outPath) const
 	return true;
 }
 
-// 2. Export enhanced data with signatures and RVAs
 bool StringXrefAnalyzer::ExportEnhancedResults(std::string& outPath) const
 {
 	if (m_state.rows.empty()) return false;
@@ -904,7 +855,6 @@ bool StringXrefAnalyzer::ExportEnhancedResults(std::string& outPath) const
 		return false;
 	}
 
-	// Get current time for display
 	const auto now = std::chrono::system_clock::now();
 	const auto tt = std::chrono::system_clock::to_time_t(now);
 	std::tm tm{};
@@ -927,7 +877,6 @@ bool StringXrefAnalyzer::ExportEnhancedResults(std::string& outPath) const
 		ofs << "VA:  0x" << std::hex << std::setw(16) << std::setfill('0') << r.addr << "\n";
 		ofs << "RVA: 0x" << std::hex << std::setw(8) << std::setfill('0') << rva << "\n";
 
-		// Read first 64 bytes for signature
 		uint8_t bytes[64] = { 0 };
 		SIZE_T bytesRead = 0;
 		if (ReadProcessMemory(GetCurrentProcess(),
@@ -940,16 +889,13 @@ bool StringXrefAnalyzer::ExportEnhancedResults(std::string& outPath) const
 			}
 			ofs << "\n";
 
-			// Generate IDA-style pattern (with wildcards for calls/jumps)
 			ofs << "Pattern: ";
 			for (size_t i = 0; i < std::min(bytesRead, (SIZE_T)32); ++i) {
-				// After E8/E9 (CALL/JMP), next 4 bytes are relative
 				if (bytes[i] == 0xE8 || bytes[i] == 0xE9) {
 					ofs << std::hex << std::setw(2) << std::setfill('0')
 						<< (int)bytes[i] << " ? ? ? ? ";
-					i += 4; // Skip displacement
+					i += 4;
 				}
-				// RIP-relative addressing
 				else if (i + 6 < bytesRead && bytes[i] == 0x48 &&
 					(bytes[i + 1] == 0x8D || bytes[i + 1] == 0x8B) &&
 					(bytes[i + 2] & 0xC7) == 0x05) {
@@ -980,7 +926,6 @@ bool StringXrefAnalyzer::ExportEnhancedResults(std::string& outPath) const
 	return true;
 }
 
-// 3. Export as CSV for easy spreadsheet analysis
 bool StringXrefAnalyzer::ExportToCSV(std::string& outPath) const
 {
 	if (m_state.rows.empty()) return false;
@@ -996,7 +941,6 @@ bool StringXrefAnalyzer::ExportToCSV(std::string& outPath) const
 	HMODULE hMod = GetModuleHandleW(nullptr);
 	uintptr_t imageBase = reinterpret_cast<uintptr_t>(hMod);
 
-	// CSV header
 	ofs << "\"Address\",\"RVA\",\"String Count\",\"Strings\"\n";
 
 	for (const auto& r : m_state.rows) {
@@ -1006,10 +950,8 @@ bool StringXrefAnalyzer::ExportToCSV(std::string& outPath) const
 		ofs << "\"0x" << std::hex << rva << "\",";
 		ofs << std::dec << r.strings.size() << ",\"";
 
-		// Join strings with pipe delimiter
 		for (size_t i = 0; i < r.strings.size(); ++i) {
 			if (i) ofs << " | ";
-			// Escape quotes in CSV
 			std::string s = r.strings[i];
 			for (char& c : s) {
 				if (c == '"') ofs << "\"\"";
@@ -1025,7 +967,6 @@ bool StringXrefAnalyzer::ExportToCSV(std::string& outPath) const
 	return true;
 }
 
-// 4. Helper to sanitize strings for Python
 std::string StringXrefAnalyzer::SanitizeForPython(const std::string& str) const
 {
 	std::string result;
@@ -1037,7 +978,6 @@ std::string StringXrefAnalyzer::SanitizeForPython(const std::string& str) const
 		else if (c == '\t') result += "\\t";
 		else if (c >= 32 && c <= 126) result += c;
 		else {
-			// Non-printable as hex escape
 			char buf[5];
 			std::snprintf(buf, sizeof(buf), "\\x%02x", (unsigned char)c);
 			result += buf;

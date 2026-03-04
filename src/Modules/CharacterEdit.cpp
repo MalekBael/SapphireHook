@@ -9,10 +9,8 @@
 using SapphireHook::LogInfo;
 
 namespace SapphireHook {
-	// Forward declaration (provided by PacketInjector.cpp)
 	uint32_t GetLearnedLocalActorId();
 
-	// Helper: resolve UI target (0 = self) to an effective actor id
 	static inline uint64_t ResolveTarget(uint64_t uiTarget)
 	{
 		if (uiTarget != 0ULL) return uiTarget;
@@ -51,11 +49,9 @@ namespace SapphireHook {
 		ImGui::TextDisabled("Character modification via GM Commands (packet injection)");
 		ImGui::Separator();
 
-		// Target selection section
 		DrawTargetSection();
 		ImGui::Separator();
 
-		// Tabs for different categories
 		if (ImGui::BeginTabBar("CharacterEditTabs", ImGuiTabBarFlags_None)) {
 			if (ImGui::BeginTabItem("Stats & Progression")) {
 				DrawStatsTab();
@@ -117,7 +113,6 @@ namespace SapphireHook {
 	void CharacterEditModule::DrawStatsTab() {
 		ImGui::BeginChild("##stats_scroll", ImVec2(0, 0), false);
 
-		// Level
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Level");
 		ImGui::SliderInt("##level", &m_level, 1, 90, "Level: %d");
 		if (ImGui::Button("Set Level", ImVec2(120, 0))) {
@@ -129,7 +124,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// Class/Job
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Class/Job");
 		static const char* kClassJobs[] = {
 			"Gladiator (1)", "Pugilist (2)", "Marauder (3)", "Lancer (4)", "Archer (5)",
@@ -151,7 +145,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// Experience
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Experience");
 		ImGui::InputInt("##exp", &m_exp);
 		if (ImGui::Button("Add EXP", ImVec2(120, 0))) {
@@ -163,7 +156,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// HP
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Hit Points");
 		ImGui::InputInt("##hp", &m_hp);
 		if (ImGui::Button("Set HP", ImVec2(120, 0))) {
@@ -175,7 +167,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// MP
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Magic Points");
 		ImGui::InputInt("##mp", &m_mp);
 		if (ImGui::Button("Set MP", ImVec2(120, 0))) {
@@ -187,7 +178,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// GP
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Gathering Points");
 		ImGui::InputInt("##gp", &m_gp);
 		if (ImGui::Button("Set GP", ImVec2(120, 0))) {
@@ -199,7 +189,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// Gil
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Gil (Currency)");
 		ImGui::InputInt("##gil", &m_gil);
 		if (ImGui::Button("Set Gil", ImVec2(120, 0))) {
@@ -220,7 +209,6 @@ namespace SapphireHook {
 		};
 		static const char* kGenders[] = { "Male (0)", "Female (1)" };
 
-		// Race
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Race");
 		ImGui::Combo("##race", &m_race, kRaces, IM_ARRAYSIZE(kRaces));
 		if (ImGui::Button("Set Race", ImVec2(120, 0))) {
@@ -232,7 +220,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// Tribe
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Tribe");
 		ImGui::SliderInt("##tribe", &m_tribe, 0, 15, "Tribe ID: %d");
 		if (ImGui::Button("Set Tribe", ImVec2(120, 0))) {
@@ -244,7 +231,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// Gender
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Gender");
 		ImGui::Combo("##gender", &m_gender, kGenders, IM_ARRAYSIZE(kGenders));
 		if (ImGui::Button("Set Gender", ImVec2(120, 0))) {
@@ -266,7 +252,6 @@ namespace SapphireHook {
 			"Immortal Flames (3)"
 		};
 
-		// Grand Company
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Grand Company");
 		ImGui::Combo("##gc", &m_selectedGC, kGrandCompanies, IM_ARRAYSIZE(kGrandCompanies));
 		if (ImGui::Button("Set Grand Company", ImVec2(160, 0))) {
@@ -278,7 +263,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// GC Rank
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Grand Company Rank");
 		ImGui::SliderInt("##gcrank", &m_gcRank, 0, 15, "Rank: %d");
 		ImGui::TextDisabled("Ranks: 0=None, 1-15=Increasing ranks");
@@ -294,7 +278,6 @@ namespace SapphireHook {
 	void CharacterEditModule::DrawUnlocksTab() {
 		ImGui::BeginChild("##unlocks_scroll", ImVec2(0, 0), false);
 
-		// Orchestrion
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Orchestrion Rolls");
 		ImGui::InputInt("Song ID##orch", &m_orchestrionSongId);
 		ImGui::TextDisabled("Enter 0 to unlock all songs, or a specific Song ID");
@@ -307,7 +290,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// Title
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Titles");
 		ImGui::InputInt("Title ID##title", &m_titleId);
 		if (ImGui::Button("Add Title", ImVec2(160, 0))) {
@@ -319,7 +301,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// Discovery
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Discovery Points");
 		ImGui::InputInt("Zone ID##disc_zone", &m_discoveryZone);
 		ImGui::InputInt("Discovery ID##disc_id", &m_discoveryId);
@@ -335,7 +316,6 @@ namespace SapphireHook {
 	void CharacterEditModule::DrawTogglesTab() {
 		ImGui::BeginChild("##toggles_scroll", ImVec2(0, 0), false);
 
-		// Online Status Icon
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Online Status Icon");
 		ImGui::InputInt("##icon", &m_onlineStatusIcon);
 		ImGui::TextDisabled("0=None, 12=AFK, 15=Busy, 17=Looking for Party, etc.");
@@ -348,7 +328,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// Invisibility
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Invisibility");
 		ImGui::Checkbox("Invisible##invis", &m_invisToggle);
 		ImGui::TextDisabled("0 = invisible, 1 = visible");
@@ -361,7 +340,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// Invincibility
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Invincibility");
 		ImGui::Checkbox("Invincible##inv", &m_invincToggle);
 		if (ImGui::Button("Toggle Invincibility", ImVec2(160, 0))) {
@@ -373,7 +351,6 @@ namespace SapphireHook {
 		ImGui::Spacing();
 		ImGui::Separator();
 
-		// Wireframe
 		ImGui::TextColored(ImVec4(0.6f, 0.85f, 1.0f, 1.0f), "Wireframe Rendering");
 		ImGui::Checkbox("Wireframe##wire", &m_wireframeToggle);
 		if (ImGui::Button("Toggle Wireframe", ImVec2(160, 0))) {
@@ -385,7 +362,6 @@ namespace SapphireHook {
 		ImGui::EndChild();
 	}
 
-	// GM Command senders (now all resolve target locally when needed)
 	void CharacterEditModule::SendGMCommand_Level() {
 		CommandInterface::SetPlayerLevel(static_cast<uint8_t>(m_level), ResolveTarget(m_targetId));
 		LogInfo("[CharacterEdit] Sent: Level " + std::to_string(m_level));
@@ -448,10 +424,9 @@ namespace SapphireHook {
 	}
 
 	void CharacterEditModule::SendGMCommand_Invis() {
-		// Include target (UI value or self) so server logs reflect correct actor
 		const uint64_t target = ResolveTarget(m_targetId);
 		CommandInterface::SendGMCommand(
-			/*Invis*/ 0x000D,
+			0x000D,
 			m_invisToggle ? 1u : 0u, 0, 0, 0, target);
 		LogInfo("[CharacterEdit] Sent: Invisibility toggle => " +
 			std::string(m_invisToggle ? "VISIBLE" : "INVISIBLE") +
@@ -464,10 +439,9 @@ namespace SapphireHook {
 	}
 
 	void CharacterEditModule::SendGMCommand_Wireframe() {
-		// Include target (UI value or self)
 		const uint64_t target = ResolveTarget(m_targetId);
 		CommandInterface::SendGMCommand(
-			/*Wireframe*/ 0x0226,
+			0x0226,
 			m_wireframeToggle ? 1u : 0u, 0, 0, 0, target);
 		LogInfo("[CharacterEdit] Sent: Wireframe => " +
 			std::string(m_wireframeToggle ? "ON" : "OFF") +
@@ -475,17 +449,15 @@ namespace SapphireHook {
 	}
 
 	void CharacterEditModule::SendGMCommand_Orchestrion() {
-		// Include target (UI value or self). Arg0=1 per command syntax, Arg1=songId (0=all)
 		const uint64_t target = ResolveTarget(m_targetId);
 		CommandInterface::SendGMCommand(
-			/*Orchestrion*/ 0x0074,
+			0x0074,
 			1u, static_cast<uint32_t>(m_orchestrionSongId), 0, 0, target);
 		LogInfo("[CharacterEdit] Sent: Orchestrion unlock " +
 			std::to_string(m_orchestrionSongId) +
 			" (target=" + Logger::HexFormat(target) + ")");
 	}
 
-	// Debug senders (unchanged)
 	void CharacterEditModule::SendDebugCommand_ClassJob() {
 		const uint32_t jobId = static_cast<uint32_t>(m_selectedClassJob + 1);
 		char cmd[128];
@@ -508,4 +480,4 @@ namespace SapphireHook {
 		LogInfo("[CharacterEdit] Sent: Unlock Discovery Zone=" + std::to_string(m_discoveryZone) +
 			" ID=" + std::to_string(m_discoveryId));
 	}
-} // namespace SapphireHook
+}

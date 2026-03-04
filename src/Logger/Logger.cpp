@@ -7,7 +7,6 @@
 #include <chrono>
 #include <iostream>
 
-// spdlog includes - SPDLOG_USE_STD_FORMAT is defined by the NuGet package
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/sinks/rotating_file_sink.h>
@@ -17,7 +16,6 @@
 
 namespace {
 
-// Build %TEMP%\SapphireHook directory
 static std::filesystem::path BuildTempSapphireDir() {
     wchar_t tempPathW[MAX_PATH]{};
     DWORD len = GetTempPathW(MAX_PATH, tempPathW);
@@ -28,7 +26,7 @@ static std::filesystem::path BuildTempSapphireDir() {
     return base / "SapphireHook";
 }
 
-} // namespace
+}  
 
 namespace SapphireHook {
 
@@ -71,32 +69,26 @@ Logger::~Logger() {
 void Logger::RecreateLogger() {
     std::vector<spdlog::sink_ptr> sinks;
 
-    // Windows colored console sink - works better for DLL injection scenarios
     if (m_logToConsole) {
         auto console_sink = std::make_shared<spdlog::sinks::wincolor_stdout_sink_mt>();
         console_sink->set_level(ToSpdlogLevel(m_minimumLevel));
         
-        // Configure colors for each level
-        // Colors: BLACK=0, BLUE=1, GREEN=2, CYAN=3, RED=4, MAGENTA=5, YELLOW=6, WHITE=7
-        // Add BOLD (8) or BACKGROUND (16*color) as needed
-        console_sink->set_color(spdlog::level::trace,    FOREGROUND_INTENSITY);                                      // Gray
-        console_sink->set_color(spdlog::level::debug,    FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY); // Cyan
-        console_sink->set_color(spdlog::level::info,     FOREGROUND_GREEN | FOREGROUND_INTENSITY);                   // Bright Green
-        console_sink->set_color(spdlog::level::warn,     FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);  // Yellow
-        console_sink->set_color(spdlog::level::err,      FOREGROUND_RED | FOREGROUND_INTENSITY);                     // Bright Red
-        console_sink->set_color(spdlog::level::critical, BACKGROUND_RED | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY); // White on Red
+        console_sink->set_color(spdlog::level::trace,    FOREGROUND_INTENSITY);                                       
+        console_sink->set_color(spdlog::level::debug,    FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);  
+        console_sink->set_color(spdlog::level::info,     FOREGROUND_GREEN | FOREGROUND_INTENSITY);                     
+        console_sink->set_color(spdlog::level::warn,     FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);   
+        console_sink->set_color(spdlog::level::err,      FOREGROUND_RED | FOREGROUND_INTENSITY);                       
+        console_sink->set_color(spdlog::level::critical, BACKGROUND_RED | FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY);    
         
         sinks.push_back(console_sink);
     }
 
-    // MSVC debug output sink
 #ifdef _DEBUG
     auto msvc_sink = std::make_shared<spdlog::sinks::msvc_sink_mt>();
     msvc_sink->set_level(ToSpdlogLevel(m_minimumLevel));
     sinks.push_back(msvc_sink);
 #endif
 
-    // Rotating file sink
     if (m_logToFile && !m_logFilePath.empty()) {
         try {
             auto file_sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
@@ -107,24 +99,19 @@ void Logger::RecreateLogger() {
             file_sink->set_level(ToSpdlogLevel(m_minimumLevel));
             sinks.push_back(file_sink);
         } catch (const std::exception& ex) {
-            // Fallback: just use console if file fails
             if (m_logToConsole) {
                 std::cerr << "[SapphireHook] Failed to create log file: " << ex.what() << std::endl;
             }
         }
     }
 
-    // Create the multi-sink logger
     m_logger = std::make_shared<spdlog::logger>("sapphire", sinks.begin(), sinks.end());
     m_logger->set_level(ToSpdlogLevel(m_minimumLevel));
 
-    // Set pattern: timestamp [LEVEL] message
     m_logger->set_pattern("%Y-%m-%d %H:%M:%S.%e [%l] %v");
 
-    // Flush on warning and above
     m_logger->flush_on(spdlog::level::warn);
 
-    // Register as default
     spdlog::set_default_logger(m_logger);
 }
 
@@ -146,7 +133,6 @@ bool Logger::Initialize(const std::filesystem::path& pathOrFile,
     s_instance->m_minimumLevel = minLevel;
     s_instance->m_metrics.Reset();
 
-    // Environment variable override
     const char* envDir = std::getenv("SAPPHIREHOOK_LOG_DIR");
     bool envNoCreate = std::getenv("SAPPHIREHOOK_LOG_NOCREATE") != nullptr;
 
@@ -179,7 +165,6 @@ bool Logger::Initialize(const std::filesystem::path& pathOrFile,
     s_instance->m_customDirectory = custom;
     s_instance->m_createdDirectory = created;
 
-    // Generate timestamped log filename
     auto now = std::chrono::system_clock::now();
     auto tt = std::chrono::system_clock::to_time_t(now);
     auto tm = *std::localtime(&tt);
@@ -197,7 +182,6 @@ bool Logger::Initialize(const std::filesystem::path& pathOrFile,
 
     s_instance->m_logFilePath = baseDir / name.str();
 
-    // Create the spdlog-based logger
     s_instance->RecreateLogger();
 
     s_instance->Information("=== SapphireHook Logger Initialized (spdlog backend) ===");
@@ -217,7 +201,6 @@ Logger& Logger::Instance() {
         EnsureDir(s_instance->m_logDirectory, true, created);
         s_instance->m_createdDirectory = created;
 
-        // Generate fallback log path
         auto now = std::chrono::system_clock::now();
         auto t = std::chrono::system_clock::to_time_t(now);
         auto tm = *std::localtime(&t);
@@ -282,10 +265,8 @@ void Logger::SetAsyncLogging(bool enable) {
     if (enable != m_asyncEnabled) {
         m_asyncEnabled = enable;
         if (enable) {
-            // Initialize spdlog thread pool for async logging
             spdlog::init_thread_pool(8192, 1);
         }
-        // Note: spdlog handles async internally, no need to recreate logger
     }
 }
 
@@ -303,7 +284,7 @@ std::string Logger::HexFormat(uintptr_t v) {
 }
 
 void Logger::WriteLog(LogLevel level, const std::string& message) {
-    if (s_shuttingDown.load(std::memory_order_acquire)) return;  // No logging during shutdown
+    if (s_shuttingDown.load(std::memory_order_acquire)) return;      
     if (level < m_minimumLevel) return;
     if (!m_logger) return;
 
@@ -377,7 +358,6 @@ void Logger::ReattachConsole() {
     std::cout.clear();
     std::cerr.clear();
     
-    // Recreate the logger to get fresh console handles for colored output
     RecreateLogger();
 }
 
@@ -390,4 +370,4 @@ void Logger::AnnounceLogFileLocation(bool force) {
     Information(std::string("Directory created this run: ") + (m_createdDirectory ? "yes" : "no"));
 }
 
-} // namespace SapphireHook
+}   

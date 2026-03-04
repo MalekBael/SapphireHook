@@ -14,28 +14,20 @@ using SapphireHook::LogInfo;
 using SapphireHook::LogWarning;
 using SapphireHook::LogError;
 
-// Type aliases for datReader types to avoid namespace collision with GameData
 using XivGameData = xiv::dat::GameData;
 using XivExdData = xiv::exd::ExdData;
 using XivLanguage = xiv::exd::Language;
 
 namespace GameData {
 
-// ============================================================================
-// Internal Storage
-// ============================================================================
-
 namespace {
     std::filesystem::path s_sqpackPath;
     LoadStats s_stats;
     std::mutex s_mutex;
     
-    // Game data instances
     std::unique_ptr<XivGameData> s_gameData;
     std::unique_ptr<XivExdData> s_exdData;
     
-    // Cache maps - populated on-demand for frequently accessed data
-    // Key is ID, value is name string
     std::unordered_map<uint32_t, std::string> s_items;
     std::unordered_map<uint32_t, std::string> s_actions;
     std::unordered_map<uint32_t, std::string> s_statuses;
@@ -49,15 +41,14 @@ namespace {
     std::unordered_map<uint32_t, std::string> s_enpcs;
     std::unordered_map<uint32_t, std::string> s_placeNames;
     std::unordered_map<uint32_t, std::string> s_territoryBgPaths;
-    std::unordered_map<uint32_t, std::string> s_maps;  // Just paths for backwards compat
-    std::unordered_map<uint32_t, MapInfo> s_mapInfos;  // Full map info
-    std::unordered_map<uint32_t, uint32_t> s_territoryToMap;  // TerritoryType -> MapId
+    std::unordered_map<uint32_t, std::string> s_maps;       
+    std::unordered_map<uint32_t, MapInfo> s_mapInfos;     
+    std::unordered_map<uint32_t, uint32_t> s_territoryToMap;     
     std::unordered_map<uint32_t, std::string> s_weathers;
     std::unordered_map<uint32_t, std::string> s_worlds;
     std::unordered_map<uint32_t, std::string> s_aetherytes;
     std::unordered_map<uint32_t, std::string> s_instanceContents;
     
-    // New EXD sheets for enhanced packet decoding
     std::unordered_map<uint32_t, std::string> s_fates;
     std::unordered_map<uint32_t, std::string> s_recipes;
     std::unordered_map<uint32_t, std::string> s_contentFinderConditions;
@@ -67,7 +58,6 @@ namespace {
     std::unordered_map<uint32_t, std::string> s_orchestrions;
     std::unordered_map<uint32_t, std::string> s_tripleTriadCards;
 
-    // Helper to load a sheet into a cache map
     template<typename StructT, typename ExtractName>
     bool LoadSheet(const std::string& sheetName, std::unordered_map<uint32_t, std::string>& cache, 
                    size_t& count, ExtractName extractName) {
@@ -75,7 +65,6 @@ namespace {
             if (!s_exdData) return false;
             
             auto& cat = s_exdData->get_category(sheetName);
-            // Use get_data() which falls back to Language::none if English isn't available
             auto& exd = cat.get_data(XivLanguage::en);
             auto rows = exd.get_sheet_rows<StructT>();
             
@@ -129,11 +118,7 @@ namespace {
         s_stats = LoadStats{};
     }
     
-} // anonymous namespace
-
-// ============================================================================
-// Initialization
-// ============================================================================
+}   
 
 bool Initialize(const std::filesystem::path& sqpackPath) {
     std::lock_guard lock(s_mutex);
@@ -152,76 +137,56 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
         s_gameData = std::make_unique<XivGameData>(sqpackPath);
         s_exdData = std::make_unique<XivExdData>(*s_gameData);
         
-        // Load commonly used sheets
-        // Item: Text.SGL is the singular name
         LoadSheet<Excel::Item>("Item", s_items, s_stats.itemCount, 
             [](const auto& row) { return row->getString(row->_data.Text.SGL); });
             
-        // Action: Text.Name
         LoadSheet<Excel::Action>("Action", s_actions, s_stats.actionCount,
             [](const auto& row) { return row->getString(row->_data.Text.Name); });
             
-        // Status: Text.Name
         LoadSheet<Excel::Status>("Status", s_statuses, s_stats.statusCount,
             [](const auto& row) { return row->getString(row->_data.Text.Name); });
         
-        // ClassJob: Text.Name
         LoadSheet<Excel::ClassJob>("ClassJob", s_classJobs, s_stats.classJobCount,
             [](const auto& row) { return row->getString(row->_data.Text.Name); });
             
-        // Mount: Text.SGL
         LoadSheet<Excel::Mount>("Mount", s_mounts, s_stats.mountCount,
             [](const auto& row) { return row->getString(row->_data.Text.SGL); });
             
-        // Companion (minion): Text.SGL
         LoadSheet<Excel::Companion>("Companion", s_minions, s_stats.minionCount,
             [](const auto& row) { return row->getString(row->_data.Text.SGL); });
             
-        // Emote: Text.Name
         LoadSheet<Excel::Emote>("Emote", s_emotes, s_stats.emoteCount,
             [](const auto& row) { return row->getString(row->_data.Text.Name); });
             
-        // Quest: Text.Name
         LoadSheet<Excel::Quest>("Quest", s_quests, s_stats.questCount,
             [](const auto& row) { return row->getString(row->_data.Text.Name); });
             
-        // BNpcName: Text.SGL
         LoadSheet<Excel::BNpcName>("BNpcName", s_bnpcs, s_stats.bnpcCount,
             [](const auto& row) { return row->getString(row->_data.Text.SGL); });
             
-        // ENpcResident: Text.SGL
         LoadSheet<Excel::ENpcResident>("ENpcResident", s_enpcs, s_stats.enpcCount,
             [](const auto& row) { return row->getString(row->_data.Text.SGL); });
             
-        // PlaceName: Text.SGL
         LoadSheet<Excel::PlaceName>("PlaceName", s_placeNames, s_stats.placeNameCount,
             [](const auto& row) { return row->getString(row->_data.Text.SGL); });
             
-        // TerritoryType: Name (not in a Text struct)
         LoadSheet<Excel::TerritoryType>("TerritoryType", s_territories, s_stats.territoryCount,
             [](const auto& row) { return row->getString(row->_data.Name); });
         
-        // Also load TerritoryType LVB paths (level paths for zone layout)
         {
             size_t lvbCount = 0;
             LoadSheet<Excel::TerritoryType>("TerritoryType", s_territoryBgPaths, lvbCount,
                 [](const auto& row) { return row->getString(row->_data.LVB); });
         }
         
-        // Map: Try to load using the simple LoadSheet first
-        // The Map struct might have issues with get_sheet_rows, so we'll just load paths for now
-        // and add full MapInfo support later if needed
         LoadSheet<Excel::Map>("Map", s_maps, s_stats.mapCount,
             [](const auto& row) { return row->getString(row->_data.Path); });
         
-        // Build MapInfo by reading TerritoryType first, then fetching Map data per-row
-        // We avoid get_sheet_rows<Excel::Map> since it can crash with large sheets
         try {
             auto& terrCat = s_exdData->get_category("TerritoryType");
             auto& terrExd = terrCat.get_data(XivLanguage::en);
             auto terrRows = terrExd.get_sheet_rows<Excel::TerritoryType>();
             
-            // Get the Map exd for individual row lookups
             auto& mapCat = s_exdData->get_category("Map");
             auto& mapExd = mapCat.get_data(XivLanguage::en);
             
@@ -233,27 +198,19 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
                 MapInfo info;
                 info.mapId = mapId;
                 info.territoryType = static_cast<uint16_t>(terrId);
-                info.sizeFactor = 100;  // Default
+                info.sizeFactor = 100;   
                 info.offsetX = 0;
                 info.offsetY = 0;
                 
-                // Try to read actual Map data using get_row (non-templated, returns Fields)
-                // Map columns based on EXD schema:
-                // Index 3: SizeFactor (UInt16)
-                // Index 7: OffsetX (Int16)
-                // Index 8: OffsetY (Int16)
                 try {
                     auto fields = mapExd.get_row(mapId);
                     if (fields.size() > 8) {
-                        // SizeFactor at index 3 (UInt16)
                         if (auto* sf = std::get_if<uint16_t>(&fields[3])) {
                             info.sizeFactor = *sf;
                         }
-                        // OffsetX at index 7 (Int16)
                         if (auto* ox = std::get_if<int16_t>(&fields[7])) {
                             info.offsetX = *ox;
                         }
-                        // OffsetY at index 8 (Int16)
                         if (auto* oy = std::get_if<int16_t>(&fields[8])) {
                             info.offsetY = *oy;
                         }
@@ -261,7 +218,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
                     }
                 }
                 catch (...) {
-                    // Could not read this Map row, keep defaults
                 }
                 
                 s_mapInfos[mapId] = info;
@@ -274,7 +230,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] Could not build MapInfo from TerritoryType: " + std::string(e.what()));
         }
         
-        // Weather: Text.Name
         LogInfo("[GameData] Loading Weather...");
         try {
             LoadSheet<Excel::Weather>("Weather", s_weathers, s_stats.weatherCount,
@@ -283,7 +238,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] Weather loading failed: " + std::string(e.what()));
         }
         
-        // World: InternalName (the actual world name string)
         LogInfo("[GameData] Loading World...");
         try {
             LoadSheet<Excel::World>("World", s_worlds, s_stats.worldCount,
@@ -292,7 +246,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] World loading failed: " + std::string(e.what()));
         }
         
-        // Aetheryte: Text.SGL
         LogInfo("[GameData] Loading Aetheryte...");
         try {
             LoadSheet<Excel::Aetheryte>("Aetheryte", s_aetherytes, s_stats.aetheryteCount,
@@ -301,7 +254,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] Aetheryte loading failed: " + std::string(e.what()));
         }
         
-        // InstanceContent: Text.Name
         LogInfo("[GameData] Loading InstanceContent...");
         try {
             LoadSheet<Excel::InstanceContent>("InstanceContent", s_instanceContents, s_stats.instanceContentCount,
@@ -310,11 +262,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] InstanceContent loading failed: " + std::string(e.what()));
         }
         
-        // ====================================================================
-        // NEW: Enhanced Packet Decoding Sheets
-        // ====================================================================
-        
-        // Fate: Text.TitleText (FATE name)
         LogInfo("[GameData] Loading Fate...");
         try {
             LoadSheet<Excel::Fate>("Fate", s_fates, s_stats.fateCount,
@@ -323,7 +270,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] Fate loading failed: " + std::string(e.what()));
         }
         
-        // Leve: Text.Name (Levequest name)
         LogInfo("[GameData] Loading Leve...");
         try {
             LoadSheet<Excel::Leve>("Leve", s_leves, s_stats.leveCount,
@@ -332,7 +278,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] Leve loading failed: " + std::string(e.what()));
         }
         
-        // Achievement: Text.Name
         LogInfo("[GameData] Loading Achievement...");
         try {
             LoadSheet<Excel::Achievement>("Achievement", s_achievements, s_stats.achievementCount,
@@ -341,7 +286,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] Achievement loading failed: " + std::string(e.what()));
         }
         
-        // Title: Text.Male (use male variant as primary)
         LogInfo("[GameData] Loading Title...");
         try {
             LoadSheet<Excel::Title>("Title", s_titles, s_stats.titleCount,
@@ -350,13 +294,8 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] Title loading failed: " + std::string(e.what()));
         }
         
-        // ContentFinderCondition: We need to get the name via the linked InstanceContent
-        // For now, store the InstanceContentId as the "name" and lookup at runtime
-        // Or we could build a more complex lookup. For simplicity, use InstanceContent names.
         LogInfo("[GameData] Loading ContentFinderCondition...");
         try {
-            // ContentFinderCondition links to InstanceContent via InstanceContentId field
-            // We'll read ContentFinderCondition and look up names from s_instanceContents
             auto& cat = s_exdData->get_category("ContentFinderCondition");
             auto& exd = cat.get_data(XivLanguage::en);
             auto rows = exd.get_sheet_rows<Excel::ContentFinderCondition>();
@@ -364,7 +303,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             s_contentFinderConditions.clear();
             for (const auto& [id, row] : rows) {
                 uint16_t instanceId = row->_data.InstanceContentId;
-                // Look up the instance content name
                 auto it = s_instanceContents.find(instanceId);
                 if (it != s_instanceContents.end() && !it->second.empty()) {
                     s_contentFinderConditions[id] = it->second;
@@ -376,9 +314,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] ContentFinderCondition loading failed: " + std::string(e.what()));
         }
         
-        // Recipe: Doesn't have a name field, but we store the CraftItemId for runtime lookup
-        // We'll format recipes as "Recipe #X (creates ItemName)" at format time
-        // For the cache, store the item name of the crafted item
         LogInfo("[GameData] Loading Recipe...");
         try {
             auto& cat = s_exdData->get_category("Recipe");
@@ -389,7 +324,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             for (const auto& [id, row] : rows) {
                 int32_t craftItemId = row->_data.CraftItemId;
                 if (craftItemId > 0) {
-                    // Look up the crafted item name
                     auto it = s_items.find(static_cast<uint32_t>(craftItemId));
                     if (it != s_items.end() && !it->second.empty()) {
                         s_recipes[id] = it->second;
@@ -402,8 +336,6 @@ bool Initialize(const std::filesystem::path& sqpackPath) {
             LogWarning("[GameData] Recipe loading failed: " + std::string(e.what()));
         }
         
-        // Note: Orchestrion and TripleTriadCard sheets are not in Structs.h
-        // We'll add placeholders and implement when struct definitions are available
         s_stats.orchestrionCount = 0;
         s_stats.tripleTriadCardCount = 0;
         
@@ -431,10 +363,6 @@ bool Reload() {
 const std::filesystem::path& GetDataDirectory() {
     return s_sqpackPath;
 }
-
-// ============================================================================
-// Lookup Functions
-// ============================================================================
 
 const char* LookupItemName(uint32_t itemId) noexcept {
     auto it = s_items.find(itemId);
@@ -637,10 +565,6 @@ std::string FormatInstanceContent(uint32_t instanceContentId) {
     return std::to_string(instanceContentId);
 }
 
-// ============================================================================
-// NEW: Enhanced Packet Decoding Lookups
-// ============================================================================
-
 const char* LookupFateName(uint32_t fateId) noexcept {
     auto it = s_fates.find(fateId);
     return (it != s_fates.end()) ? it->second.c_str() : nullptr;
@@ -737,12 +661,7 @@ std::string FormatTripleTriadCard(uint32_t cardId) {
     return std::to_string(cardId);
 }
 
-// ============================================================================
-// Asset Path Resolution
-// ============================================================================
-
 namespace {
-    // Helper to zero-pad IDs for path construction
     std::string PadId(uint16_t id, size_t width = 4) {
         std::string s = std::to_string(id);
         if (s.length() < width) {
@@ -751,27 +670,25 @@ namespace {
         return s;
     }
     
-    // Equipment slot suffix for model files
     const char* GetEquipSlotSuffix(EquipSlot slot) {
         switch (slot) {
             case EquipSlot::MainHand:
             case EquipSlot::OffHand:
-                return ""; // Weapons have different structure
-            case EquipSlot::Head:   return "_met";  // helmet/met
-            case EquipSlot::Body:   return "_top";  // top
-            case EquipSlot::Hands:  return "_glv";  // gloves
-            case EquipSlot::Legs:   return "_dwn";  // down/legs
-            case EquipSlot::Feet:   return "_sho";  // shoes
+                return "";     
+            case EquipSlot::Head:   return "_met";   
+            case EquipSlot::Body:   return "_top";   
+            case EquipSlot::Hands:  return "_glv";   
+            case EquipSlot::Legs:   return "_dwn";   
+            case EquipSlot::Feet:   return "_sho";   
             case EquipSlot::Earring:
             case EquipSlot::Necklace:
             case EquipSlot::Bracelet:
             case EquipSlot::Ring:
-                return "_acc";  // accessory
+                return "_acc";   
             default: return "";
         }
     }
     
-    // Equipment category folder for model files
     const char* GetEquipCategoryFolder(EquipSlot slot) {
         switch (slot) {
             case EquipSlot::MainHand:
@@ -795,15 +712,12 @@ std::string ResolveEquipmentModelPath(uint16_t primaryId, uint16_t secondaryId, 
     std::string vPad = PadId(secondaryId);
     
     if (slot == EquipSlot::MainHand || slot == EquipSlot::OffHand) {
-        // Weapons: chara/weapon/w0001/obj/body/b0001/model/w0001b0001.mdl
         return std::format("chara/{}/w{}/obj/body/b{}/model/w{}b{}.mdl", 
             category, ePad, vPad, ePad, vPad);
     } else if (category == "accessory") {
-        // Accessories: chara/accessory/a0001/model/c0101a0001_acc.mdl
         return std::format("chara/{}/a{}/model/c0101a{}{}.mdl", 
             category, ePad, ePad, suffix);
     } else {
-        // Regular equipment: chara/equipment/e0001/model/c0101e0001_top.mdl
         return std::format("chara/{}/e{}/model/c0101e{}{}.mdl", 
             category, ePad, ePad, suffix);
     }
@@ -814,7 +728,6 @@ std::string ResolveMonsterModelPath(uint16_t modelId, uint16_t bodyId, uint16_t 
     std::string bPad = PadId(bodyId);
     std::string tPad = PadId(typeId);
     
-    // Monster models: chara/monster/m0001/obj/body/b0001/model/m0001b0001.mdl
     return std::format("chara/monster/m{}/obj/body/b{}/model/m{}b{}.mdl", 
         mPad, bPad, mPad, bPad);
 }
@@ -823,8 +736,7 @@ std::string ResolveCharacterModelPath(uint16_t raceId, const std::string& partTy
     std::string cPad = PadId(raceId);
     std::string pPad = PadId(partId);
     
-    // Map part type to file prefix and suffix
-    char typeChar = 'f'; // default to face
+    char typeChar = 'f';    
     std::string suffix = "_fac";
     
     if (partType == "face") {
@@ -836,50 +748,42 @@ std::string ResolveCharacterModelPath(uint16_t raceId, const std::string& partTy
     } else if (partType == "tail") {
         typeChar = 't'; suffix = "_til";
     } else if (partType == "ear") {
-        typeChar = 'z'; suffix = "_zer"; // zear
+        typeChar = 'z'; suffix = "_zer";  
     }
     
-    // chara/human/c0101/obj/face/f0001/model/c0101f0001_fac.mdl
     return std::format("chara/human/c{}/obj/{}/{}{}/model/c{}{}{}{}.mdl",
         cPad, partType, typeChar, pPad, cPad, typeChar, pPad, suffix);
 }
 
 std::string ResolveMapTexturePath(uint32_t territoryId, uint8_t variant) {
-    // Get territory's Bg path to extract map folder
     const char* bgPath = LookupTerritoryBgPath(territoryId);
     if (!bgPath) return "";
     
     std::string_view bg(bgPath);
     
-    // Extract the last folder from bg path (e.g., "f1t1" from "ffxiv/fst_f1/twn/f1t1")
     auto lastSlash = bg.rfind('/');
     if (lastSlash == std::string_view::npos) return "";
     
-    // Get just the level folder name and its parent
     std::string_view levelFolder = bg.substr(lastSlash + 1);
     auto secondLastSlash = bg.rfind('/', lastSlash - 1);
     std::string_view fullPath = (secondLastSlash != std::string_view::npos) 
         ? bg.substr(secondLastSlash + 1) 
         : levelFolder;
     
-    // ui/map/f1t1/00/f1t100_m.tex (variant as 2-digit: 00, 01, etc.)
     std::string varStr = PadId(variant, 2);
     return std::format("ui/map/{}/{}/{}{}_{}.tex", 
         levelFolder, varStr, levelFolder, varStr, 'm');
 }
 
 std::string ResolveIconPath(uint32_t iconId, bool highRes) {
-    // Icons are organized in folders of 1000: 000000, 001000, 002000, etc.
     uint32_t folder = (iconId / 1000) * 1000;
     
     std::string folderStr = PadId(static_cast<uint16_t>(folder), 6);
     std::string iconStr = PadId(static_cast<uint16_t>(iconId), 6);
     
-    // To handle larger IDs (6 digits total)
     if (folder >= 100000) {
         folderStr = std::to_string(folder);
         iconStr = std::to_string(iconId);
-        // Pad to 6 digits
         while (folderStr.length() < 6) folderStr.insert(0, 1, '0');
         while (iconStr.length() < 6) iconStr.insert(0, 1, '0');
     }
@@ -891,20 +795,13 @@ std::string ResolveIconPath(uint32_t iconId, bool highRes) {
 }
 
 std::string ResolveItemIconPath(uint32_t itemId, bool highRes) {
-    // Need to look up item's icon ID from the Item sheet
     auto it = s_items.find(itemId);
     if (it == s_items.end()) return "";
     
-    // We stored just the name, but we need the icon ID
-    // This would require storing more data in the cache
-    // For now, return empty - this needs Item sheet access
-    // TODO: Extend s_items to store ItemInfo { name, iconId, etc. }
     return "";
 }
 
 std::string ResolveActionIconPath(uint32_t actionId, bool highRes) {
-    // Similar to items - needs icon ID from Action sheet
-    // TODO: Extend s_actions to store ActionInfo { name, iconId, etc. }
     return "";
 }
 
@@ -912,7 +809,6 @@ std::string ResolveTerritoryLgbPath(uint32_t territoryId) {
     const char* bgPath = LookupTerritoryBgPath(territoryId);
     if (!bgPath) return "";
     
-    // bg/[BgPath]/level/bg.lgb
     return std::format("bg/{}/level/bg.lgb", bgPath);
 }
 
@@ -920,7 +816,6 @@ std::string ResolveTerritoryPlannerPath(uint32_t territoryId) {
     const char* bgPath = LookupTerritoryBgPath(territoryId);
     if (!bgPath) return "";
     
-    // bg/[BgPath]/level/planner.sgb
     return std::format("bg/{}/level/planner.sgb", bgPath);
 }
 
@@ -942,7 +837,6 @@ std::optional<std::vector<char>> ReadRawFile(const std::string& path) {
         auto& sections = file->get_data_sections();
         if (sections.empty()) return std::nullopt;
         
-        // Return the first (usually only) data section
         return sections.front();
     }
     catch (const std::exception& e) {
@@ -982,4 +876,4 @@ size_t GetFileSize(const std::string& path) {
     }
 }
 
-} // namespace GameData
+}   

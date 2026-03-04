@@ -1,7 +1,7 @@
 #include "FunctionAnalyzer.h"
 #include "FunctionDatabase.h"
 #include "SignatureDatabase.h"
-#include "../Analysis/PatternScanner.h"  // Add this include for the consolidated string xref functionality
+#include "../Analysis/PatternScanner.h"           
 #include "../Logger/Logger.h"
 #include <sstream>
 #include <iomanip>
@@ -23,9 +23,7 @@
 
 namespace SapphireHook {
 
-    // C-style helper functions for SEH (no C++ objects with destructors)
     extern "C" {
-        // Helper function to safely read code bytes without C++ objects
         static bool SafeReadCodeBytes(uintptr_t address, uint8_t* bytes, size_t count)
         {
             __try
@@ -43,7 +41,6 @@ namespace SapphireHook {
             }
         }
 
-        // Helper function to safely read memory for signature verification
         static bool SafeReadMemoryBytes(uintptr_t address, uint8_t* bytes, size_t count)
         {
             __try
@@ -67,17 +64,14 @@ namespace SapphireHook {
         std::shared_ptr<FunctionDatabase> m_functionDatabase;
         std::shared_ptr<SignatureDatabase> m_signatureDatabase;
 
-        // Analysis state
         bool m_databasesInitialized = false;
         bool m_signaturesInitialized = false;
         bool m_typeInfoInitialized = false;
 
-        // Discovered functions tracking
         std::vector<uintptr_t> m_discoveredFunctions;
         std::map<uintptr_t, std::string> m_discoveredFunctionNames;
         std::map<std::string, std::vector<uintptr_t>> m_functionsByType;
 
-        // VTable analysis results
         std::map<uintptr_t, std::vector<uintptr_t>> m_vtables;
 
         Impl() {}
@@ -112,20 +106,17 @@ namespace SapphireHook {
     {
         std::string trimmed = input;
 
-        // Remove whitespace
         trimmed.erase(std::remove_if(trimmed.begin(), trimmed.end(), ::isspace), trimmed.end());
 
-        // Try hex format (0x...)
         if (trimmed.find("0x") == 0 || trimmed.find("0X") == 0)
         {
             std::stringstream ss;
             ss << std::hex << trimmed.substr(2);
             ss >> result;
             if (ss.fail()) return false;
-            // Auto-relocate IDA absolute addresses to runtime base
             constexpr uintptr_t IDA_BASE = 0x0000000140000000ULL;
             if (result >= IDA_BASE && result < (IDA_BASE + 0x10000000ULL))
-            { // within a sane window
+            {     
                 HMODULE hExe = GetModuleHandle(nullptr);
                 if (hExe)
                 {
@@ -136,11 +127,9 @@ namespace SapphireHook {
             return true;
         }
 
-        // Try decimal
         std::stringstream ss(trimmed);
         ss >> result;
         if (ss.fail()) return false;
-        // Decimal path: also try to relocate if it's an IDA absolute decimal
         constexpr uintptr_t IDA_BASE = 0x0000000140000000ULL;
         if (result >= IDA_BASE && result < (IDA_BASE + 0x10000000ULL))
         {
@@ -156,7 +145,6 @@ namespace SapphireHook {
 
     uintptr_t FunctionAnalyzer::ConvertRVAToRuntimeAddress(uintptr_t rva)
     {
-        // Get module base
         HMODULE hModule = GetModuleHandle(nullptr);
         if (hModule)
         {
@@ -173,13 +161,12 @@ namespace SapphireHook {
         ss << "0x" << std::hex << std::uppercase << address;
         LogInfo("Address: " + ss.str());
 
-        // If address looks like an IDA absolute and the memory is not committed, attempt relocation
         auto tryRelocateIfNeeded = [&]() -> uintptr_t
             {
                 MEMORY_BASIC_INFORMATION mbiPre{};
                 if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &mbiPre, sizeof(mbiPre)) != 0)
                 {
-                    if (mbiPre.State == MEM_COMMIT) return address; // good already
+                    if (mbiPre.State == MEM_COMMIT) return address;   
                 }
                 constexpr uintptr_t IDA_BASE = 0x0000000140000000ULL;
                 if (address >= IDA_BASE && address < (IDA_BASE + 0x10000000ULL))
@@ -204,10 +191,8 @@ namespace SapphireHook {
                 return address;
             };
 
-        // Relocate IDA absolute address if needed
         address = tryRelocateIfNeeded();
 
-        // Check if address is in valid memory
         MEMORY_BASIC_INFORMATION mbi{};
         if (VirtualQuery(reinterpret_cast<LPCVOID>(address), &mbi, sizeof(mbi)) == 0)
         {
@@ -235,11 +220,9 @@ namespace SapphireHook {
             return false;
         }
 
-        // Check if it's executable
         bool isExecutable = (mbi.Protect & (PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY)) != 0;
         LogInfo("Is executable: " + std::string(isExecutable ? "Yes" : "No"));
 
-        // Check if it looks like a function prologue using the safe helper
         uint8_t codeBytes[3] = { 0 };
         if (SafeReadCodeBytes(address, codeBytes, 3))
         {
@@ -249,12 +232,11 @@ namespace SapphireHook {
                 << " 0x" << std::setw(2) << static_cast<int>(codeBytes[2]);
             LogInfo(ss.str());
 
-            // Common x64 function prologues
             bool likelyFunction = false;
-            if (codeBytes[0] == 0x48 && codeBytes[1] == 0x89) likelyFunction = true; // mov instruction
-            if (codeBytes[0] == 0x48 && codeBytes[1] == 0x83) likelyFunction = true; // sub rsp
-            if (codeBytes[0] == 0x55) likelyFunction = true; // push rbp
-            if (codeBytes[0] == 0x53) likelyFunction = true; // push rbx
+            if (codeBytes[0] == 0x48 && codeBytes[1] == 0x89) likelyFunction = true;   
+            if (codeBytes[0] == 0x48 && codeBytes[1] == 0x83) likelyFunction = true;   
+            if (codeBytes[0] == 0x55) likelyFunction = true;   
+            if (codeBytes[0] == 0x53) likelyFunction = true;   
 
             LogInfo("Looks like function: " + std::string(likelyFunction ? "Yes" : "No"));
         }
@@ -271,7 +253,6 @@ namespace SapphireHook {
     {
         LogInfo("=== Address Source Debug: " + name + " ===");
 
-        // Check if address is from function database
         if (m_impl->m_functionDatabase && m_impl->m_functionDatabase->HasFunction(address))
         {
             auto info = m_impl->m_functionDatabase->GetFunction(address);
@@ -281,7 +262,6 @@ namespace SapphireHook {
             LogInfo("  Category: " + info.category);
         }
 
-        // Check if address is from signature database
         if (m_impl->m_signatureDatabase)
         {
             auto resolvedFuncs = m_impl->m_signatureDatabase->GetResolvedFunctions();
@@ -294,7 +274,6 @@ namespace SapphireHook {
             }
         }
 
-        // Get module information
         HMODULE hModule = nullptr;
         if (GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
             reinterpret_cast<LPCSTR>(address), &hModule))
@@ -327,7 +306,6 @@ namespace SapphireHook {
             ss << "Parsed address: 0x" << std::hex << addr;
             LogInfo(ss.str());
 
-            // Convert to runtime if this looks like a small RVA only; otherwise ParseAddressInput may have relocated already
             uintptr_t runtimeAddr = addr;
             if (addr < 0x10000000ULL)
             {
@@ -356,17 +334,13 @@ namespace SapphireHook {
             size_t catCount = m_impl->m_functionDatabase->GetCategoryCount();
             LogInfo("Function Database: " + std::to_string(funcCount) + " functions, " + std::to_string(catCount) + " categories");
 
-            // Show sample functions from each category
             const auto& categories = m_impl->m_functionDatabase->GetCategories();
             for (const auto& catKV : categories)
             {
                 const auto& catName = catKV.first;
-                // const auto& catDesc = catKV.second; // unused
-
                 auto funcsInCat = m_impl->m_functionDatabase->GetFunctionsByCategory(catName);
                 LogInfo("Category '" + catName + "': " + std::to_string(funcsInCat.size()) + " functions");
 
-                // Show first few functions as examples
                 size_t maxShow = funcsInCat.size() < static_cast<size_t>(3) ? funcsInCat.size() : static_cast<size_t>(3);
                 for (size_t i = 0; i < maxShow; ++i)
                 {
@@ -387,7 +361,6 @@ namespace SapphireHook {
             size_t resolvedSigs = m_impl->m_signatureDatabase->GetResolvedSignatures();
             LogInfo("Signature Database: " + std::to_string(resolvedSigs) + "/" + std::to_string(totalSigs) + " signatures resolved");
 
-            // Show resolved signatures
             auto resolved = m_impl->m_signatureDatabase->GetResolvedFunctions();
             LogInfo("Sample resolved signatures:");
             size_t shown = 0;
@@ -416,7 +389,6 @@ namespace SapphireHook {
             return;
         }
 
-        // Test a few known addresses if they exist
         std::vector<std::string> testCategories = { "UI", "Network", "Gameplay", "System", "Graphics" };
 
         for (const auto& category : testCategories)
@@ -424,16 +396,13 @@ namespace SapphireHook {
             auto functions = m_impl->m_functionDatabase->GetFunctionsByCategory(category);
             LogInfo("Testing category '" + category + "' (" + std::to_string(functions.size()) + " functions)");
 
-            // Test first few functions in each category
             const size_t limit = (functions.size() < static_cast<size_t>(2)) ? functions.size() : static_cast<size_t>(2);
             for (size_t i = 0; i < limit; ++i)
             {
                 LogInfo("  Testing function: " + functions[i]);
-                // In a real implementation, you'd test if these addresses are valid
             }
         }
 
-        // Test signature resolution if available
         if (m_impl->m_signatureDatabase)
         {
             LogInfo("Testing signature resolution...");
@@ -441,11 +410,9 @@ namespace SapphireHook {
             LogInfo("Signatures resolved before test: " + std::to_string(resolvedBefore));
         }
 
-        // Scan ALL strings in .rdata and map to referencing functions
         HMODULE self = GetModuleHandleW(nullptr);
-        const size_t minStringLen = 6; // tune if needed
+        const size_t minStringLen = 6;    
 
-        // Use the consolidated PatternScanner string xref functionality
         auto functionStringMap = PatternScanner::MapFunctionsToStrings(self, minStringLen);
 
         size_t totalFnRefs = 0;
@@ -461,7 +428,6 @@ namespace SapphireHook {
            << ", TotalFn->String edges=" << totalFnRefs;
         LogInfo(ss.str());
 
-        // Integrate into discovered set (avoid duplicates)
         size_t added = 0, preview = 0;
         for (const auto& kv : functionStringMap.functionsToStrings)
         {
@@ -508,7 +474,6 @@ namespace SapphireHook {
 
         LogInfo("Starting signature-based initialization...");
 
-        // Get current resolution status
         size_t totalSigs = m_impl->m_signatureDatabase->GetTotalSignatures();
         size_t resolvedSigs = m_impl->m_signatureDatabase->GetResolvedSignatures();
 
@@ -519,7 +484,6 @@ namespace SapphireHook {
             LogInfo("Attempting to resolve remaining signatures...");
             m_impl->m_signatureDatabase->ResolveAllSignatures();
 
-            // Check results
             size_t newResolved = m_impl->m_signatureDatabase->GetResolvedSignatures();
             LogInfo("Resolution complete: " + std::to_string(newResolved) + "/" + std::to_string(totalSigs) + " resolved");
             LogInfo("Newly resolved: " + std::to_string(newResolved - resolvedSigs) + " signatures");
@@ -539,11 +503,10 @@ namespace SapphireHook {
             return;
         }
 
-        // Set up progress callback
         auto progressCallback = [](size_t current, size_t total, const std::string& currentSig)
             {
                 if (current % 10 == 0)
-                { // Log every 10th signature to avoid spam
+                {        
                     LogInfo("Resolving signatures: " + std::to_string(current) + "/" + std::to_string(total) +
                         " (Current: " + currentSig + ")");
                 }
@@ -601,12 +564,10 @@ namespace SapphireHook {
             return;
         }
 
-        // Clear previous discoveries
         m_impl->m_discoveredFunctions.clear();
         m_impl->m_discoveredFunctionNames.clear();
         m_impl->m_functionsByType.clear();
 
-        // Get all resolved functions
         auto resolvedFunctions = m_impl->m_signatureDatabase->GetResolvedFunctions();
 
         LogInfo("Analyzing " + std::to_string(resolvedFunctions.size()) + " signature-resolved functions...");
@@ -619,7 +580,6 @@ namespace SapphireHook {
             m_impl->m_discoveredFunctions.push_back(address);
             m_impl->m_discoveredFunctionNames[address] = name;
 
-            // Categorize by function name patterns
             std::string category = "Unknown";
             std::string lowerName = name;
             std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), ::tolower);
@@ -663,17 +623,14 @@ namespace SapphireHook {
             return;
         }
 
-        // Get all available classes
         auto allClasses = m_impl->m_signatureDatabase->GetAllClasses();
         LogInfo("Found " + std::to_string(allClasses.size()) + " classes in signature database");
 
-        // Initialize type-based analysis for each class
         for (const auto& className : allClasses)
         {
             auto classFunctions = m_impl->m_signatureDatabase->FindFunctionsByClass(className);
             LogInfo("Class '" + className + "': " + std::to_string(classFunctions.size()) + " functions");
 
-            // Store functions by class type
             std::vector<uintptr_t> classAddresses;
             for (const auto& func : classFunctions)
             {
@@ -699,7 +656,6 @@ namespace SapphireHook {
             return;
         }
 
-        // Find functions for specific class
         auto classFunctions = m_impl->m_signatureDatabase->FindFunctionsByClass(className);
         LogInfo("Found " + std::to_string(classFunctions.size()) + " functions for class " + className);
 
@@ -714,7 +670,6 @@ namespace SapphireHook {
                 ss << "  " << func.functionName << " -> 0x" << std::hex << func.resolvedAddress;
                 LogInfo(ss.str());
 
-                // Add to discovered functions
                 m_impl->m_discoveredFunctionNames[func.resolvedAddress] = className + "::" + func.functionName;
             }
             else
@@ -723,10 +678,8 @@ namespace SapphireHook {
             }
         }
 
-        // Store by type
         m_impl->m_functionsByType[className] = resolvedAddresses;
 
-        // Also check for derived classes
         auto derivedClasses = m_impl->m_signatureDatabase->GetDerivedClasses(className);
         if (!derivedClasses.empty())
         {
@@ -748,10 +701,8 @@ namespace SapphireHook {
             return;
         }
 
-        // Clear previous VTable analysis
         m_impl->m_vtables.clear();
 
-        // Get all classes and look for virtual functions
         auto allClasses = m_impl->m_signatureDatabase->GetAllClasses();
 
         for (const auto& className : allClasses)
@@ -762,7 +713,6 @@ namespace SapphireHook {
             {
                 LogInfo("Class " + className + " has " + std::to_string(virtualFuncs.size()) + " virtual functions");
 
-                // Try to find VTable based on virtual function addresses
                 std::vector<uintptr_t> vtableEntries;
 
                 for (const auto& virtFunc : virtualFuncs)
@@ -784,7 +734,6 @@ namespace SapphireHook {
 
                 if (!vtableEntries.empty())
                 {
-                    // Use first virtual function address as VTable identifier
                     m_impl->m_vtables[vtableEntries[0]] = vtableEntries;
                 }
             }
@@ -814,7 +763,6 @@ namespace SapphireHook {
 
             LogInfo("Type '" + typeName + "': " + std::to_string(functions.size()) + " potential hooks");
 
-            // Generate hooks for interesting function types
             bool shouldHook = false;
             std::string lowerType = typeName;
             std::transform(lowerType.begin(), lowerType.end(), lowerType.begin(), ::tolower);
@@ -872,7 +820,6 @@ namespace SapphireHook {
         {
             LogWarning("Found " + std::to_string(unresolvedSigs) + " unresolved signatures");
 
-            // Get all classes and check their resolution rates
             auto allClasses = m_impl->m_signatureDatabase->GetAllClasses();
 
             for (const auto& className : allClasses)
@@ -904,7 +851,6 @@ namespace SapphireHook {
             }
         }
 
-        // Check for common signature issues...
         const auto& globalSigs = m_impl->m_signatureDatabase->GetGlobalSignatures();
         for (const auto& kv : globalSigs)
         {
@@ -934,16 +880,13 @@ namespace SapphireHook {
 
         LogInfo("Starting enhanced resolution process...");
 
-        // First, try standard resolution
         m_impl->m_signatureDatabase->ResolveAllSignatures();
 
         size_t resolvedAfterStandard = m_impl->m_signatureDatabase->GetResolvedSignatures();
         LogInfo("Standard resolution completed: " + std::to_string(resolvedAfterStandard) + " signatures resolved");
 
-        // Try enhanced techniques for remaining signatures
         LogInfo("Attempting enhanced resolution techniques...");
 
-        // Get unresolved signatures and try alternative approaches
         auto allClasses = m_impl->m_signatureDatabase->GetAllClasses();
 
         for (const auto& className : allClasses)
@@ -956,8 +899,6 @@ namespace SapphireHook {
                 {
                     LogInfo("Attempting enhanced resolution for " + className + "::" + func.functionName);
 
-                    // Could implement more sophisticated pattern matching here
-                    // For now, just log the attempt
                     LogInfo("  Signature: " + func.signature);
                     LogInfo("  Return type: " + func.returnType);
 
@@ -998,7 +939,6 @@ namespace SapphireHook {
 
         LogInfo("Starting debug signature scan...");
 
-        // Get module information for scanning
         HMODULE hModule = GetModuleHandle(nullptr);
         if (!hModule)
         {
@@ -1020,11 +960,9 @@ namespace SapphireHook {
         ss << "Scanning module: base=0x" << std::hex << moduleBase << ", size=0x" << moduleSize;
         LogInfo(ss.str());
 
-        // Sample a few signatures for detailed debugging
         auto globalSigs = m_impl->m_signatureDatabase->GetGlobalSignatures();
         size_t debugCount = 0;
 
-        // --- inside FunctionAnalyzer::DebugSignatureScanning(), unchanged except we already replaced structured binding ---
         for (const auto& kv : globalSigs)
         {
             const auto& name = kv.first;
@@ -1074,4 +1012,4 @@ namespace SapphireHook {
         LogInfo("Debug signature scanning complete");
     }
 
-} // namespace SapphireHook
+}   

@@ -42,7 +42,6 @@ namespace SapphireHook
 		UIManager(const UIManager&) = delete;
 		UIManager& operator=(const UIManager&) = delete;
 
-		// Helper template for module registration with error handling
 		template<typename T>
 		bool TryRegisterModule(const char* moduleId, const char* displayName, int& successCount);
 

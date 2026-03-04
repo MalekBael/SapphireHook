@@ -1,4 +1,5 @@
-<Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+<Project DefaultTargets="Build" ToolsVersion="16.0"
+  xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <!-- Project Configurations -->
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|x64">
@@ -69,10 +70,10 @@
     <PostBuildEvent>
       <Command>echo [BUILD] SapphireHookDLL Debug (static Capstone + MinHook)
 if not exist "$(OutDir)data" mkdir "$(OutDir)data"
-xcopy /Y /E /I "$(ProjectDir)data\*" "$(OutDir)data\" &gt;nul 2&gt;&amp;1
+%SystemRoot%\System32\xcopy.exe /Y /E /I "$(ProjectDir)data\*" "$(OutDir)data\" &gt;nul 2&gt;&amp;1
 echo [BUILD] Copied data folder to output directory
 echo [BUILD] Copying vcpkg debug DLLs...
-xcopy /Y "$(ProjectDir)vcpkg\installed\x64-windows\debug\bin\*.dll" "$(OutDir)" &gt;nul 2&gt;&amp;1
+%SystemRoot%\System32\xcopy.exe /Y "$(ProjectDir)vcpkg\installed\x64-windows\debug\bin\*.dll" "$(OutDir)" &gt;nul 2&gt;&amp;1
 echo [BUILD] Copied vcpkg DLLs to output directory</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -94,7 +95,7 @@ echo [BUILD] Copied vcpkg DLLs to output directory</Command>
 				$(ProjectDir)vendor\minhook;
 				$(ProjectDir)vcpkg\installed\x64-windows\lib;
 				%(AdditionalLibraryDirectories)
-			</AdditionalLibraryDirectories>
+      </AdditionalLibraryDirectories>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <LinkTimeCodeGeneration>Default</LinkTimeCodeGeneration>
@@ -102,10 +103,10 @@ echo [BUILD] Copied vcpkg DLLs to output directory</Command>
     <PostBuildEvent>
       <Command>echo [BUILD] SapphireHookDLL Release (static Capstone + MinHook)
 if not exist "$(OutDir)data" mkdir "$(OutDir)data"
-xcopy /Y /E /I "$(ProjectDir)data\*" "$(OutDir)data\" &gt;nul 2&gt;&amp;1
+%SystemRoot%\System32\xcopy.exe /Y /E /I "$(ProjectDir)data\*" "$(OutDir)data\" &gt;nul 2&gt;&amp;1
 echo [BUILD] Copied data folder to output directory
 echo [BUILD] Copying vcpkg release DLLs...
-xcopy /Y "$(ProjectDir)vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)" &gt;nul 2&gt;&amp;1
+%SystemRoot%\System32\xcopy.exe /Y "$(ProjectDir)vcpkg\installed\x64-windows\bin\*.dll" "$(OutDir)" &gt;nul 2&gt;&amp;1
 echo [BUILD] Copied vcpkg DLLs to output directory</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -149,6 +150,7 @@ echo [BUILD] Copied vcpkg DLLs to output directory</Command>
     <ClInclude Include="src\Modules\LuaGameScriptModule.h" />
     <ClInclude Include="src\Modules\MemoryViewerModule.h" />
     <ClInclude Include="src\Modules\NetDiagnosticsModule.h" />
+    <ClInclude Include="src\Modules\RetainerCacheInspectorModule.h" />
     <ClInclude Include="src\Modules\SettingsModule.h" />
     <ClInclude Include="src\Modules\Weather.h" />
     <ClInclude Include="src\Monitor\NetworkMonitor.h" />
@@ -301,6 +303,7 @@ echo [BUILD] Copied vcpkg DLLs to output directory</Command>
     <ClCompile Include="src\Modules\GMCommandsModule.cpp" />
     <ClCompile Include="src\Modules\MemoryViewerModule.cpp" />
     <ClCompile Include="src\Modules\NetDiagnosticsModule.cpp" />
+    <ClCompile Include="src\Modules\RetainerCacheInspectorModule.cpp" />
     <ClCompile Include="src\Modules\SettingsModule.cpp" />
     <ClCompile Include="src\Monitor\NetworkMonitor.cpp" />
     <ClCompile Include="src\Monitor\NetworkMonitorHelper.cpp" />

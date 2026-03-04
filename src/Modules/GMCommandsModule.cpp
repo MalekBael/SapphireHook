@@ -5,7 +5,6 @@
 #include <cstdio>
 #include "../Core/PacketInjector.h"
 
-// Small UI helpers (file-local)
 static void DrawHintBox()
 {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.16f, 0.35f));
@@ -32,8 +31,6 @@ static void DrawDiscoveryHintBox()
     ImGui::PopStyleColor();
 }
 
-// Reusable args + target block (deduplicates Known/Discovery)
-// labelSuffix must be unique per caller (e.g. "##known", "##discovery") to avoid ID collisions.
 static void DrawArgsSection(const char* labelSuffix,
                             bool readOnlyCommandId,
                             int& commandId,
@@ -57,7 +54,6 @@ static void DrawArgsSection(const char* labelSuffix,
     ImGui::InputInt("Arg 3", &a3);
     ImGui::InputScalar("Target ID (uint64)", ImGuiDataType_U64, &targetId);
 
-    // Learned local actor id + "Use Self" (shared UI)
     const uint32_t learned = SapphireHook::GetLearnedLocalActorId();
     ImGui::Spacing();
 
@@ -67,7 +63,6 @@ static void DrawArgsSection(const char* labelSuffix,
     else
         std::snprintf(buf, sizeof(buf), "Local actor ID: (learning...) Type any chat message once.");
 
-    // Ensure distinct IDs between tabs
     char statusId[64];
     std::snprintf(statusId, sizeof(statusId), "##local_actor_status%s", labelSuffix ? labelSuffix : "");
     ImGui::InputText(statusId, buf, sizeof(buf), ImGuiInputTextFlags_ReadOnly);
@@ -91,12 +86,10 @@ void GMCommandsModule::Initialize()
 {
     printf("[GMCommandsModule] Initializing...\n");
 
-    // Default: no selection; show blank preview
     m_selectedIndex = -1;
     m_commandId = 0;
 
-    // Initialize discovery mode with default values
-    m_discoveryCommandId = 605;  // Start with an unknown command for testing
+    m_discoveryCommandId = 605;         
     m_discoveryArg0 = 0;
     m_discoveryArg1 = 0;
     m_discoveryArg2 = 0;
@@ -131,7 +124,6 @@ void GMCommandsModule::RenderWindow()
 
         if (ImGui::BeginTabBar("GMCommandTabs"))
         {
-            // Known Commands Tab
             if (ImGui::BeginTabItem("Known Commands"))
             {
                 DrawHintBox();
@@ -212,7 +204,6 @@ void GMCommandsModule::RenderWindow()
                 ImGui::EndTabItem();
             }
 
-            // Discovery Mode Tab
             if (ImGui::BeginTabItem("Discovery Mode"))
             {
                 DrawDiscoveryHintBox();

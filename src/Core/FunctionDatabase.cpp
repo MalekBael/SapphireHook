@@ -23,9 +23,6 @@ static std::string FormatHexAddress(uintptr_t address) {
     return std::string(buf);
 }
 
-// --- Heuristic JSON helpers (declared before use) ---
-
-// Helper: parse hex (with/without 0x) or decimal
 static uint64_t ParseUintFlexible(const std::string& s)
 {
     std::string t = s;
@@ -145,7 +142,6 @@ std::string FunctionDatabase::DetermineCategory(const std::string& functionName)
 
 bool FunctionDatabase::Load(const std::string& filename)
 {
-    // Just use the existing LoadJsonFile function which already works
     return LoadJsonFile(filename);
 }
 
@@ -176,7 +172,6 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
 
     int functionsLoaded = 0;
 
-    // Try SimpleJSON first for the common cases
     SapphireHook::SimpleJSON::JSONObject jsonRoot;
     bool parsed = false;
     try {
@@ -188,16 +183,14 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
     }
 
     auto toRuntime = [&](uintptr_t addrOrRva)->uintptr_t {
-        // Treat small values as RVAs automatically; keep file-name based hint too
         const bool nameHintsRva = (filepath.find("rva") != std::string::npos) ||
             (filepath.find("updated") != std::string::npos);
-        const bool looksLikeRva = (addrOrRva < 0x0100'0000ULL); // <16MB heuristic
+        const bool looksLikeRva = (addrOrRva < 0x0100'0000ULL);   
         if ((nameHintsRva || looksLikeRva) && m_runtimeBaseAddress != 0)
             return RvaToRuntimeAddress(addrOrRva);
         return addrOrRva;
         };
 
-    // 1) Structured simple format: { "functions": { "0xADDR": "Name", ... }, "categories": {...} }
     if (parsed && jsonRoot.HasKey("functions"))
     {
         auto& fv = jsonRoot.data["functions"];
@@ -226,7 +219,6 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
             }
         }
 
-        // Categories via SimpleJSON if present
         if (jsonRoot.HasKey("categories"))
         {
             auto& cv = jsonRoot.data["categories"];
@@ -244,14 +236,11 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
                 std::to_string(m_categories.size()) + " categories from JSON (map format)");
             return true;
         }
-        // If we got here with 0, fall through to nested-object handling below.
     }
 
-    // 2) Structured nested-object format fallback (manual parse, robust brace/quote aware)
     if (content.find("\"functions\"") != std::string::npos)
     {
         LogInfo("Detected structured JSON format with 'functions' key");
-        // Find functions object bounds
         size_t keyPos = content.find("\"functions\"");
         size_t colonPos = (keyPos == std::string::npos) ? std::string::npos : content.find(':', keyPos);
         size_t braceStart = (colonPos == std::string::npos) ? std::string::npos : content.find('{', colonPos);
@@ -279,7 +268,6 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
             {
                 const std::string section = content.substr(braceStart + 1, braceEnd - braceStart - 1);
 
-                // Walk each entry: "0x...": { ... }  OR  "0x...": "Name"
                 size_t searchPos = 0;
                 while (true)
                 {
@@ -293,17 +281,14 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
                     size_t colonAfterAddr = section.find(':', addrEnd);
                     if (colonAfterAddr == std::string::npos) { searchPos = addrEnd + 1; continue; }
 
-                    // Skip whitespace after colon
                     size_t valStart = section.find_first_not_of(" \t\r\n", colonAfterAddr + 1);
                     if (valStart == std::string::npos) { searchPos = addrEnd + 1; continue; }
 
                     uintptr_t addrOrRva = ParseAddress(addrStr);
                     if (addrOrRva == 0) { searchPos = addrEnd + 1; continue; }
 
-                    // Case A: value is a JSON string => "0x...": "FunctionName"
                     if (section[valStart] == '"')
                     {
-                        // Parse string with escape handling
                         size_t p = valStart + 1;
                         std::string funcName;
                         while (p < section.size())
@@ -332,16 +317,13 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
                                 LogDebug("Loaded (map-fallback) " + FormatHexAddress(runtime) + " -> " + info.name + " [" + info.category + "]");
                         }
 
-                        // Advance past the parsed string value
                         searchPos = (p < section.size()) ? (p + 1) : (addrEnd + 1);
                         continue;
                     }
 
-                    // Case B: value is an object => "0x...": { ... }
                     size_t objStart = (section[valStart] == '{') ? valStart : std::string::npos;
                     if (objStart == std::string::npos) { searchPos = addrEnd + 1; continue; }
 
-                    // Find matching close for this object
                     int d = 1; bool q = false;
                     size_t p = objStart + 1, objEnd = std::string::npos;
                     while (p < section.size() && d > 0)
@@ -394,7 +376,6 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
             }
         }
 
-        // Categories via SimpleJSON if we have it
         if (parsed && jsonRoot.HasKey("categories"))
         {
             auto& cv = jsonRoot.data["categories"];
@@ -407,13 +388,11 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
         }
         else
         {
-            // Regex fallback for categories
             std::smatch catMatch;
             if (std::regex_search(content, catMatch, std::regex("\"categories\"\\s*:\\s*\\{([^{}]*)\\}")))
             {
                 std::string catContent = catMatch[1].str();
 
-                // Keep the regex object alive for the iterator's lifetime
                 const std::regex catPairRe(R"CAT("([^"]+)"\s*:\s*"([^"]+)")CAT");
 
                 for (std::sregex_iterator it(catContent.begin(), catContent.end(), catPairRe), end;
@@ -429,7 +408,6 @@ bool FunctionDatabase::LoadJsonFile(const std::string& filepath)
         return functionsLoaded > 0;
     }
 
-    // Fallback: no functions loaded from any format
     LogWarning("No functions loaded from JSON file: " + filepath);
     return false;
 }
@@ -555,8 +533,3 @@ bool FunctionDatabase::Save(const std::string& filepath)
 
 
 
-/* AUTO-INSERTED TYPE SIGNATURE DUMP (REMOVE IF RE-APPEARS)
-   If a tool re-injects the "SIGNATURES OF REFERENCED TYPES" block, ensure it is
-   wrapped in a comment like this or deleted; it is NOT valid C++ and will break
-   IntelliSense / compilation.
-*/
