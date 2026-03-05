@@ -433,3 +433,4 @@ data/data-sig.json
 /notes/
 /build_cmake/
 /build_vs/
+/vcpkg_installed/

@@ -13,5 +13,6 @@
     "minhook",
     "nlohmann-json",
     "spdlog"
-  ]
+  ],
+  "builtin-baseline": "57987637aac17d62bac535bc839baca3754490e6"
 }

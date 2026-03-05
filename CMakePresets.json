@@ -1,52 +1,63 @@
 {
-    "version": 6,
-    "cmakeMinimumRequired": {
-        "major": 3,
-        "minor": 22,
-        "patch": 0
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 22,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "vcpkg-base",
+      "hidden": true,
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "cacheVariables": {
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
     },
-    "configurePresets": [
-        {
-            "name": "default",
-            "displayName": "Debug (Ninja + MSVC)",
-            "description": "Build with MSVC via Ninja. Must be run from a VS 2022 Developer Command Prompt (x64) or with the correct VS Code CMake Kit selected so that cl.exe and the Windows SDK lib paths are on PATH/LIB.",
-            "generator": "Ninja",
-            "binaryDir": "${sourceDir}/build_cmake",
-            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug",
-                "VCPKG_TARGET_TRIPLET": "x64-windows"
-            }
-        },
-        {
-            "name": "release",
-            "displayName": "Release (Ninja + VS2022 Build Tools)",
-            "inherits": "default",
-            "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
-            }
-        },
-        {
-            "name": "vs2022",
-            "displayName": "Debug (Visual Studio 2022 Solution)",
-            "description": "Generate VS2022 solution file",
-            "generator": "Visual Studio 17 2022",
-            "architecture": "x64",
-            "binaryDir": "${sourceDir}/build_vs",
-            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
-            "cacheVariables": {
-                "VCPKG_TARGET_TRIPLET": "x64-windows"
-            }
-        }
-    ],
-    "buildPresets": [
-        {
-            "name": "default",
-            "configurePreset": "default"
-        },
-        {
-            "name": "release",
-            "configurePreset": "release"
-        }
-    ]
+    {
+      "name": "ninja-debug",
+      "hidden": true,
+      "displayName": "Debug (Ninja + MSVC)",
+      "description": "Ninja build — run from a VS Developer Command Prompt only.",
+      "inherits": "vcpkg-base",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build_cmake",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "ninja-release",
+      "hidden": true,
+      "displayName": "Release (Ninja + MSVC)",
+      "inherits": "ninja-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "vs2026",
+      "displayName": "Visual Studio 2026 x64 Debug",
+      "description": "VS solution — use this from VS IDE or cmake --preset vs2026.",
+      "inherits": "vcpkg-base",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build_vs"
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "ninja-debug",
+      "configurePreset": "ninja-debug"
+    },
+    {
+      "name": "ninja-release",
+      "configurePreset": "ninja-release"
+    },
+    {
+      "name": "vs2026",
+      "configurePreset": "vs2026",
+      "configuration": "Debug"
+    }
+  ]
 }
