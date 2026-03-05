@@ -5,8 +5,8 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
 endif()
 
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake")
-        set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/vcpkg/scripts/buildsystems/vcpkg.cmake"
+    if(DEFINED ENV{VCPKG_ROOT} AND EXISTS "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake")
+        set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake"
             CACHE STRING "Vcpkg toolchain file")
     endif()
 endif()
@@ -46,9 +46,8 @@ find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(xxHash CONFIG REQUIRED)
 find_package(minhook CONFIG REQUIRED)
-
-set(NUGET_NLOHMANN_DIR "${CMAKE_CURRENT_SOURCE_DIR}/packages/nlohmann.json.3.12.0/build/native")
-set(NUGET_SPDLOG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/packages/native.spdlog-stdfmt.1.12.0/build/native")
+find_package(nlohmann_json CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
 add_compile_definitions(SPDLOG_USE_STD_FORMAT)
 
@@ -224,8 +223,6 @@ target_include_directories(SapphireHookDLL PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/miniz
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/hex_editor
     ${CMAKE_CURRENT_SOURCE_DIR}/vendor/ImGuiFD
-    ${NUGET_NLOHMANN_DIR}/include
-    ${NUGET_SPDLOG_DIR}/include
 )
 
 target_compile_definitions(SapphireHookDLL PRIVATE
@@ -249,6 +246,8 @@ target_link_libraries(SapphireHookDLL PRIVATE
     magic_enum::magic_enum
     xxHash::xxhash
     minhook::minhook
+    nlohmann_json::nlohmann_json
+    spdlog::spdlog_header_only
     
     kernel32
     user32

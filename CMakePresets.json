@@ -12,9 +12,9 @@
             "description": "Build with MSVC via Ninja. Must be run from a VS 2022 Developer Command Prompt (x64) or with the correct VS Code CMake Kit selected so that cl.exe and the Windows SDK lib paths are on PATH/LIB.",
             "generator": "Ninja",
             "binaryDir": "${sourceDir}/build_cmake",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
                 "VCPKG_TARGET_TRIPLET": "x64-windows"
             }
         },
@@ -33,8 +33,8 @@
             "generator": "Visual Studio 17 2022",
             "architecture": "x64",
             "binaryDir": "${sourceDir}/build_vs",
+            "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
             "cacheVariables": {
-                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/vcpkg/scripts/buildsystems/vcpkg.cmake",
                 "VCPKG_TARGET_TRIPLET": "x64-windows"
             }
         }

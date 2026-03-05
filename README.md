@@ -8,8 +8,6 @@ A C++20 native hook DLL for FFXIV. Provides network packet monitoring/decoding, 
 - **Windows 10/11 SDK** (10.0.26100.0 or later)
 - Git (to clone the repo)
 
-> All third-party dependencies (`vendor/`, `vcpkg/`) are bundled — no separate installs needed.
-
 ## Clone
 
 ```bat
