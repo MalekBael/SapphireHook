@@ -1,0 +1,17 @@
+{
+  "name": "sapphirehook",
+  "version-string": "1.0.0",
+  "dependencies": [
+    "capstone",
+    "zlib",
+    "fmt",
+    "glm",
+    "recastnavigation",
+    "sqlite3",
+    "magic-enum",
+    "xxhash",
+    "minhook",
+    "nlohmann-json",
+    "spdlog"
+  ]
+}
